@@ -56,7 +56,7 @@ This repository is being extended into **ApplyXAI**, a multi-user web applicatio
 the automation engine above. The classic control panel keeps working unchanged throughout.
 
 - [Architecture audit](docs/ARCHITECTURE_AUDIT.md) and [SaaS roadmap](docs/SAAS_ROADMAP.md)
-- [Local development](docs/DEVELOPMENT.md): running the API (`backend/`) next to `python app.py`
+- [Local development](docs/DEVELOPMENT.md): running the API (`backend/`) and the web app (`frontend/`) next to `python app.py`
 - [Database](docs/DATABASE.md): models, migrations, PostgreSQL setup
 - [API](docs/API.md) and [Security](docs/SECURITY.md)
 

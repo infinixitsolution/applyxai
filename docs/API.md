@@ -172,5 +172,6 @@ Notification object: `{id, type, title, body, link, read_at, created_at}`. `link
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
+| GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
 Automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).

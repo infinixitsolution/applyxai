@@ -1,14 +1,14 @@
 # ApplyXAI — Local development
 
-The repository contains two applications that run side by side during the migration:
+The repository contains the classic app and the new SaaS, which run side by side during the migration:
 
-| | Classic control panel | ApplyXAI SaaS backend |
-|---|---|---|
-| Code | `app.py`, `runAiBot.py`, `config/`, `modules/`, `templates/` | `backend/` |
-| Start | `python app.py` | `uvicorn backend.app.main:app --reload` |
-| URL | http://127.0.0.1:5000 | http://127.0.0.1:8000/api/docs |
-| Config | `user_config.json` | `.env` (see `.env.example`) |
-| Storage | CSV files in `all excels/` | SQLite `storage/applyxai.db` or PostgreSQL |
+| | Classic control panel | ApplyXAI SaaS backend | ApplyXAI web app |
+|---|---|---|---|
+| Code | `app.py`, `runAiBot.py`, `config/`, `modules/`, `templates/` | `backend/` | `frontend/` (React, Vite, Tailwind) |
+| Start | `python app.py` | `uvicorn backend.app.main:app --reload` | `npm run dev` in `frontend/` |
+| URL | http://127.0.0.1:5000 | http://127.0.0.1:8000/api/docs | http://localhost:5173 |
+| Config | `user_config.json` | `.env` (see `.env.example`) | `frontend/.env.local` (optional) |
+| Storage | CSV files in `all excels/` | SQLite `storage/applyxai.db` or PostgreSQL | none (talks to the API) |
 
 The classic panel is unchanged and keeps working; nothing in `backend/` imports `runAiBot.py`.
 
@@ -38,12 +38,36 @@ Then open http://127.0.0.1:8000/api/docs for the interactive API docs. `GET /api
 
 The backend package is always imported as `backend.app.*` from the project root, because the classic panel already owns the module name `app` (`app.py`).
 
+### Web app
+
+Needs Node.js 20 or newer. With the API running on port 8000:
+
+```powershell
+cd frontend
+npm install        # first time only
+npm run dev        # http://localhost:5173
+```
+
+Vite proxies `/api` to the API, so the browser sees one origin and the auth cookies work without CORS. To point at another API, set `APPLYXAI_API_URL` (for example `$env:APPLYXAI_API_URL="http://127.0.0.1:8077"`) before `npm run dev`. `VITE_CONTACT_EMAIL` in `frontend/.env.local` sets the support address shown on public pages.
+
+In development, verification and password-reset emails are printed to the API console instead of being sent; open the link from there. Links use `FRONTEND_URL`, which defaults to `http://localhost:5173`.
+
+`npm run build` writes a static bundle to `frontend/dist/`. Serving it in production (Nginx in front of the API) is covered in Phase 11.
+
 ## Tests
 
 ```powershell
 venv\Scripts\python -m pytest                     # everything: engine + backend
 venv\Scripts\python -m pytest tests               # engine and classic panel only
 venv\Scripts\python -m pytest backend/tests       # SaaS backend only
+```
+
+Web app (from `frontend/`):
+
+```powershell
+npm run typecheck
+npm test           # Vitest + Testing Library, no browser or API needed
+npm run build
 ```
 
 No test needs a real browser, network access, or a running database server. Optional extras:

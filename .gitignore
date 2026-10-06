@@ -28,6 +28,8 @@ storage/
 *.db
 *.sqlite3
 node_modules/
+frontend/dist/
+*.tsbuildinfo
 
 # Local control-panel runtime files — contain your credentials/answers, never commit
 user_config.json
