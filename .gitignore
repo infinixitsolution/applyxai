@@ -16,7 +16,18 @@ old
 # panel writes it, config/_overrides.py applies it over these defaults, and the
 # in-app updater copies your live values into it before it pulls.
 .venv
+venv
 apikeys.py
+
+# Secrets and SaaS runtime data
+.env
+.env.*
+!.env.example
+runs/
+storage/
+*.db
+*.sqlite3
+node_modules/
 
 # Local control-panel runtime files — contain your credentials/answers, never commit
 user_config.json

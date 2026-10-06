@@ -136,3 +136,68 @@ def test_status_reports_not_running(client):
 def test_control_panel_and_history_pages_render(client):
     assert client.get("/").status_code == 200
     assert client.get("/history").status_code == 200
+
+
+# ------------------------------- security -----------------------------------
+def _isolated_config(tmp_path, monkeypatch, contents):
+    import app
+    import config._overrides as overrides
+    cfg_path = str(tmp_path / "user_config.json")
+    monkeypatch.setattr(app, "USER_CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(overrides, "USER_CONFIG_PATH", cfg_path)
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(contents, f)
+    return cfg_path
+
+
+def test_no_cors_headers_for_foreign_origins(client):
+    resp = client.get("/api/config", headers={"Origin": "https://evil.example"})
+    assert "Access-Control-Allow-Origin" not in resp.headers
+
+
+def test_get_config_never_returns_passwords(client, tmp_path, monkeypatch):
+    _isolated_config(tmp_path, monkeypatch,
+                     {"secrets": {"password": "hunter2-real", "llm_api_key": "sk-real"}})
+    body = client.get("/api/config").get_data(as_text=True)
+    assert "hunter2-real" not in body and "sk-real" not in body
+    got = json.loads(body)
+    assert got["secrets"]["password"] == "********"
+
+
+def test_posting_placeholder_keeps_saved_password(client, tmp_path, monkeypatch):
+    cfg_path = _isolated_config(tmp_path, monkeypatch, {"secrets": {"password": "hunter2-real"}})
+    resp = client.post("/api/config", json={"secrets": {"password": "********", "use_AI": False}})
+    assert resp.status_code == 200
+    assert "hunter2-real" not in resp.get_data(as_text=True)
+    with open(cfg_path, encoding="utf-8") as f:
+        assert json.load(f)["secrets"]["password"] == "hunter2-real"
+
+
+def test_posting_new_password_replaces_it(client, tmp_path, monkeypatch):
+    cfg_path = _isolated_config(tmp_path, monkeypatch, {"secrets": {"password": "old-pass"}})
+    assert client.post("/api/config", json={"secrets": {"password": "new-pass"}}).status_code == 200
+    with open(cfg_path, encoding="utf-8") as f:
+        assert json.load(f)["secrets"]["password"] == "new-pass"
+
+
+def test_foreign_host_header_is_rejected(client):
+    '''DNS rebinding: a hostile domain resolving to 127.0.0.1 arrives with its own Host.'''
+    resp = client.get("/api/config", headers={"Host": "evil.example:5000"})
+    assert resp.status_code == 403
+
+
+def test_cross_site_post_is_rejected(client, monkeypatch):
+    import app
+    started = []
+    monkeypatch.setattr(app.subprocess, "Popen", lambda *a, **k: started.append(a))
+    resp = client.post("/api/run", headers={"Origin": "https://evil.example"})
+    assert resp.status_code == 403
+    resp = client.post("/api/run", headers={"Sec-Fetch-Site": "cross-site"})
+    assert resp.status_code == 403
+    assert started == []
+
+
+def test_same_origin_post_is_allowed(client):
+    resp = client.post("/api/stop", headers={"Origin": "http://127.0.0.1:5000",
+                                             "Sec-Fetch-Site": "same-origin"})
+    assert resp.status_code == 200

@@ -20,7 +20,6 @@ SECURITY: this app handles LinkedIn credentials, so it binds to 127.0.0.1 only
 '''
 
 from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
 import csv
 from datetime import datetime
 import os
@@ -31,13 +30,40 @@ import signal
 import subprocess
 import threading
 import importlib
+from urllib.parse import urlsplit
 
 import config_schema
 from config import _overrides
 from modules import updater
 
+# SECURITY: no CORS. Every page this app serves is same-origin, and enabling CORS
+# would let any website the user visits read /api/config (credentials) from localhost.
 app = Flask(__name__)
-CORS(app)
+
+_LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+
+
+def _hostname(netloc: str) -> str:
+    return (urlsplit("//" + netloc).hostname or "").lower()
+
+
+@app.before_request
+def _reject_foreign_requests():
+    '''
+    Binding to 127.0.0.1 doesn't stop a malicious web page in the user's own browser:
+    a DNS-rebinding page arrives with a foreign Host header, and a cross-site form
+    POST (to /api/run, /api/update, ...) needs no CORS at all. Refuse both.
+    '''
+    if _hostname(request.host) not in _LOCAL_HOSTNAMES:
+        return jsonify({"error": "Forbidden"}), 403
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    if request.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+        return jsonify({"error": "Cross-site request rejected"}), 403
+    origin = request.headers.get("Origin")
+    if origin and _hostname(urlsplit(origin).netloc) not in _LOCAL_HOSTNAMES:
+        return jsonify({"error": "Cross-site request rejected"}), 403
+    return None
 
 # Project root is the folder this file lives in.
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +135,24 @@ def _effective_config() -> dict:
         if isinstance(section, dict) and key in section:
             effective[module_name][key] = section[key]
     return effective
+
+
+# Password-type values are never sent to the browser. A saved secret is shown as this
+# placeholder, and posting the placeholder back means "keep the saved value".
+SECRET_PLACEHOLDER = "********"
+
+
+def _password_keys() -> set:
+    return {(f["config_module"], f["key"]) for f in config_schema.iter_fields() if f["type"] == "password"}
+
+
+def _mask_secrets(config: dict) -> dict:
+    masked = copy.deepcopy(config)
+    for module_name, key in _password_keys():
+        section = masked.get(module_name)
+        if isinstance(section, dict) and section.get(key):
+            section[key] = SECRET_PLACEHOLDER
+    return masked
 
 
 def _coerce(field_type: str, value):
@@ -339,9 +383,9 @@ def api_get_config():
     '''
     Returns the effective config: pristine defaults overlaid with the current
     user_config.json, grouped by config module (secrets, personals, questions,
-    search, settings).
+    search, settings). Password fields are masked.
     '''
-    return jsonify(_effective_config())
+    return jsonify(_mask_secrets(_effective_config()))
 
 
 @app.route('/api/config', methods=['POST'])
@@ -370,6 +414,8 @@ def api_save_config():
             if field is None:
                 unknown.append(f"{section}.{key}")
                 continue
+            if field["type"] == "password" and value == SECRET_PLACEHOLDER:
+                continue
             try:
                 coerced.setdefault(section, {})[key] = _coerce(field["type"], value)
             except ValueError as err:
@@ -393,7 +439,7 @@ def api_save_config():
     except OSError as err:
         return jsonify({"error": f"Could not save settings: {err}"}), 500
 
-    return jsonify(current)
+    return jsonify(_mask_secrets(current))
 
 
 @app.route('/api/run', methods=['POST'])
