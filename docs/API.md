@@ -25,6 +25,9 @@ Every response uses one envelope:
 | `WEAK_PASSWORD` | 422 | Password rejected by policy |
 | `RATE_LIMITED` | 429 | Too many attempts; see the `Retry-After` header |
 | `NOT_FOUND` | 404 | No such route or resource (also used for other users' resources) |
+| `INVALID_FILE` | 422 | Upload isn't a real PDF/DOCX, is empty, or its type contradicts its extension |
+| `FILE_TOO_LARGE` | 413 | Upload exceeds `MAX_RESUME_BYTES` (5 MB by default) |
+| `PLAN_LIMIT_REACHED` | 403 | The user's plan doesn't allow more of this resource |
 | `INTERNAL_ERROR` | 500 | Unexpected error; details are only in the server log |
 
 ## Authentication model (for frontend developers)
@@ -61,10 +64,59 @@ Password policy: 10–128 characters, no leading or trailing spaces, at least 4 
   "is_verified": true, "is_admin": false, "created_at": "…", "last_login_at": "…" }
 ```
 
+## Profile and preferences
+
+All require login and only ever touch the caller's own data.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/profile` | none | `{email, first_name, last_name, phone, headline, summary, current_title, current_company, experience_years, skills, preferred_roles, preferred_locations}` |
+| PUT | `/profile` | same fields minus `email` | Full replace. Lists are trimmed and de-duplicated; unknown fields are rejected |
+| GET | `/preferences/options` | none | Allowed values for every option field, plus form metadata (`key, label, type, help, options`) for the extra search settings and application answers |
+| GET | `/preferences/search` | none | Saved search, or the defaults with `"configured": false` |
+| PUT | `/preferences/search` | see below | Full replace |
+| GET | `/preferences/application` | none | `{engine_setting: value}`; only keys the user has set |
+| PATCH | `/preferences/application` | `{engine_setting: value \| null}` | Merges; `null` removes a key so the engine default applies |
+
+Search body:
+
+```json
+{ "keywords": ["Python Developer"], "location": "Bengaluru, India", "easy_apply_only": true,
+  "experience_level": ["Entry level", "Associate"], "job_type": ["Full-time"], "on_site": ["Remote", "Hybrid"],
+  "companies": [], "date_posted": "Past week", "sort_by": "Most recent",
+  "salary_min": 500000, "salary_max": 1500000,
+  "extra": { "current_experience": 3, "bad_words": ["unpaid"] } }
+```
+
+Option values are the exact strings the automation engine uses (it clicks LinkedIn filters by their visible text), so they're case-sensitive and never numeric codes. `["1"]`, `"entry level"`, or `"permanent"` get `422 VALIDATION_ERROR`. The lists are in `automation/options.py`, and a test keeps them identical to `modules/validator.py`.
+
+| Field | Allowed values |
+|---|---|
+| `experience_level` | Internship, Entry level, Associate, Mid-Senior level, Director, Executive |
+| `job_type` | Full-time, Part-time, Contract, Temporary, Volunteer, Internship, Other |
+| `on_site` | On-site, Remote, Hybrid |
+| `date_posted` | `""`, Any time, Past month, Past week, Past 24 hours |
+| `sort_by` | `""`, Most recent, Most relevant |
+
+`extra` and the application answers accept only the engine settings listed by `/preferences/options`, type-checked the way the engine checks them (for example `desired_salary` must be a whole number ≥ 0, and `switch_number` ≥ 1). Account secrets (LinkedIn username/password, AI API keys) are never accepted.
+
+## Resumes
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/resumes` | none | `{resumes: [...], limit}`; default first |
+| POST | `/resumes` | multipart: `file`, optional `name` | 201. PDF or DOCX only, max 5 MB, checked by content, not just the extension. The first resume becomes the default. 30/hour |
+| PATCH | `/resumes/{id}` | `{name}` | Rename |
+| POST | `/resumes/{id}/default` | none | Make default (exactly one per user) |
+| DELETE | `/resumes/{id}` | none | Deleting the default promotes the newest remaining resume |
+| GET | `/resumes/{id}/download` | none | The file, as an attachment |
+
+Resume object: `{id, name, filename, file_type, file_size, is_default, created_at}`. `filename` is the sanitised upload name, for display only.
+
 ## Other endpoints
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
 
-Profile, resumes, preferences, jobs, applications, automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).
+Jobs, applications, automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).

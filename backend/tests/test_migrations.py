@@ -19,7 +19,7 @@ from backend.app.models import Base
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 EXPECTED_TABLES = {
-    "users", "user_profiles", "auth_tokens", "search_configs", "resumes", "jobs", "applications",
+    "users", "user_profiles", "auth_tokens", "application_preferences", "search_configs", "resumes", "jobs", "applications",
     "automation_jobs", "plans", "subscriptions", "usage_counters",
 }
 

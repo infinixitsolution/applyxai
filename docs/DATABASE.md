@@ -18,6 +18,7 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 | `users` | Accounts | unique `email` (stored lower-cased) |
 | `user_profiles` | Phone, headline, summary, skills, preferred roles/locations, experience | one per user |
 | `search_configs` | Job-search preferences fed to the engine | one per user; enumerated fields hold the engine's exact strings |
+| `application_preferences` | Answers the engine uses to fill application forms (`answers` JSON keyed by engine setting name) | one per user; only whitelisted, type-checked engine settings; never secrets |
 | `resumes` | Uploaded resume metadata (files live under `STORAGE_DIR`) | unique `storage_path`; partial unique index: one `is_default` per user |
 | `jobs` | Shared catalogue of postings | unique `(platform, external_id)`; indexes on `external_id`, `platform`, `company`, `title`, `discovered_at` |
 | `applications` | A user's outcome for a job | unique `(user_id, job_id)`; status ∈ discovered, queued, running, applied, failed, skipped, external, cancelled |
@@ -36,7 +37,7 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 - Job type: `Full-time`, `Part-time`, `Contract`, `Temporary`, `Volunteer`, `Internship`, `Other`
 - Work setting: `On-site`, `Remote`, `Hybrid`
 
-Never numeric IDs (`"1"`) or synonyms (`"permanent"`). API validation against these lists arrives in Phase 4.
+Never numeric IDs (`"1"`) or synonyms (`"permanent"`). The API rejects anything else (`automation/options.py`, kept identical to the validator by `backend/tests/test_engine_options.py`).
 
 ## Running migrations
 

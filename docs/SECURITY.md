@@ -40,14 +40,25 @@ What is implemented today. Planned hardening is listed at the end.
 - In development without SMTP, emails (including their one-time links) are printed to the API console. This is intentional for local testing and impossible in production because of the check above.
 - Behind a reverse proxy, run uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy>` so rate limits see real client IPs.
 
+## SaaS backend: user data
+
+- Every profile, preference, and resume query is filtered by the logged-in user's ID. Another user's resource answers `404`, not `403`, so IDs can't be probed. `backend/tests/test_isolation.py` checks this with two real sessions.
+- Preferences only accept whitelisted engine settings, validated against the engine's own rules. The API never accepts LinkedIn credentials or AI API keys (those stay on the user's machine, with the desktop agent).
+- Resume uploads:
+  - PDF and DOCX only. The content must match: `%PDF-` header, or a real DOCX zip with `word/document.xml`. Macro-enabled documents are rejected, and so is a declared MIME type that contradicts the extension.
+  - Read in chunks and capped at `MAX_RESUME_BYTES` (5 MB).
+  - Stored as `STORAGE_DIR/resumes/<user_id>/<random>.pdf|docx`. The uploaded filename is sanitised and kept for display only; it never becomes part of a path.
+  - Downloads are always attachments with `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`.
+  - The resume count is checked server-side against the plan (`backend/app/core/plans.py`, later the `plans` table).
+
 ## Never commit
 
 `.env`, `user_config.json`, `storage/`, LinkedIn credentials, API keys, payment secrets, cookies, or session tokens. These paths are in `.gitignore`.
 
 ## Planned (later phases)
 
-- Per-user authorization on every resource endpoint, with cross-user access tests (Phase 4–5)
-- Resume upload validation: extension, magic-byte MIME check, size cap, generated filenames (Phase 4)
+- The same per-user scoping and isolation tests for jobs, applications, and automation runs (Phase 5)
+- Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
 - Razorpay webhook signature verification; plan status only from verified server-side events (Phase 9)
 - Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)
 - Security headers (HSTS, CSP, frame-ancestors), structured JSON logs with secret redaction, dependency pinning, and backups (Phase 12)

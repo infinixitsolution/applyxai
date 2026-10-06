@@ -16,6 +16,7 @@ else:
 
     import re
 
+    from backend.app.core.config import get_settings
     from backend.app.core.cookies import CSRF_COOKIE, CSRF_HEADER
     from backend.app.core.database import build_engine, get_db
     from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
@@ -39,6 +40,13 @@ else:
                     if match:
                         return match.group(1)
             raise AssertionError(f"no token email for {to}: {self.sent}")
+
+    @pytest.fixture(autouse=True)
+    def storage_dir(tmp_path, monkeypatch):
+        """Uploaded files go to a per-test directory, never the real storage/."""
+        path = tmp_path / "storage"
+        monkeypatch.setattr(get_settings(), "STORAGE_DIR", path)
+        return path
 
     @pytest.fixture
     def outbox():

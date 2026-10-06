@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     STORAGE_DIR: Path = DEFAULT_STORAGE_DIR
+    MAX_RESUME_BYTES: int = 5 * 1024 * 1024
 
     # Where the SPA lives; used to build links in verification / reset emails.
     FRONTEND_URL: str = "http://localhost:5173"

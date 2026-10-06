@@ -29,3 +29,13 @@ class SearchConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     salary_max: Mapped[int | None] = mapped_column(Integer)
     # Remaining config_schema "search" fields (bad words, sponsorship phrases, ...).
     extra: Mapped[dict] = mapped_column(JSONType, default=dict)
+
+
+class ApplicationPreferences(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Answers the engine uses to fill application forms (config_schema "personals" /
+    "questions" / run settings), keyed by the engine's own setting names."""
+
+    __tablename__ = "application_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    answers: Mapped[dict] = mapped_column(JSONType, default=dict)

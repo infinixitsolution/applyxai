@@ -64,7 +64,8 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _validation_error(_request: Request, exc: RequestValidationError):
         details = [
-            {"field": ".".join(str(p) for p in err["loc"] if p != "body"), "message": err["msg"]}
+            {"field": ".".join(str(p) for p in err["loc"] if p != "body"),
+             "message": err["msg"].removeprefix("Value error, ")}
             for err in exc.errors()
         ]
         message = details[0]["message"] if len(details) == 1 else "Invalid request"
