@@ -6,6 +6,8 @@ classic `python app.py` / `python runAiBot.py` workflow behaves exactly as befor
     APPLYXAI_EVENTS_FILE   append one JSON object per line for each outcome
     APPLYXAI_CONTROL_FILE  read between jobs: "pause" idles, "stop" ends the run cleanly
     APPLYXAI_PROFILE_DIR   dedicated Chrome profile for this user (see open_chrome.py)
+    APPLYXAI_MAX_APPLIED   stop at the next checkpoint once this many "applied" events were
+                           emitted (the plan's remaining monthly applications)
 
 The event format is documented in automation/events.py, which also reads these files.
 
@@ -20,9 +22,12 @@ from datetime import datetime, timezone
 EVENTS_ENV = "APPLYXAI_EVENTS_FILE"
 CONTROL_ENV = "APPLYXAI_CONTROL_FILE"
 PROFILE_ENV = "APPLYXAI_PROFILE_DIR"
+MAX_APPLIED_ENV = "APPLYXAI_MAX_APPLIED"
 
 MAX_TEXT = 20_000
 PAUSE_POLL_SECONDS = 2.0
+
+_applied = 0
 
 
 class StopRequested(BaseException):
@@ -49,6 +54,9 @@ def _clean(value):
 
 def emit(event: str, **fields) -> None:
     '''Append an event to APPLYXAI_EVENTS_FILE. Never raises: a broken sink must not stop a run.'''
+    global _applied
+    if event == "applied":
+        _applied += 1
     path = os.environ.get(EVENTS_ENV)
     if not path:
         return
@@ -72,13 +80,24 @@ def read_control() -> str:
         return ""
 
 
+def _application_limit_reached() -> bool:
+    try:
+        return _applied >= int(os.environ.get(MAX_APPLIED_ENV, ""))
+    except ValueError:
+        return False
+
+
 def checkpoint(sleep=time.sleep) -> None:
     '''
     Called between jobs. Returns immediately when no supervisor is attached. While the
-    control file says "pause", idles; "stop" raises StopRequested.
+    control file says "pause", idles; "stop", or reaching APPLYXAI_MAX_APPLIED, raises
+    StopRequested.
     '''
     if not os.environ.get(CONTROL_ENV):
         return
+    if _application_limit_reached():
+        emit("limit_reached", applied=_applied)
+        raise StopRequested()
     state = read_control()
     if state == "pause":
         emit("paused")

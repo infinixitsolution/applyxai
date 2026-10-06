@@ -149,6 +149,7 @@ def test_notifications_flow(alice, db):
     uid = user_id(db, EMAIL)
     first = notification_service.notify(db, uid, "run_finished", "Run finished", "2 applied", "/automation")
     notification_service.notify(db, uid, "limit_reached", "Monthly limit reached", link="/billing")
+    first.created_at -= timedelta(seconds=1)       # Windows clocks can give both the same timestamp
     db.commit()
 
     data = alice.get("/api/notifications").json()["data"]

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from automation import events as ev
-from modules.run_hooks import CONTROL_ENV, EVENTS_ENV, PROFILE_ENV
+from modules.run_hooks import CONTROL_ENV, EVENTS_ENV, MAX_APPLIED_ENV, PROFILE_ENV
 
 ENGINE_ROOT = Path(__file__).resolve().parent.parent
 ENGINE_SCRIPT = ENGINE_ROOT / "runAiBot.py"
@@ -64,7 +64,8 @@ class EngineRun:
         self._offset = 0
 
     # ---------------------------------------------------------------- lifecycle
-    def start(self, config: dict) -> None:
+    def start(self, config: dict, *, max_applied: int | None = None) -> None:
+        """Launch the engine. With `max_applied`, it stops by itself after that many applications."""
         if self._proc is not None:
             raise RunnerError("this run has already been started")
         for path in (self.dir, self.workspace.profile_dir, self.workspace.history_dir):
@@ -82,6 +83,9 @@ class EngineRun:
             "PYTHONUNBUFFERED": "1",
             "PYTHONIOENCODING": "utf-8",
         })
+        env.pop(MAX_APPLIED_ENV, None)
+        if max_applied is not None:
+            env[MAX_APPLIED_ENV] = str(max(int(max_applied), 0))
         kwargs = {"cwd": str(ENGINE_ROOT), "env": env, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -96,9 +100,13 @@ class EngineRun:
     def resume(self) -> None:
         self._write_control(RUNNING)
 
+    def request_stop(self) -> None:
+        """Ask the engine to stop after the current job, without waiting for it."""
+        self._write_control(STOP)
+
     def stop(self, timeout: float = 60) -> int | None:
         """Ask the engine to stop after the current job; kill it if it hasn't exited by `timeout`."""
-        self._write_control(STOP)
+        self.request_stop()
         if self._proc is None:
             return None
         try:

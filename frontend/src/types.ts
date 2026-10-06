@@ -154,9 +154,14 @@ export interface Usage {
   limit_reached: boolean;
 }
 
+export type RunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+
 export interface AutomationRun {
   id: string;
-  status: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  status: RunStatus;
+  control: "run" | "pause" | "stop";
+  dry_run: boolean;
+  created_at: string;
   started_at: string | null;
   finished_at: string | null;
   current_job: string;
@@ -164,6 +169,36 @@ export interface AutomationRun {
   successful_count: number;
   failed_count: number;
   skipped_count: number;
+  error_message: string;
+  stop_reason: "" | "user" | "plan_limit";
+  claimed: boolean;
+}
+
+export interface AgentDevice {
+  id: string;
+  name: string;
+  platform: string;
+  agent_version: string;
+  paired_at: string | null;
+  last_seen_at: string | null;
+  online: boolean;
+}
+
+export interface AutomationOverview {
+  active: AutomationRun | null;
+  recent: AutomationRun[];
+  devices: AgentDevice[];
+  agent_online: boolean;
+  readiness: { ready: boolean; problems: string[] };
+  usage: Usage;
+}
+
+export interface RunLogLine {
+  seq: number;
+  ts: string;
+  level: "info" | "warning" | "error";
+  event: string;
+  message: string;
 }
 
 export interface DashboardStats {

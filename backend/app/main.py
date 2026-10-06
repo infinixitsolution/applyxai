@@ -9,7 +9,9 @@ OpenAPI docs: http://127.0.0.1:8000/api/docs
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api import applications, auth, dashboard, health, jobs, notifications, plans, profile, resumes
+from backend.app.api import (
+    agent, applications, auth, automation, dashboard, health, jobs, notifications, plans, profile, resumes,
+)
 from backend.app.core.config import settings
 from backend.app.core.csrf import CSRFMiddleware
 from backend.app.core.errors import register_error_handlers
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(notifications.router, prefix="/api")
     app.include_router(plans.router, prefix="/api")
+    app.include_router(automation.router, prefix="/api")
+    app.include_router(agent.router, prefix="/api")
     return app
 
 

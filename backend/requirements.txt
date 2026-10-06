@@ -15,5 +15,8 @@ argon2-cffi>=23.1,<26
 PyJWT>=2.9,<3
 limits>=3.13,<6
 
+# background jobs (scheduled housekeeping)
+celery[redis]>=5.4,<6
+
 # tests
 httpx>=0.27,<1

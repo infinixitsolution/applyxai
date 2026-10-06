@@ -76,7 +76,15 @@ def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
     )
 
 
-def _log_message(event: dict, details: dict) -> tuple[str, str]:
+def _stopped_message(stop_reason: str) -> str:
+    if stop_reason == "user":
+        return "Run stopped at your request."
+    if stop_reason == "plan_limit":
+        return "Run stopped at this month's application limit."
+    return "Run stopped."
+
+
+def _log_message(event: dict, details: dict, stop_reason: str = "") -> tuple[str, str]:
     kind = event["event"]
     if kind == ev.RUN_STARTED:
         terms = ", ".join(_text(t, 100) for t in (event.get("search_terms") or [])[:10])
@@ -97,10 +105,12 @@ def _log_message(event: dict, details: dict) -> tuple[str, str]:
         return "info", "Paused."
     if kind == ev.RESUMED:
         return "info", "Resumed."
+    if kind == ev.LIMIT_REACHED:
+        return "warning", "You've reached this month's application limit, so the run is stopping."
     if kind == ev.RUN_FINISHED:
         if event.get("error"):
             return "error", f"Run stopped because of an error: {_text(event.get('error'), 500)}"
-        return "info", "Run stopped at your request." if event.get("stopped") else "Run finished."
+        return "info", _stopped_message(stop_reason) if event.get("stopped") else "Run finished."
     return "info", kind
 
 
@@ -134,6 +144,7 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
         raise ValueError("automation run does not belong to this user")
     result = IngestResult(context=dict(context or {}))
     seq = 0
+    limit_reached = False
     if run is not None:
         seq = db.scalar(select(func.coalesce(func.max(AutomationLog.seq), 0))
                         .where(AutomationLog.automation_job_id == run.id))
@@ -178,8 +189,13 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
         elif kind == ev.RUN_FINISHED:
             _finish(db, run, event, at)
             result.finished = True
+        elif kind == ev.LIMIT_REACHED:
+            if run.stop_reason:
+                continue                                # the server already logged why the run is stopping
+            limit_reached = True
 
-        level, message = _log_message(event, details)
+        stop_reason = "plan_limit" if limit_reached and not run.stop_reason else run.stop_reason
+        level, message = _log_message(event, details, stop_reason)
         seq += 1
         db.add(AutomationLog(automation_job_id=run.id, user_id=user_id, seq=seq, ts=at,
                              level=level, event=kind, message=message))

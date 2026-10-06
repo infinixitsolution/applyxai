@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, Laptop, ShieldCheck } from "lucide-react";
+import { Bell } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../../auth/session";
@@ -53,52 +53,6 @@ export function ProfilePage() {
     <>
       <PageHeader title="Profile" description="Details used to fill in application forms." />
       <Card><ProfileForm /></Card>
-    </>
-  );
-}
-
-export function AutomationPage() {
-  const { data } = useQuery({ queryKey: ["dashboard"], queryFn: dashboard.stats });
-  const run = data?.automation.active ?? data?.automation.last;
-  return (
-    <>
-      <PageHeader title="Automation" description="Start, pause, and monitor your job applications." />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2" title="Run from your computer">
-          <div className="space-y-4 text-sm text-slate-600">
-            <div className="flex gap-3">
-              <Laptop className="h-6 w-6 shrink-0 text-brand-600" aria-hidden />
-              <p>
-                The automation runs in a browser on <strong>your own computer</strong>, using your saved preferences,
-                answers, and default resume. You sign in to LinkedIn there, so ApplyXAI never receives your password.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <ShieldCheck className="h-6 w-6 shrink-0 text-brand-600" aria-hidden />
-              <p>You can watch every step, and pause or stop at any time. Results sync to your dashboard as they happen.</p>
-            </div>
-            <Alert kind="info">
-              The ApplyXAI desktop agent, with start, pause, and stop controls on this page, is coming soon.
-              Until then, use the classic control panel (<code>python app.py</code>) on your computer.
-            </Alert>
-            <div className="flex flex-wrap gap-2">
-              <ButtonLink to="/app/preferences" variant="secondary">Review preferences</ButtonLink>
-              <ButtonLink to="/app/resumes" variant="secondary">Manage resumes</ButtonLink>
-            </div>
-          </div>
-        </Card>
-        <Card title={data?.automation.active ? "Current run" : "Last run"}>
-          {run ? (
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">Status</dt><dd><Badge>{run.status}</Badge></dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Applied</dt><dd>{run.successful_count}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Failed</dt><dd>{run.failed_count}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Skipped</dt><dd>{run.skipped_count}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Started</dt><dd>{formatDateTime(run.started_at)}</dd></div>
-            </dl>
-          ) : <EmptyState icon={<Bot className="h-10 w-10" />} title="No runs yet" />}
-        </Card>
-      </div>
     </>
   );
 }

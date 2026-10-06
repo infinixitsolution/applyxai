@@ -4,10 +4,11 @@ import { GuestOnly, RequireAuth, RequireOnboarded } from "./auth/session";
 import { AppShell } from "./layouts/AppShell";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { ApplicationsPage } from "./pages/app/Applications";
+import { AutomationPage } from "./pages/app/Automation";
 import { DashboardPage } from "./pages/app/Dashboard";
 import { JobsPage } from "./pages/app/Jobs";
 import {
-  AutomationPage, BillingPage, NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
+  BillingPage, NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
 } from "./pages/app/Pages";
 import {
   CheckEmailPage, ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, VerifyEmailPage,

@@ -19,7 +19,7 @@ from backend.app.core.security import (
     burn_password_check, create_access_token, generate_token, hash_password, hash_token,
     password_needs_rehash, verify_password,
 )
-from backend.app.models import AuthToken, TokenPurpose, User
+from backend.app.models import AgentDevice, AuthToken, TokenPurpose, User
 
 logger = logging.getLogger("applyxai.auth")
 
@@ -191,9 +191,12 @@ def logout(db: Session, raw_refresh: str | None) -> None:
 
 
 def revoke_all_sessions(db: Session, user_id) -> None:
-    """End every session: refresh tokens die now, access tokens fail their version check."""
+    """End every session: refresh tokens die now, access tokens fail their version check,
+    and paired desktop agents have to be paired again."""
     _invalidate_tokens(db, user_id, TokenPurpose.REFRESH)
     db.execute(update(User).where(User.id == user_id).values(token_version=User.token_version + 1))
+    db.execute(update(AgentDevice).where(AgentDevice.user_id == user_id, AgentDevice.revoked_at.is_(None))
+               .values(revoked_at=_now()))
 
 
 # --------------------------------------------------------------------------- password reset

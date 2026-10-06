@@ -55,13 +55,22 @@ What is implemented today. Planned hardening is listed at the end.
   - Downloads are always attachments with `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`.
   - The resume count is checked server-side against the plan (`backend/app/core/plans.py`, later the `plans` table).
 
+## Desktop agent
+
+- Pairing codes are 8 characters from a 32-symbol alphabet (40 bits), valid 10 minutes, single use, and stored only as SHA-256. Asking for a new code voids the previous one. Pairing is rate-limited per IP, and code generation per user.
+- Device tokens (`axd_` + 256 random bits) are shown to the agent once and stored only as SHA-256. The agent keeps its copy in its own folder (owner-only permissions on macOS and Linux) and never prints it.
+- Agent endpoints accept only `Authorization: Bearer`, never cookies, so a web page can't drive them. CORS doesn't allow the `Authorization` header.
+- Removing a computer, logging out everywhere, resetting the password, and refresh-token reuse all revoke device tokens. The agent stops its engine on the next 401.
+- A device acts only for its own user: it can claim only that user's queued runs, and report events, download the resume, or read control only for runs it claimed. Anything else is `404`. `backend/tests/test_automation_api.py` checks this with two users.
+- The server never receives LinkedIn credentials. The engine gets placeholder credentials, so the user signs in by hand in the browser window on their own computer. The server rechecks readiness and the plan limit when a run is claimed, so a stale browser tab can't get around them.
+- The agent refuses plain `http://` servers other than `localhost` unless `--insecure` is given.
+
 ## Never commit
 
 `.env`, `user_config.json`, `storage/`, LinkedIn credentials, API keys, payment secrets, cookies, or session tokens. These paths are in `.gitignore`.
 
 ## Planned (later phases)
 
-- The same per-user scoping and isolation tests for automation runs and their logs (Phase 8)
 - Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
 - Razorpay webhook signature verification; plan status only from verified server-side events (Phase 9)
 - Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)

@@ -23,7 +23,8 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 | `resumes` | Uploaded resume metadata (files live under `STORAGE_DIR`) | unique `storage_path`; partial unique index: one `is_default` per user |
 | `jobs` | Shared catalogue of postings | unique `(platform, external_id)`; indexes on `external_id`, `platform`, `company`, `title`, `discovered_at` |
 | `applications` | A user's outcome for a job | unique `(user_id, job_id)`; status ∈ discovered, queued, running, applied, failed, skipped, external, cancelled |
-| `automation_jobs` | One automation run | status ∈ queued, running, paused, completed, failed, cancelled; partial unique index: one queued/running/paused run per user |
+| `agent_devices` | Computers running the desktop agent, and pending pairing codes | `token_hash` and `pairing_code_hash` unique (SHA-256 only, never the token or code); `revoked_at` disconnects a computer |
+| `automation_jobs` | One automation run | status ∈ queued, running, paused, completed, failed, cancelled; partial unique index: one queued/running/paused run per user. `device_id` is the computer that claimed it; `control` (run, pause, stop) is relayed to that computer; `event_seq` and `ingest_context` make event batches idempotent; `stop_reason` is "", user, or plan_limit |
 | `automation_logs` | A run's activity log, built from engine events (see `docs/AUTOMATION.md`) | unique `(automation_job_id, seq)`; `seq` numbers lines within a run for polling; messages never include job descriptions or form answers |
 | `plans` | Plan catalogue (limits + price) | unique `code` |
 | `subscriptions` | A user's plan subscription | unique `provider_subscription_id`; status ∈ pending, trialing, active, past_due, cancelled, expired |

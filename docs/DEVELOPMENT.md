@@ -46,6 +46,25 @@ venv\Scripts\python -m backend.app.cli import-history --email you@example.com
 
 How the SaaS drives the engine (run config, events, pause/stop) is described in `docs/AUTOMATION.md`.
 
+### Desktop agent and background tasks
+
+To try a full run locally, start the API and the web app, sign in, open **Automation → Connect a computer**, and pair this machine with the code it shows:
+
+```powershell
+venv\Scripts\python -m agent pair --server http://localhost:5173 --code ABCD-2345
+venv\Scripts\python -m agent run
+```
+
+This launches the real engine, which opens Chrome and applies on LinkedIn with your account. Tick **Practice run** to fill in forms without submitting them. Use `--home <folder>` (or `APPLYXAI_AGENT_HOME`) to keep a test agent separate from your normal one. The commands the Connect dialog shows use `VITE_AGENT_SERVER_URL`, or the page's own address if that isn't set.
+
+The periodic tasks (failing runs whose computer went silent, deleting expired pairing codes) run in Celery and need Redis:
+
+```powershell
+venv\Scripts\celery -A backend.app.worker worker --beat --pool=solo --loglevel=info
+```
+
+Without the worker, the Automation page still cleans up the signed-in user's stale runs when it loads, so development works without Redis.
+
 ### Web app
 
 Needs Node.js 20 or newer. With the API running on port 8000:
@@ -86,6 +105,7 @@ No test needs a real browser, network access, or a running database server. Opti
 ## Rules while the migration is in progress
 
 - Keep `python app.py` working after every change, and keep the full test suite green.
-- Don't modify `runAiBot.py` or `modules/` outside the planned Phase 7 hooks (see `docs/SAAS_ROADMAP.md`).
+- Don't modify `runAiBot.py` or `modules/` outside the planned engine hooks (`modules/run_hooks.py`; see `docs/AUTOMATION.md`).
+- Tests never launch the real engine; they use fakes or a stand-in script that emits the same events.
 - Don't revert `chromedriver.exe` in `modules/open_chrome.py`. It's required on Windows.
 - Never commit `.env`, `user_config.json`, `storage/`, or anything containing credentials.

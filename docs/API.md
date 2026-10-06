@@ -167,6 +167,38 @@ Usage resets on the first of each month (UTC). Only the first successful submiss
 
 Notification object: `{id, type, title, body, link, read_at, created_at}`. `link` is always an in-app path (for example `/automation`).
 
+## Automation
+
+For the logged-in user (cookie session, CSRF on POST/DELETE). How runs execute is described in `docs/AUTOMATION.md`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/automation` | `{active, recent, devices, agent_online, readiness, usage}`. `readiness` is `{ready, problems}`, where `problems` lists in plain language what must be done before a run can start |
+| POST | `/automation/start` | Body `{dry_run: false}`. Creates a queued run. Errors: `NOT_READY` 422 (`details.problems`), `PLAN_LIMIT_REACHED` 403, `NO_AGENT` 409 (no connected computer), `RUN_ACTIVE` 409. 30/hour |
+| GET | `/automation/{id}` | Run object |
+| GET | `/automation/{id}/logs` | `?after=<seq>&limit=<=500`. `{items: [{seq, ts, level, event, message}], next_after}`; poll with `after=next_after` |
+| POST | `/automation/{id}/pause` | Takes effect between jobs. `RUN_FINISHED`, `RUN_NOT_STARTED`, or `RUN_STOPPING` 409 when it can't |
+| POST | `/automation/{id}/resume` | |
+| POST | `/automation/{id}/stop` | A run no computer has picked up yet is cancelled at once; otherwise it stops after the current job |
+| GET | `/automation/devices` | Connected computers: `[{id, name, platform, agent_version, paired_at, last_seen_at, online}]` |
+| POST | `/automation/devices/pairing-code` | `{code: "ABCD-2345", expires_at}`. Valid 10 minutes, single use; a new code voids the previous one. `DEVICE_LIMIT_REACHED` 409 at 5 computers. 10/hour |
+| DELETE | `/automation/devices/{id}` | Disconnects the computer immediately |
+
+Run object: `{id, status, control, dry_run, created_at, started_at, finished_at, current_job, total_jobs, successful_count, failed_count, skipped_count, error_message, stop_reason, claimed}`. `status` ∈ queued, running, paused, completed, failed, cancelled; `control` ∈ run, pause, stop; `stop_reason` ∈ "", user, plan_limit.
+
+## Desktop agent
+
+Called only by the agent (`python -m agent`). It authenticates with `Authorization: Bearer axd_...`, never cookies, so CSRF doesn't apply. A missing, revoked, or unknown token returns 401 `DEVICE_UNAUTHORIZED`.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/agent/pair` | No auth. Body `{code, name, platform, agent_version}`. Returns `{token, device_id, user_id, name}`; the token is shown once. `INVALID_PAIRING_CODE` 400. 10/minute and 50/hour per IP |
+| GET | `/agent/me` | This computer, as in `/automation/devices`. Never hands out a run |
+| POST | `/agent/unpair` | Revokes this token. `{revoked: true}` |
+| POST | `/agent/poll` | Body `{active_run_id, platform, agent_version}`. Returns `{run, user_id}`; `run` is null when there's nothing to do, otherwise `{id, dry_run, control, next_seq, values, resume, remaining_applications}`. A held run that isn't reported as active is marked failed |
+| GET | `/agent/runs/{id}/resume` | The run's default resume file, only while the run is active |
+| POST | `/agent/runs/{id}/events` | Body `{first_seq, events}` (at most 200). Returns `{next_seq, control, status, remaining_applications}`. `SEQUENCE_GAP` 409 with `details.next_seq` |
+
 ## Other endpoints
 
 | Method | Path | Notes |
@@ -174,4 +206,4 @@ Notification object: `{id, type, title, body, link, read_at, created_at}`. `link
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
 | GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
-Automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).
+Billing and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).

@@ -1,6 +1,7 @@
 import type {
-  Answers, Application, ApplicationDetail, ApplicationStatus, DashboardStats, JobWithApplication, Notification,
-  Page, Plan, PreferenceOptions, Profile, ProfileInput, Resume, SearchConfig, SearchConfigOut, Usage, User,
+  AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus, AutomationOverview, AutomationRun,
+  DashboardStats, JobWithApplication, Notification, Page, Plan, PreferenceOptions, Profile, ProfileInput, Resume,
+  RunLogLine, SearchConfig, SearchConfigOut, Usage, User,
 } from "../types";
 import { buildUrl, request } from "./api";
 
@@ -86,6 +87,19 @@ export const notifications = {
     request<Page<Notification> & { unread_count: number }>("/notifications", { query }),
   read: (id: string) => request<Notification>(`/notifications/${id}/read`, { method: "POST" }),
   readAll: () => request<{ marked: number }>("/notifications/read-all", { method: "POST" }),
+};
+
+export const automation = {
+  overview: () => request<AutomationOverview>("/automation"),
+  start: (dryRun: boolean) => request<AutomationRun>("/automation/start", { method: "POST", body: { dry_run: dryRun } }),
+  pause: (id: string) => request<AutomationRun>(`/automation/${id}/pause`, { method: "POST" }),
+  resume: (id: string) => request<AutomationRun>(`/automation/${id}/resume`, { method: "POST" }),
+  stop: (id: string) => request<AutomationRun>(`/automation/${id}/stop`, { method: "POST" }),
+  logs: (id: string, after: number) =>
+    request<{ items: RunLogLine[]; next_after: number }>(`/automation/${id}/logs`, { query: { after } }),
+  devices: () => request<{ devices: AgentDevice[] }>("/automation/devices").then((d) => d.devices),
+  pairingCode: () => request<{ code: string; expires_at: string }>("/automation/devices/pairing-code", { method: "POST" }),
+  removeDevice: (id: string) => request(`/automation/devices/${id}`, { method: "DELETE" }),
 };
 
 export const plans = {

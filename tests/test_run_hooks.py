@@ -16,8 +16,9 @@ from modules import run_hooks
 
 @pytest.fixture(autouse=True)
 def no_supervisor(monkeypatch):
-    for name in (run_hooks.EVENTS_ENV, run_hooks.CONTROL_ENV, run_hooks.PROFILE_ENV):
+    for name in (run_hooks.EVENTS_ENV, run_hooks.CONTROL_ENV, run_hooks.PROFILE_ENV, run_hooks.MAX_APPLIED_ENV):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(run_hooks, "_applied", 0)
 
 
 def read(path):
@@ -98,6 +99,32 @@ def test_stop_while_paused_raises(tmp_path, monkeypatch):
     monkeypatch.setenv(run_hooks.CONTROL_ENV, str(control))
     with pytest.raises(run_hooks.StopRequested):
         run_hooks.checkpoint(sleep=lambda s: control.write_text("stop", encoding="utf-8"))
+
+
+def test_the_application_cap_stops_at_the_next_checkpoint(tmp_path, monkeypatch):
+    control, sink = tmp_path / "control", tmp_path / "events.jsonl"
+    control.write_text("run", encoding="utf-8")
+    monkeypatch.setenv(run_hooks.CONTROL_ENV, str(control))
+    monkeypatch.setenv(run_hooks.EVENTS_ENV, str(sink))
+    monkeypatch.setenv(run_hooks.MAX_APPLIED_ENV, "2")
+    run_hooks.emit("applied", job_id="1")
+    run_hooks.emit("skipped", job_id="2")
+    run_hooks.checkpoint()
+    run_hooks.emit("applied", job_id="3")
+    with pytest.raises(run_hooks.StopRequested):
+        run_hooks.checkpoint()
+    assert read(sink)[-1]["event"] == "limit_reached" and read(sink)[-1]["applied"] == 2
+
+
+def test_a_zero_cap_stops_before_the_first_job_and_a_bad_value_is_ignored(tmp_path, monkeypatch):
+    control = tmp_path / "control"
+    control.write_text("run", encoding="utf-8")
+    monkeypatch.setenv(run_hooks.CONTROL_ENV, str(control))
+    monkeypatch.setenv(run_hooks.MAX_APPLIED_ENV, "lots")
+    run_hooks.checkpoint()
+    monkeypatch.setenv(run_hooks.MAX_APPLIED_ENV, "0")
+    with pytest.raises(run_hooks.StopRequested):
+        run_hooks.checkpoint()
 
 
 def test_profile_dir_is_created(tmp_path, monkeypatch):

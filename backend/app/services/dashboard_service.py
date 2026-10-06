@@ -7,21 +7,9 @@ from sqlalchemy.orm import Session, contains_eager
 from backend.app.models import Application, ApplicationStatus, AutomationJob, Job
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
 from backend.app.services import usage_service
+from backend.app.services.automation_service import run_out
 
 CHART_DAYS = 30
-
-
-def _run(run: AutomationJob | None) -> dict | None:
-    if run is None:
-        return None
-    return {
-        "id": str(run.id), "status": run.status.value,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "current_job": run.current_job, "total_jobs": run.total_jobs,
-        "successful_count": run.successful_count, "failed_count": run.failed_count,
-        "skipped_count": run.skipped_count,
-    }
 
 
 def stats(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> dict:
@@ -74,6 +62,6 @@ def stats(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> dict:
         "daily": [{"date": d, **v} for d, v in daily.items()],
         "top_companies": top_companies,
         "recent_applications": recent,
-        "automation": {"active": _run(active), "last": _run(last)},
+        "automation": {"active": run_out(active), "last": run_out(last)},
         "usage": usage_service.usage_summary(db, user_id),
     }

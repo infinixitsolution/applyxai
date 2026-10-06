@@ -65,9 +65,19 @@ def test_start_lays_out_the_workspace_and_points_the_engine_at_it(tmp_path, laun
     assert run.control_state() == "run" and run.events_path.exists()
     assert ws.profile_dir.is_dir() and ws.history_dir.is_dir()
     assert run.running
+    assert "APPLYXAI_MAX_APPLIED" not in env
 
     with pytest.raises(RunnerError):
         run.start({})
+
+
+def test_start_can_cap_the_number_of_applications(tmp_path, launched, monkeypatch):
+    procs, popen = launched
+    monkeypatch.setenv("APPLYXAI_MAX_APPLIED", "99")              # never inherited from the agent's own env
+    EngineRun(Workspace(tmp_path / "a"), "r1", popen=popen).start({})
+    EngineRun(Workspace(tmp_path / "b"), "r2", popen=popen).start({}, max_applied=4)
+    assert "APPLYXAI_MAX_APPLIED" not in procs[0].kwargs["env"]
+    assert procs[1].kwargs["env"]["APPLYXAI_MAX_APPLIED"] == "4"
 
 
 @pytest.mark.parametrize("bad", ["../escape", "a/b", "", "x" * 65, "run 1"])

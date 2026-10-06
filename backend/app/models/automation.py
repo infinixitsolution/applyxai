@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
+from backend.app.models.base import Base, JSONType, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, AutomationStatus
 
 _ACTIVE_STATUS_SQL = text(
@@ -29,6 +29,17 @@ class AutomationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_message: Mapped[str] = mapped_column(Text, default="")
     task_id: Mapped[str] = mapped_column(String(255), default="")
     worker_id: Mapped[str] = mapped_column(String(255), default="")
+
+    device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_devices.id", ondelete="SET NULL"))
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # What the user (or the plan limit) asked for: run, pause, or stop. The agent relays it to
+    # the engine's control file; `status` changes only when the engine reports back.
+    control: Mapped[str] = mapped_column(String(10), default="run", server_default="run")
+    stop_reason: Mapped[str] = mapped_column(String(32), default="", server_default="")
+    # Highest event sequence number ingested, so retried batches are never applied twice.
+    event_seq: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ingest_context: Mapped[dict] = mapped_column(JSONType, default=dict, server_default=text("'{}'"))
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     __table_args__ = (
         # At most one queued/running/paused run per user, enforced by the database.

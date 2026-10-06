@@ -12,6 +12,7 @@ Every event has "event" and "ts" (ISO-8601, UTC). Outcome events carry the Linke
     failed          job_id, job_link, reason, detail, date_listed, application_link
     skipped         job_id, job_link, reason, detail (filtered out, or not submittable)
     paused, resumed
+    limit_reached   applied (the run's application cap, APPLYXAI_MAX_APPLIED, was reached)
     run_finished    applied, external, failed, skipped, stopped, daily_limit_reached, error
 """
 
@@ -27,10 +28,11 @@ FAILED = "failed"
 SKIPPED = "skipped"
 PAUSED = "paused"
 RESUMED = "resumed"
+LIMIT_REACHED = "limit_reached"
 RUN_FINISHED = "run_finished"
 
 OUTCOMES = {APPLIED, EXTERNAL, FAILED, SKIPPED}
-KNOWN_EVENTS = OUTCOMES | {RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, RUN_FINISHED}
+KNOWN_EVENTS = OUTCOMES | {RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, LIMIT_REACHED, RUN_FINISHED}
 
 
 def validate_event(event) -> dict | None:
