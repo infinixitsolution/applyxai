@@ -17,6 +17,15 @@ def _login(api, email="alice@example.com", password=PASSWORD):
     return api.post("/api/auth/login", json={"email": email, "password": password})
 
 
+def test_accounts_on_internal_domains_can_log_in_but_not_register(api, db):
+    from backend.app.core.security import hash_password
+    db.add(User(email="admin@applyxai.local", password_hash=hash_password(PASSWORD), is_verified=True, is_admin=True))
+    db.commit()
+    assert _register(api, email="someone@applyxai.local").status_code == 422
+    assert _login(api, email="Admin@ApplyXAI.local").status_code == 200
+    assert _login(api, email="not-an-email").status_code == 422
+
+
 # ------------------------------------------------------------------ registration
 def test_register_stores_hash_not_password_and_sends_verification(api, db, outbox):
     resp = _register(api, email="Alice@Example.com", first_name=" Alice ")

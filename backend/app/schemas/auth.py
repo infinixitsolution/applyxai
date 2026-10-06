@@ -30,7 +30,9 @@ class RegisterIn(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    # Only registration enforces strict email rules; login must work for every existing account,
+    # including ones created by an admin with an internal domain such as .local.
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+$")
     password: str = Field(min_length=1, max_length=PASSWORD_MAX)
 
 
