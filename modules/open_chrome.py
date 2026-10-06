@@ -27,6 +27,7 @@ import os, shutil, subprocess, sys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from modules.helpers import find_default_profile_directory, critical_error_log, logger, print_lg
+from modules import run_hooks
 from selenium.common.exceptions import SessionNotCreatedException
 
 def _adhoc_sign(path: str) -> None:
@@ -80,8 +81,13 @@ def createChromeSession(isRetry: bool = False):
 
     print_lg("IF YOU HAVE MORE THAN 10 TABS OPENED, PLEASE CLOSE OR BOOKMARK THEM! Or it's highly likely that application will just open browser and not do anything!")
     profile_dir = find_default_profile_directory()
+    # A dedicated per-user profile from the ApplyXAI agent never touches the user's own
+    # Chrome profile, so it is used even in safe_mode. It keeps the LinkedIn login between runs.
+    agent_profile_dir = run_hooks.profile_dir()
     if isRetry:
         print_lg("Will login with a guest profile, browsing history will not be saved in the browser!")
+    elif agent_profile_dir:
+        options.add_argument(f"--user-data-dir={agent_profile_dir}")
     elif profile_dir and not safe_mode:
         options.add_argument(f"--user-data-dir={profile_dir}")
     else:

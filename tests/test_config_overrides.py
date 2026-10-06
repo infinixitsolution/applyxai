@@ -63,3 +63,17 @@ def test_load_user_config_reads_valid_json(monkeypatch, tmp_path):
     good.write_text('{"secrets": {"use_AI": true}}', encoding="utf-8")
     monkeypatch.setattr(overrides, "USER_CONFIG_PATH", str(good))
     assert overrides.load_user_config() == {"secrets": {"use_AI": True}}
+
+
+def test_run_config_env_var_replaces_user_config(monkeypatch, tmp_path):
+    '''The ApplyXAI agent points APPLYXAI_RUN_CONFIG at a per-run file; user_config.json is then ignored.'''
+    panel = tmp_path / "user_config.json"
+    panel.write_text('{"search": {"search_terms": ["panel"]}}', encoding="utf-8")
+    run = tmp_path / "run.json"
+    run.write_text('{"search": {"search_terms": ["agent"]}}', encoding="utf-8")
+    monkeypatch.setattr(overrides, "USER_CONFIG_PATH", str(panel))
+
+    monkeypatch.delenv(overrides.RUN_CONFIG_ENV, raising=False)
+    assert overrides.load_user_config()["search"]["search_terms"] == ["panel"]
+    monkeypatch.setenv(overrides.RUN_CONFIG_ENV, str(run))
+    assert overrides.load_user_config()["search"]["search_terms"] == ["agent"]

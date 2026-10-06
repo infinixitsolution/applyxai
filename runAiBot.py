@@ -46,6 +46,7 @@ from modules.open_chrome import *
 from modules.helpers import *
 from modules.clickers_and_finders import *
 from modules.validator import validate_config
+from modules import run_hooks
 
 if use_AI:
     from modules.ai.connections import create_ai_client, extract_skills, answer_question, close_ai_client
@@ -188,6 +189,7 @@ def login_LN() -> None:
     if username == "username@example.com" and password == "example_password":
         pyautogui.alert("User did not configure username and password in secrets.py, hence can't login automatically! Please login manually!", "Login Manually","Okay")
         print_lg("User did not configure username and password in secrets.py, hence can't login automatically! Please login manually!")
+        run_hooks.emit("login_required")
         manual_login_retry(is_logged_in_LN, 2)
         return
     try:
@@ -217,6 +219,7 @@ def login_LN() -> None:
         return print_lg("Login successful!")
     except Exception as e:
         logger.warning("Seems like login attempt failed! Possibly due to wrong credentials or already logged in! Try logging in manually! %s", e)
+        run_hooks.emit("login_required")
         manual_login_retry(is_logged_in_LN, 2)
 #>
 
@@ -1055,6 +1058,9 @@ def failed_job(job_id: str, job_link: str, resume: str, date_listed, error: str,
     '''
     Function to update failed jobs list in excel
     '''
+    run_hooks.emit("skipped" if application_link == "Skipped" else "failed",
+                   job_id=job_id, job_link=job_link, date_listed=date_listed, reason=error,
+                   detail=str(exception)[:1000], application_link=application_link)
     try:
         with open(failed_file_name, 'a', newline='', encoding='utf-8') as file:
             fieldnames = ['Job ID', 'Job Link', 'Resume Tried', 'Date listed', 'Date Tried', 'Assumed Reason', 'Stack Trace', 'External Job link', 'Screenshot Name']
@@ -1095,6 +1101,11 @@ def submitted_jobs(job_id: str, title: str, company: str, work_location: str, wo
     '''
     Function to create or update the Applied jobs CSV file, once the application is submitted successfully
     '''
+    run_hooks.emit("applied" if application_link == "Easy Applied" else "external",
+                   job_id=job_id, title=title, company=company, work_location=work_location,
+                   work_style=work_style, description=description, experience_required=experience_required,
+                   reposted=reposted, date_listed=date_listed, date_applied=date_applied,
+                   job_link=job_link, application_link=application_link)
     try:
         with open(file_name, mode='a', newline='', encoding='utf-8') as csv_file:
             fieldnames = ['Job ID', 'Title', 'Company', 'Work Location', 'Work Style', 'About Job', 'Experience required', 'Skills required', 'HR Name', 'HR Link', 'Resume', 'Re-posted', 'Date Posted', 'Date Applied', 'Job Link', 'External Job link', 'Questions Found', 'Connect Request']
@@ -1196,11 +1207,14 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     job_index += 1
                     if keep_screen_awake: pyautogui.press('shiftright')
                     if current_count >= switch_number: break
+                    run_hooks.checkpoint()
                     print_lg("\n-@-\n")
 
                     job_id,title,company,work_location,work_style,skip = get_job_main_details(job, blacklisted_companies, rejected_jobs)
                     
                     if skip: continue
+                    run_hooks.emit("job_started", job_id=job_id, title=title, company=company,
+                                   work_location=work_location, work_style=work_style)
                     # Redundant fail safe check for applied jobs!
                     try:
                         if job_id in applied_jobs or find_by_class(driver, "jobs-s-apply__application-link", 2):
@@ -1408,6 +1422,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             # Not a failure: the dry run did what it was asked. Counting it as
                             # failed made a perfectly good stop_before_submit run read as 0/0/all-failed.
                             print_lg(str(e))
+                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link, reason="Dry run: stopped before submit")
                             skip_count += 1
                             discard_job()
                             continue
@@ -1415,6 +1430,8 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                         except UnansweredQuestions as e:
                             print_lg(str(e))
                             print_lg("Add those answers to config/questions.py and re-run to apply to this job.")
+                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link,
+                                           reason="Required questions have no saved answer", detail=str(e)[:1000])
                             skip_count += 1
                             discard_job()
                             continue
@@ -1495,10 +1512,13 @@ linkedIn_tab = False
 def main() -> None:
     pyautogui.alert("Please consider sponsoring this project at:\n\nhttps://github.com/sponsors/GodsScion\n\n", "Support the project", "Okay")
     total_runs = 1
+    stop_requested = False
+    error_message = ""
     try:
         global linkedIn_tab, tabs_count, useNewResume, aiClient
         alert_title = "Error Occurred. Closing Browser!"
         validate_config()
+        run_hooks.emit("run_started", search_terms=search_terms)
         
         if not os.path.exists(default_resume_path):
             pyautogui.alert(text='Your default resume "{}" is missing! Please update it\'s folder path "default_resume_path" in config.py\n\nOR\n\nAdd a resume with exact name and path (check for spelling mistakes including cases).\n\n\nFor now the bot will continue using your previous upload from LinkedIn!'.format(default_resume_path), title="Missing Resume", button="OK")
@@ -1532,12 +1552,20 @@ def main() -> None:
                 break
         
 
+    except run_hooks.StopRequested:
+        stop_requested = True
+        print_lg("Stop requested. Finishing the run.")
     except (NoSuchWindowException, WebDriverException) as e:
+        error_message = "The browser window was closed or the session became invalid."
         logger.error("The browser window was closed or the session became invalid. Exiting.", exc_info=e)
     except Exception as e:
+        error_message = str(e)
         critical_error_log("In Applier Main", e)
         pyautogui.alert(e,alert_title)
     finally:
+        run_hooks.emit("run_finished", applied=easy_applied_count, external=external_jobs_count,
+                       failed=failed_count, skipped=skip_count, stopped=stop_requested,
+                       daily_limit_reached=dailyEasyApplyLimitReached, error=error_message[:1000])
         summary = "Total runs: {}\nJobs Easy Applied: {}\nExternal job links collected: {}\nTotal applied or collected: {}\nFailed jobs: {}\nIrrelevant jobs skipped: {}\n".format(total_runs,easy_applied_count,external_jobs_count,easy_applied_count + external_jobs_count,failed_count,skip_count)
         print_lg(summary)
         print_lg("\n\nTotal runs:                     {}".format(total_runs))

@@ -59,6 +59,7 @@ the automation engine above. The classic control panel keeps working unchanged t
 - [Local development](docs/DEVELOPMENT.md): running the API (`backend/`) and the web app (`frontend/`) next to `python app.py`
 - [Database](docs/DATABASE.md): models, migrations, PostgreSQL setup
 - [API](docs/API.md) and [Security](docs/SECURITY.md)
+- [Automation integration](docs/AUTOMATION.md): how the SaaS runs the engine and imports its history
 
 ## 📚 Documentation
 

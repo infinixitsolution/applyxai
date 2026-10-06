@@ -112,3 +112,30 @@ def test_patch_happens_before_signing_and_never_on_the_selenium_cache(monkeypatc
     assert order[0][1] == cached and order[0][2] == path         # copied OUT of the shared cache
     assert order[1][1] == path and order[2][1] == path           # patched and signed our copy only
     assert cached not in (order[1][1], order[2][1])              # the shared cache is never patched
+
+
+def _profile_args(monkeypatch, **overrides) -> list[str]:
+    _chrome_kwargs.clear()
+    monkeypatch.setattr(oc.uc, "Chrome", _FakeChrome)
+    monkeypatch.setattr(oc, "make_directories", lambda paths: None)
+    monkeypatch.setattr(oc, "get_managed_driver_path", lambda: None)
+    monkeypatch.setattr(oc, "get_default_temp_profile", lambda: "/tmp/guest-profile")
+    monkeypatch.setattr(oc, "find_default_profile_directory", lambda: "/home/me/chrome-profile")
+    for name, value in overrides.items():
+        monkeypatch.setattr(oc, name, value)
+    oc.createChromeSession()
+    return [a for a in _chrome_kwargs[0]["options"].arguments if a.startswith("--user-data-dir=")]
+
+
+def test_agent_profile_dir_is_used_even_in_safe_mode(monkeypatch, tmp_path):
+    '''The ApplyXAI agent gives each user their own profile; it keeps the LinkedIn login between runs.'''
+    profile = tmp_path / "agent-profile"
+    monkeypatch.setenv("APPLYXAI_PROFILE_DIR", str(profile))
+    assert _profile_args(monkeypatch, safe_mode=True) == [f"--user-data-dir={profile}"]
+    assert profile.is_dir()
+
+
+def test_without_the_agent_profile_behaviour_is_unchanged(monkeypatch):
+    monkeypatch.delenv("APPLYXAI_PROFILE_DIR", raising=False)
+    assert _profile_args(monkeypatch, safe_mode=True) == ["--user-data-dir=/tmp/guest-profile"]
+    assert _profile_args(monkeypatch, safe_mode=False) == ["--user-data-dir=/home/me/chrome-profile"]

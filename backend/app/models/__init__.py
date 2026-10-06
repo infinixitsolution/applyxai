@@ -7,7 +7,7 @@ from backend.app.models.auth_token import AuthToken
 from backend.app.models.preferences import ApplicationPreferences, SearchConfig
 from backend.app.models.resume import Resume
 from backend.app.models.job import Job
-from backend.app.models.automation import AutomationJob
+from backend.app.models.automation import AutomationJob, AutomationLog
 from backend.app.models.application import Application
 from backend.app.models.subscription import Plan, Subscription
 from backend.app.models.usage import UsageCounter
@@ -17,5 +17,5 @@ __all__ = [
     "Base",
     "ApplicationStatus", "AutomationStatus", "SubscriptionStatus", "TokenPurpose",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AutomationJob",
-    "Application", "Plan", "Subscription", "UsageCounter", "Notification",
+    "AutomationLog", "Application", "Plan", "Subscription", "UsageCounter", "Notification",
 ]

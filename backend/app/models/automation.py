@@ -40,3 +40,19 @@ class AutomationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             sqlite_where=_ACTIVE_STATUS_SQL,
         ),
     )
+
+
+class AutomationLog(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One line of a run's activity log. `seq` numbers lines within a run for polling with ?after=."""
+
+    __tablename__ = "automation_logs"
+
+    automation_job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("automation_jobs.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime())
+    level: Mapped[str] = mapped_column(String(10), default="info")
+    event: Mapped[str] = mapped_column(String(50))
+    message: Mapped[str] = mapped_column(Text, default="")
+
+    __table_args__ = (Index("uq_automation_logs_run_seq", "automation_job_id", "seq", unique=True),)

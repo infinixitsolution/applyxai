@@ -38,6 +38,14 @@ Then open http://127.0.0.1:8000/api/docs for the interactive API docs. `GET /api
 
 The backend package is always imported as `backend.app.*` from the project root, because the classic panel already owns the module name `app` (`app.py`).
 
+To copy your existing engine history (the CSVs in `all excels/`) into an ApplyXAI account:
+
+```powershell
+venv\Scripts\python -m backend.app.cli import-history --email you@example.com
+```
+
+How the SaaS drives the engine (run config, events, pause/stop) is described in `docs/AUTOMATION.md`.
+
 ### Web app
 
 Needs Node.js 20 or newer. With the API running on port 8000:

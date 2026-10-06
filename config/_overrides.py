@@ -12,6 +12,9 @@ If `user_config.json` does not exist, everything here is a no-op and the tool
 behaves exactly as it always has: configuration comes entirely from the
 config/*.py defaults. This keeps the classic "edit the .py files" workflow
 fully working for existing users.
+
+When the APPLYXAI_RUN_CONFIG environment variable names a JSON file (the ApplyXAI
+agent sets it for each run), that file is read instead of `user_config.json`.
 '''
 
 import os
@@ -21,15 +24,17 @@ import json
 _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_CONFIG_DIR)
 USER_CONFIG_PATH = os.path.join(_ROOT_DIR, "user_config.json")
+RUN_CONFIG_ENV = "APPLYXAI_RUN_CONFIG"
 
 
 def load_user_config() -> dict:
     '''
-    Returns the full override dictionary from `user_config.json`, or an empty
-    dict if the file is missing, unreadable, or not valid JSON. Never raises.
+    Returns the full override dictionary from `user_config.json` (or the file named by
+    APPLYXAI_RUN_CONFIG), or an empty dict if the file is missing, unreadable, or not
+    valid JSON. Never raises.
     '''
     try:
-        with open(USER_CONFIG_PATH, "r", encoding="utf-8") as file:
+        with open(os.environ.get(RUN_CONFIG_ENV) or USER_CONFIG_PATH, "r", encoding="utf-8") as file:
             data = json.load(file)
             return data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):

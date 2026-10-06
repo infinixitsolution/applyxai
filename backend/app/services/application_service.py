@@ -137,10 +137,12 @@ def upsert_job(db: Session, *, external_id: str, platform: str = "linkedin", **f
 
 def record_application(db: Session, user_id: uuid.UUID, job: Job, status: ApplicationStatus, *,
                        automation_job_id: uuid.UUID | None = None, resume_id: uuid.UUID | None = None,
-                       failure_reason: str = "", applied_at: datetime | None = None) -> Application:
+                       failure_reason: str = "", applied_at: datetime | None = None,
+                       count_usage: bool = True) -> Application:
     """
     Create or update the user's application for a job. The first transition to APPLIED counts
-    against the monthly limit; a new application row counts as a discovered job. The caller commits.
+    against the monthly limit; a new application row counts as a discovered job. Imported
+    history passes count_usage=False. The caller commits.
     """
     if resume_id and db.scalar(select(Resume.id).where(Resume.id == resume_id, Resume.user_id == user_id)) is None:
         raise ValueError("resume does not belong to this user")
@@ -153,7 +155,8 @@ def record_application(db: Session, user_id: uuid.UUID, job: Job, status: Applic
     if app is None:
         app = Application(user_id=user_id, job_id=job.id, status=status)
         db.add(app)
-        usage_service.increment(db, user_id, jobs_discovered=1)
+        if count_usage:
+            usage_service.increment(db, user_id, jobs_discovered=1)
         newly_applied = status == ApplicationStatus.APPLIED
     elif app.status == ApplicationStatus.APPLIED:
         return app                                   # final: re-seeing an applied job changes nothing
@@ -168,6 +171,7 @@ def record_application(db: Session, user_id: uuid.UUID, job: Job, status: Applic
     app.failure_reason = failure_reason[:5000] if status == ApplicationStatus.FAILED else ""
     if newly_applied:
         app.applied_at = applied_at or datetime.now(timezone.utc)
-        usage_service.increment(db, user_id, applications=1)
+        if count_usage:
+            usage_service.increment(db, user_id, applications=1)
     db.flush()
     return app

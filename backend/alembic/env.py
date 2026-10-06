@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.app.core.config import settings  # noqa: E402
 from backend.app.core.database import build_engine  # noqa: E402
 from backend.app.models import Base  # noqa: E402
+from backend.app.models.base import UTCDateTime  # noqa: E402
 
 config = context.config
 if config.config_file_name is not None:
@@ -24,10 +25,18 @@ def _database_url() -> str:
     return config.attributes.get("database_url") or settings.DATABASE_URL
 
 
+def _render_item(type_, obj, autogen_context):
+    # UTCDateTime is a Python-side wrapper; the column itself is a plain timezone-aware DateTime.
+    if type_ == "type" and isinstance(obj, UTCDateTime):
+        return "sa.DateTime(timezone=True)"
+    return False
+
+
 def _configure_kwargs(url: str) -> dict:
     return {
         "target_metadata": target_metadata,
         "compare_type": True,
+        "render_item": _render_item,
         # SQLite can't ALTER most things in place; batch mode recreates the table instead.
         "render_as_batch": url.startswith("sqlite"),
     }
