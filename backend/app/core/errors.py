@@ -28,29 +28,32 @@ _STATUS_CODES = {
 class AppError(Exception):
     """Raise from services/routes for an expected, user-facing failure."""
 
-    def __init__(self, code: str, message: str, status_code: int = 400, details: Any = None):
+    def __init__(self, code: str, message: str, status_code: int = 400, details: Any = None,
+                 headers: dict[str, str] | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details
+        self.headers = headers
 
 
 def ok(data: Any = None) -> dict:
     return {"success": True, "data": data if data is not None else {}}
 
 
-def error_response(status_code: int, code: str, message: str, details: Any = None) -> JSONResponse:
+def error_response(status_code: int, code: str, message: str, details: Any = None,
+                   headers: dict[str, str] | None = None) -> JSONResponse:
     error = {"code": code, "message": message}
     if details is not None:
         error["details"] = details
-    return JSONResponse(status_code=status_code, content={"success": False, "error": error})
+    return JSONResponse(status_code=status_code, content={"success": False, "error": error}, headers=headers)
 
 
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_request: Request, exc: AppError):
-        return error_response(exc.status_code, exc.code, exc.message, exc.details)
+        return error_response(exc.status_code, exc.code, exc.message, exc.details, exc.headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_request: Request, exc: StarletteHTTPException):

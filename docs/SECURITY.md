@@ -1,0 +1,53 @@
+# ApplyXAI — Security
+
+What is implemented today. Planned hardening is listed at the end.
+
+## Classic control panel (`app.py`)
+
+- Binds to `127.0.0.1` only, debug off.
+- No CORS. Requests with a non-local `Host` header (DNS rebinding) and cross-site `POST`s (checked via `Origin` / `Sec-Fetch-Site`) are refused with 403.
+- Password-type settings (LinkedIn password, AI API key) are never sent to the browser. They show as `********`, and posting that placeholder back keeps the saved value.
+- Credentials still live in plain text in `user_config.json` on the user's own machine (gitignored).
+
+## SaaS backend: authentication
+
+| Control | Implementation |
+|---|---|
+| Password storage | Argon2id (`argon2-cffi` defaults), transparently re-hashed when parameters change. Plaintext passwords are never stored or logged |
+| Password policy | 10–128 chars, ≥4 distinct characters, not the email address |
+| Sessions | 15-minute JWT access token (HS256, audience-bound, includes a per-user `token_version`) plus a 30-day opaque refresh token |
+| Cookies | Access and refresh are `HttpOnly; SameSite=Lax`, `Secure` in production; refresh is scoped to `/api/auth` |
+| Refresh rotation | Every refresh issues a new token and retires the old one. Replaying a retired token (outside a 10 s two-tab grace window) revokes **all** of the user's sessions |
+| Revocation | Bumping `users.token_version` invalidates every outstanding access token immediately (logout-all, password reset, refresh-token theft) |
+| CSRF | Double-submit token: state-changing requests that carry an auth cookie must send `X-CSRF-Token` matching the `applyxai_csrf` cookie (constant-time compare) |
+| Email tokens | 256-bit random, stored only as SHA-256, single use, expiring (verify 24h, reset 60 min); issuing a new one voids older ones |
+| Account enumeration | Register, resend-verification, and forgot-password give identical responses for known and unknown emails. Login gives the same error for a wrong password and an unknown email, and burns an equal Argon2 verification for unknown emails to defeat timing |
+| Rate limiting | Moving-window limits per IP and per email on login, register, verification, and reset endpoints (`limits` library; Redis required in production). `429` with `Retry-After` |
+| Verification | Login requires a verified email (`REQUIRE_EMAIL_VERIFICATION`, on by default) |
+
+## SaaS backend: general
+
+- Errors use the standard envelope. Unhandled exceptions return `INTERNAL_ERROR` and are logged server-side; tracebacks never reach the client.
+- CORS: explicit allow-list (`CORS_ORIGINS`) with credentials. Unknown origins get no CORS headers.
+- SQL only through the SQLAlchemy ORM / expression language (bound parameters).
+- Configuration is environment-only (`.env` is gitignored). With `APP_ENV=production` the API **refuses to start** unless all of these hold:
+  - `SECRET_KEY` and `JWT_SECRET` are set (≥32 chars)
+  - `DATABASE_URL` is PostgreSQL
+  - SMTP is configured
+  - `PAYMENT_PROVIDER` is real (not `null`)
+  - cookies are Secure
+  - rate-limit storage is shared (Redis)
+- In development without SMTP, emails (including their one-time links) are printed to the API console. This is intentional for local testing and impossible in production because of the check above.
+- Behind a reverse proxy, run uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy>` so rate limits see real client IPs.
+
+## Never commit
+
+`.env`, `user_config.json`, `storage/`, LinkedIn credentials, API keys, payment secrets, cookies, or session tokens. These paths are in `.gitignore`.
+
+## Planned (later phases)
+
+- Per-user authorization on every resource endpoint, with cross-user access tests (Phase 4–5)
+- Resume upload validation: extension, magic-byte MIME check, size cap, generated filenames (Phase 4)
+- Razorpay webhook signature verification; plan status only from verified server-side events (Phase 9)
+- Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)
+- Security headers (HSTS, CSP, frame-ancestors), structured JSON logs with secret redaction, dependency pinning, and backups (Phase 12)

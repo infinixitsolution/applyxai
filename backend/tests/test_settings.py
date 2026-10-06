@@ -30,14 +30,29 @@ def test_production_rejects_missing_secrets_and_sqlite():
     assert "SECRET_KEY" in message and "JWT_SECRET" in message and "PostgreSQL" in message
 
 
-def test_production_rejects_free_null_payment_provider():
-    with pytest.raises(ValidationError, match="PAYMENT_PROVIDER"):
-        Settings(_env_file=None, APP_ENV="production", SECRET_KEY=STRONG, JWT_SECRET=STRONG,
-                 DATABASE_URL="postgresql+psycopg://u:p@db/applyxai", PAYMENT_PROVIDER="null")
+PRODUCTION_OK = dict(
+    _env_file=None, APP_ENV="production", SECRET_KEY=STRONG, JWT_SECRET=STRONG,
+    DATABASE_URL="postgresql+psycopg://u:p@db/applyxai", PAYMENT_PROVIDER="razorpay",
+    SMTP_HOST="smtp.example.com", RATE_LIMIT_STORAGE_URL="redis://redis:6379/1",
+)
+
+
+@pytest.mark.parametrize("override, expected", [
+    ({"PAYMENT_PROVIDER": "null"}, "PAYMENT_PROVIDER"),
+    ({"SMTP_HOST": ""}, "SMTP_HOST"),
+    ({"COOKIE_SECURE": False}, "COOKIE_SECURE"),
+    ({"RATE_LIMIT_STORAGE_URL": "memory://"}, "RATE_LIMIT_STORAGE_URL"),
+])
+def test_production_rejects_unsafe_settings(override, expected):
+    with pytest.raises(ValidationError, match=expected):
+        Settings(**{**PRODUCTION_OK, **override})
 
 
 def test_valid_production_configuration():
-    s = Settings(_env_file=None, APP_ENV="production", SECRET_KEY=STRONG, JWT_SECRET=STRONG,
-                 DATABASE_URL="postgresql+psycopg://u:p@db/applyxai", PAYMENT_PROVIDER="razorpay",
-                 CORS_ORIGINS="https://app.applyxai.com , https://applyxai.com")
+    s = Settings(**PRODUCTION_OK, CORS_ORIGINS="https://app.applyxai.com , https://applyxai.com")
     assert s.cors_origins == ["https://app.applyxai.com", "https://applyxai.com"]
+    assert s.cookie_secure is True
+
+
+def test_cookies_are_not_secure_in_development():
+    assert Settings(_env_file=None).cookie_secure is False

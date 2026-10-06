@@ -36,6 +36,20 @@ class Settings(BaseSettings):
 
     STORAGE_DIR: Path = DEFAULT_STORAGE_DIR
 
+    # Where the SPA lives; used to build links in verification / reset emails.
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    ACCESS_TOKEN_MINUTES: int = 15
+    REFRESH_TOKEN_DAYS: int = 30
+    EMAIL_VERIFICATION_HOURS: int = 24
+    PASSWORD_RESET_MINUTES: int = 60
+    REQUIRE_EMAIL_VERIFICATION: bool = True
+    # None = Secure cookies exactly when APP_ENV is production.
+    COOKIE_SECURE: bool | None = None
+
+    # "memory://" is per-process (fine for one dev server); use Redis in production.
+    RATE_LIMIT_STORAGE_URL: str = "memory://"
+
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""
@@ -52,9 +66,18 @@ class Settings(BaseSettings):
     def _blank_database_url_means_default(cls, value):
         return value if value not in (None, "") else _DEFAULT_DATABASE_URL
 
+    @field_validator("COOKIE_SECURE", mode="before")
+    @classmethod
+    def _blank_means_auto(cls, value):
+        return None if value == "" else value
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.APP_ENV == "production" if self.COOKIE_SECURE is None else self.COOKIE_SECURE
 
     @property
     def is_sqlite(self) -> bool:
@@ -73,6 +96,12 @@ class Settings(BaseSettings):
             problems.append("DATABASE_URL must point at PostgreSQL")
         if self.PAYMENT_PROVIDER == "null":
             problems.append("PAYMENT_PROVIDER 'null' grants plans for free and is not allowed")
+        if not self.SMTP_HOST:
+            problems.append("SMTP_HOST must be set so verification and reset emails are delivered")
+        if not self.cookie_secure:
+            problems.append("COOKIE_SECURE cannot be disabled in production")
+        if self.RATE_LIMIT_STORAGE_URL.startswith("memory"):
+            problems.append("RATE_LIMIT_STORAGE_URL must be shared storage (Redis) in production")
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))
         return self

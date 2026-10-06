@@ -19,6 +19,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Embedded in access tokens; bumping it invalidates every outstanding session at once.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     profile: Mapped["UserProfile | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan", passive_deletes=True

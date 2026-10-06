@@ -26,6 +26,12 @@ class AutomationStatus(str, enum.Enum):
 ACTIVE_AUTOMATION_STATUSES = (AutomationStatus.QUEUED, AutomationStatus.RUNNING, AutomationStatus.PAUSED)
 
 
+class TokenPurpose(str, enum.Enum):
+    VERIFY_EMAIL = "verify_email"
+    RESET_PASSWORD = "reset_password"
+    REFRESH = "refresh"
+
+
 class SubscriptionStatus(str, enum.Enum):
     PENDING = "pending"
     TRIALING = "trialing"

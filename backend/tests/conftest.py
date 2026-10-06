@@ -14,9 +14,39 @@ else:
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
+    import re
+
+    from backend.app.core.cookies import CSRF_COOKIE, CSRF_HEADER
     from backend.app.core.database import build_engine, get_db
+    from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
     from backend.app.main import create_app
     from backend.app.models import Base
+    from backend.app.services.email_service import get_email_sender
+
+    class Outbox:
+        """Captures emails instead of sending them."""
+
+        def __init__(self):
+            self.sent = []
+
+        def send(self, email):
+            self.sent.append(email)
+
+        def last_token(self, to=None):
+            for email in reversed(self.sent):
+                if to is None or email.to == to:
+                    match = re.search(r"token=([\w-]+)", email.body)
+                    if match:
+                        return match.group(1)
+            raise AssertionError(f"no token email for {to}: {self.sent}")
+
+    @pytest.fixture
+    def outbox():
+        return Outbox()
+
+    @pytest.fixture
+    def limiter():
+        return RateLimiter("memory://")
 
     @pytest.fixture
     def engine():
@@ -33,8 +63,10 @@ else:
         session.close()
 
     @pytest.fixture
-    def app(engine):
+    def app(engine, outbox, limiter):
         application = create_app()
+        application.dependency_overrides[get_email_sender] = lambda: outbox
+        application.dependency_overrides[get_rate_limiter] = lambda: limiter
         factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
         def _override_get_db():
@@ -50,3 +82,20 @@ else:
     @pytest.fixture
     def api(app):
         return TestClient(app, raise_server_exceptions=False)
+
+    def csrf_headers(client) -> dict:
+        return {CSRF_HEADER: client.cookies.get(CSRF_COOKIE, "")}
+
+    PASSWORD = "correct horse battery"
+
+    @pytest.fixture
+    def make_user(api, outbox):
+        """Register + verify + log in a user through the real API; returns the client."""
+        def _make(email="alice@example.com", password=PASSWORD, client=None):
+            client = client or api
+            assert client.post("/api/auth/register", json={"email": email, "password": password}).status_code == 202
+            assert client.post("/api/auth/verify-email", json={"token": outbox.last_token(email)}).status_code == 200
+            resp = client.post("/api/auth/login", json={"email": email, "password": password})
+            assert resp.status_code == 200, resp.text
+            return client
+        return _make
