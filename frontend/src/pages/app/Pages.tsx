@@ -7,14 +7,14 @@ import { appLink } from "../../components/NotificationBell";
 import { ConfirmDialog } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, ButtonLink, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
+import { Alert, Button, ButtonLink, Card, cx, EmptyState, PageHeader, Spinner } from "../../components/ui";
 import { ApplicationPreferencesForm } from "../../features/ApplicationPreferencesForm";
 import { ProfileForm } from "../../features/ProfileForm";
 import { ResumeManager } from "../../features/ResumeManager";
 import { SearchPreferencesForm } from "../../features/SearchPreferencesForm";
-import { formatDate, formatDateTime, formatMoney, formatRelative } from "../../lib/format";
+import { formatDate, formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
-import { auth, dashboard, notifications, plans as plansApi } from "../../services/endpoints";
+import { auth, notifications } from "../../services/endpoints";
 
 export function ResumesPage() {
   return (
@@ -53,50 +53,6 @@ export function ProfilePage() {
     <>
       <PageHeader title="Profile" description="Details used to fill in application forms." />
       <Card><ProfileForm /></Card>
-    </>
-  );
-}
-
-export function BillingPage() {
-  const usage = useQuery({ queryKey: ["usage"], queryFn: dashboard.usage });
-  const plans = useQuery({ queryKey: ["plans"], queryFn: plansApi.list, staleTime: 10 * 60 * 1000 });
-  if (usage.isLoading || plans.isLoading) return <Spinner />;
-  if (!usage.data || !plans.data) return <Alert kind="error">{errorMessage(usage.error ?? plans.error)}</Alert>;
-  const u = usage.data;
-  return (
-    <>
-      <PageHeader title="Billing" description="Your plan and this month's usage." />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card title="Current plan">
-          <p className="text-2xl font-semibold">{u.plan_name}</p>
-          <div className="mt-4 space-y-4">
-            <ProgressBar label="Applications this month" value={u.applications.used} max={u.applications.limit} />
-            <ProgressBar label="Resumes" value={u.resumes.used} max={u.resumes.limit} />
-          </div>
-          <p className="mt-4 text-xs text-slate-500">Usage resets on {formatDate(u.resets_at)}.</p>
-        </Card>
-        <div className="lg:col-span-2">
-          <Alert kind="info">Online payments are coming soon. Plan changes will be available here once they're live.</Alert>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {plans.data.map((p) => (
-              <div key={p.code} className={cx("rounded-xl bg-white p-5 ring-1", p.code === u.plan ? "ring-2 ring-brand-600" : "ring-slate-200")}>
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold">{p.name}</p>
-                  {p.code === u.plan && <Badge tone="brand">Current</Badge>}
-                </div>
-                <p className="mt-2 text-xl font-semibold">
-                  {p.price_cents === 0 ? "Free" : formatMoney(p.price_cents, p.currency)}
-                  {p.price_cents > 0 && <span className="text-sm font-normal text-slate-500"> / {p.interval}</span>}
-                </p>
-                <p className="mt-2 text-sm text-slate-600">
-                  {p.limits.applications_per_month.toLocaleString()} applications / month · {p.limits.resumes} resume{p.limits.resumes === 1 ? "" : "s"}
-                </p>
-                {p.code !== u.plan && <Button className="mt-4 w-full" variant="secondary" disabled>Upgrade (coming soon)</Button>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </>
   );
 }

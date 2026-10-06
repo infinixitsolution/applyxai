@@ -66,6 +66,8 @@ export function RefundPage() {
   return (
     <LegalPage title="Refund Policy">
       <p>You can cancel a paid plan at any time. It stays active until the end of the current billing period, and you won't be charged again.</p>
+      <h2>Changing plans</h2>
+      <p>When you switch to a different paid plan, the new plan starts as soon as its payment goes through and your previous plan ends at the same moment. Unused days on the previous plan aren't refunded or carried over.</p>
       <h2>Refunds</h2>
       <p>If you were charged by mistake, or the service didn't work for you because of a fault on our side, contact us within 7 days of the charge and we'll review a refund.</p>
       <h2>How to ask</h2>

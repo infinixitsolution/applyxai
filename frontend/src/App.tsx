@@ -5,10 +5,11 @@ import { AppShell } from "./layouts/AppShell";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { ApplicationsPage } from "./pages/app/Applications";
 import { AutomationPage } from "./pages/app/Automation";
+import { BillingPage } from "./pages/app/Billing";
 import { DashboardPage } from "./pages/app/Dashboard";
 import { JobsPage } from "./pages/app/Jobs";
 import {
-  BillingPage, NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
+  NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
 } from "./pages/app/Pages";
 import {
   CheckEmailPage, ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, VerifyEmailPage,

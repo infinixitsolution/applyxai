@@ -23,7 +23,7 @@ def list_plans(db: Session = Depends(get_db)):
         plans = [{"code": p.code, "name": p.name, "price_cents": p.price_cents, "currency": p.currency,
                   "interval": p.interval, "limits": _limits(p.code, p.limits)} for p in rows]
     else:
-        # Until Phase 9 seeds the plans table, serve the defaults from the single catalogue.
+        # Until the plans table is seeded, serve the defaults from the single catalogue.
         plans = [{"code": code, "name": p["name"], "price_cents": p["price_cents"], "currency": "INR",
                   "interval": "month", "limits": _limits(code, None)} for code, p in PLAN_LIMITS.items()]
     return ok({"plans": plans})

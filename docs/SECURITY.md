@@ -65,6 +65,14 @@ What is implemented today. Planned hardening is listed at the end.
 - The server never receives LinkedIn credentials. The engine gets placeholder credentials, so the user signs in by hand in the browser window on their own computer. The server rechecks readiness and the plan limit when a run is claimed, so a stale browser tab can't get around them.
 - The agent refuses plain `http://` servers other than `localhost` unless `--insecure` is given.
 
+## Billing
+
+- A plan is granted only from data the server fetched from Razorpay itself. The checkout callback's signature (HMAC-SHA256 of `payment_id|subscription_id` with the key secret) is checked first, then the subscription and payment are re-read from Razorpay's API. The browser can't send a price, plan status, or "paid" flag that is believed.
+- Webhooks are refused unless `X-Razorpay-Signature` matches the HMAC-SHA256 of the raw body with `PAYMENT_WEBHOOK_SECRET` (constant-time compare). Each event ID is applied once, and the subscription's state is re-read from Razorpay rather than taken from the payload, so replayed or reordered events can't change it.
+- A user can only confirm, cancel, or see their own subscriptions and payments (`backend/tests/test_billing_api.py` checks this with two users).
+- Card and UPI details never reach ApplyXAI; Checkout runs on Razorpay. Webhook payloads (which contain contact details) aren't stored, and Razorpay's error descriptions are logged server-side, not shown to users.
+- `PAYMENT_PROVIDER=null` (plans for free) is refused in production, and production also requires `PAYMENT_KEY_ID`, `PAYMENT_SECRET`, and `PAYMENT_WEBHOOK_SECRET`.
+
 ## Never commit
 
 `.env`, `user_config.json`, `storage/`, LinkedIn credentials, API keys, payment secrets, cookies, or session tokens. These paths are in `.gitignore`.
@@ -72,6 +80,5 @@ What is implemented today. Planned hardening is listed at the end.
 ## Planned (later phases)
 
 - Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
-- Razorpay webhook signature verification; plan status only from verified server-side events (Phase 9)
 - Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)
 - Security headers (HSTS, CSP, frame-ancestors), structured JSON logs with secret redaction, dependency pinning, and backups (Phase 12)

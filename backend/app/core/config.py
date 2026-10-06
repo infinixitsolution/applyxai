@@ -97,6 +97,8 @@ class Settings(BaseSettings):
             problems.append("DATABASE_URL must point at PostgreSQL")
         if self.PAYMENT_PROVIDER == "null":
             problems.append("PAYMENT_PROVIDER 'null' grants plans for free and is not allowed")
+        elif not (self.PAYMENT_KEY_ID and self.PAYMENT_SECRET and self.PAYMENT_WEBHOOK_SECRET):
+            problems.append("PAYMENT_KEY_ID, PAYMENT_SECRET, and PAYMENT_WEBHOOK_SECRET must be set")
         if not self.SMTP_HOST:
             problems.append("SMTP_HOST must be set so verification and reset emails are delivered")
         if not self.cookie_secure:

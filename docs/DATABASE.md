@@ -27,7 +27,9 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 | `automation_jobs` | One automation run | status ∈ queued, running, paused, completed, failed, cancelled; partial unique index: one queued/running/paused run per user. `device_id` is the computer that claimed it; `control` (run, pause, stop) is relayed to that computer; `event_seq` and `ingest_context` make event batches idempotent; `stop_reason` is "", user, or plan_limit |
 | `automation_logs` | A run's activity log, built from engine events (see `docs/AUTOMATION.md`) | unique `(automation_job_id, seq)`; `seq` numbers lines within a run for polling; messages never include job descriptions or form answers |
 | `plans` | Plan catalogue (limits + price) | unique `code` |
-| `subscriptions` | A user's plan subscription | unique `provider_subscription_id`; status ∈ pending, trialing, active, past_due, cancelled, expired |
+| `subscriptions` | A user's plan subscription | unique `provider_subscription_id`; status ∈ pending, trialing, active, past_due, cancelled, expired. Status changes only from the payment provider's API (see `docs/API.md`, Billing) |
+| `payments` | Charges reported by the payment provider | unique `provider_payment_id`; amounts in minor units (paise); no card or UPI details are ever stored |
+| `billing_events` | Processed provider webhooks, so a redelivery is applied once | unique `(provider, event_id)`; keeps only the event type and IDs, never the payload |
 | `usage_counters` | Monthly usage per user | unique `(user_id, period)`, period = `YYYY-MM`; updated with atomic `n = n + x` |
 | `notifications` | In-app notifications | index `(user_id, created_at)`; `link` is always an in-app path |
 

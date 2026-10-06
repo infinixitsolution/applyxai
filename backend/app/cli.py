@@ -7,6 +7,13 @@ Admin commands. Run from the project root:
 import-history copies the classic engine's CSV history into that user's ApplyXAI account.
 It's safe to run more than once: a job that's already marked applied is left alone.
 Imported rows don't count toward the monthly plan limit.
+
+    venv\\Scripts\\python -m backend.app.cli seed-plans
+    venv\\Scripts\\python -m backend.app.cli sync-plans
+
+seed-plans copies the default catalogue (backend/app/core/plans.py) into an empty plans
+table. sync-plans also creates each paid plan at the payment provider (PAYMENT_PROVIDER) and
+stores its ID, so it can be bought online. Both are safe to repeat.
 """
 
 import argparse
@@ -56,9 +63,36 @@ def import_history(email: str, applied: str | None, failed: str | None) -> int:
     return 0
 
 
+def seed_plans() -> int:
+    from backend.app.services.billing_service import seed_plans as seed
+    with SessionLocal() as db:
+        added = seed(db)
+        db.commit()
+    print(f"Added {added} plans." if added else "The plans table already has plans; nothing changed.")
+    return 0
+
+
+def sync_plans() -> int:
+    from backend.app.services.billing_service import sync_provider_plans
+    from backend.app.services.payments import get_payment_provider
+    provider = get_payment_provider()
+    if provider.name == "null":
+        print("PAYMENT_PROVIDER is null; set it to razorpay (with its keys) first.", file=sys.stderr)
+        return 1
+    with SessionLocal() as db:
+        created = sync_provider_plans(db, provider)
+        db.commit()
+    for code, provider_id in created:
+        print(f"Created {code}: {provider_id}")
+    print(f"Created {len(created)} plans at {provider.name}." if created else "Every paid plan already exists there.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.app.cli")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("seed-plans", help="Copy the default plan catalogue into an empty plans table")
+    commands.add_parser("sync-plans", help="Create paid plans at the payment provider")
     history = commands.add_parser("import-history", help="Import the engine's CSV history into an account")
     history.add_argument("--email", required=True)
     history.add_argument("--applied", help="Applied-jobs CSV (default: settings.file_name)")
@@ -66,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "import-history":
         return import_history(args.email, args.applied, args.failed)
+    if args.command == "seed-plans":
+        return seed_plans()
+    if args.command == "sync-plans":
+        return sync_plans()
     return 2
 
 

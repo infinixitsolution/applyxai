@@ -1,6 +1,6 @@
 import type {
   AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus, AutomationOverview, AutomationRun,
-  DashboardStats, JobWithApplication, Notification, Page, Plan, PreferenceOptions, Profile, ProfileInput, Resume,
+  BillingOverview, CheckoutResult, DashboardStats, Subscription, JobWithApplication, Notification, Page, Plan, PreferenceOptions, Profile, ProfileInput, Resume,
   RunLogLine, SearchConfig, SearchConfigOut, Usage, User,
 } from "../types";
 import { buildUrl, request } from "./api";
@@ -104,4 +104,12 @@ export const automation = {
 
 export const plans = {
   list: () => request<{ plans: Plan[] }>("/plans").then((d) => d.plans),
+};
+
+export const billing = {
+  overview: () => request<BillingOverview>("/billing"),
+  checkout: (plan: string) => request<CheckoutResult>("/billing/checkout", { method: "POST", body: { plan } }),
+  confirm: (body: { payment_id: string; subscription_id: string; signature: string }) =>
+    request<{ subscription: Subscription }>("/billing/confirm", { method: "POST", body }),
+  cancel: () => request<{ subscription: Subscription }>("/billing/cancel", { method: "POST" }),
 };

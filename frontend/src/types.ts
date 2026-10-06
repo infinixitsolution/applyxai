@@ -231,3 +231,48 @@ export interface Plan {
   interval: string;
   limits: { applications_per_month: number; resumes: number };
 }
+
+export type SubscriptionStatus = "pending" | "trialing" | "active" | "past_due" | "cancelled" | "expired";
+
+export interface Subscription {
+  id: string;
+  plan: Omit<Plan, "limits">;
+  status: SubscriptionStatus;
+  provider: string;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  created_at: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  method: string;
+  description: string;
+  paid_at: string | null;
+}
+
+export interface BillingOverview {
+  provider: string;
+  subscription: Subscription | null;
+  pending: Subscription | null;
+  usage: Usage;
+  payments: PaymentRecord[];
+}
+
+export interface CheckoutOptions {
+  key: string;
+  subscription_id: string;
+  name: string;
+  description: string;
+  prefill: { email: string; name: string };
+}
+
+export interface CheckoutResult {
+  subscription: Subscription;
+  checkout: CheckoutOptions | null;
+  replaces: Subscription | null;
+}

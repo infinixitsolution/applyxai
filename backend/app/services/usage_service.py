@@ -33,6 +33,7 @@ def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
     now = datetime.now(timezone.utc)
     subs = db.scalars(
         select(Subscription).where(Subscription.user_id == user_id, Subscription.status.in_(_ENTITLED))
+        .order_by(Subscription.created_at.desc())
     ).all()
     for sub in subs:
         if sub.current_period_end is None or _aware(sub.current_period_end) > now:

@@ -34,11 +34,13 @@ PRODUCTION_OK = dict(
     _env_file=None, APP_ENV="production", SECRET_KEY=STRONG, JWT_SECRET=STRONG,
     DATABASE_URL="postgresql+psycopg://u:p@db/applyxai", PAYMENT_PROVIDER="razorpay",
     SMTP_HOST="smtp.example.com", RATE_LIMIT_STORAGE_URL="redis://redis:6379/1",
+    PAYMENT_KEY_ID="rzp_live_x", PAYMENT_SECRET="s", PAYMENT_WEBHOOK_SECRET="w",
 )
 
 
 @pytest.mark.parametrize("override, expected", [
     ({"PAYMENT_PROVIDER": "null"}, "PAYMENT_PROVIDER"),
+    ({"PAYMENT_WEBHOOK_SECRET": ""}, "PAYMENT_WEBHOOK_SECRET"),
     ({"SMTP_HOST": ""}, "SMTP_HOST"),
     ({"COOKIE_SECURE": False}, "COOKIE_SECURE"),
     ({"RATE_LIMIT_STORAGE_URL": "memory://"}, "RATE_LIMIT_STORAGE_URL"),

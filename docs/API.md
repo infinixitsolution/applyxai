@@ -199,6 +199,24 @@ Called only by the agent (`python -m agent`). It authenticates with `Authorizati
 | GET | `/agent/runs/{id}/resume` | The run's default resume file, only while the run is active |
 | POST | `/agent/runs/{id}/events` | Body `{first_seq, events}` (at most 200). Returns `{next_seq, control, status, remaining_applications}`. `SEQUENCE_GAP` 409 with `details.next_seq` |
 
+## Billing
+
+For the logged-in user (cookie session, CSRF on POST). Plans and prices come from the `plans` table (seeded from `backend/app/core/plans.py`); the browser never sends a price or a payment status the server trusts.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/billing` | `{provider, subscription, pending, usage, payments}`. `subscription` is the paid plan in force (null on Free); `pending` is a checkout started in the last hour that the provider hasn't activated yet; `payments` are the 24 most recent |
+| POST | `/billing/checkout` | Body `{plan}`. Creates a provider subscription and returns `{subscription, checkout, replaces}`. `checkout` holds what Razorpay Checkout needs (`key`, `subscription_id`, `name`, `description`, `prefill`); it's null with the development provider, which activates the plan at once. `replaces` is the plan that ends when this one activates. Errors: `FREE_PLAN` 400, `PLAN_NOT_FOUND` 404, `ALREADY_SUBSCRIBED` 409, `PLAN_NOT_AVAILABLE` 503 (plan not created at Razorpay yet). 20/hour |
+| POST | `/billing/confirm` | Body `{payment_id, subscription_id, signature}` from Razorpay Checkout. The signature is checked, then the subscription and payment are fetched from Razorpay; only that decides the status. `INVALID_PAYMENT_SIGNATURE` 400; another user's subscription is 404. 30/hour |
+| POST | `/billing/cancel` | Cancels at the end of the paid period (`cancel_at_period_end: true`). `NO_SUBSCRIPTION` 404 on Free. Repeating it is harmless |
+| POST | `/billing/webhook/razorpay` | Razorpay only (no session). See below |
+
+Subscription object: `{id, plan: {code, name, price_cents, currency, interval}, status, provider, current_period_start, current_period_end, cancel_at_period_end, created_at}`. `status` ∈ pending, trialing, active, past_due, cancelled, expired. Payment object: `{id, amount_cents, currency, status, method, description, paid_at}`; amounts are in the currency's minor unit (paise).
+
+Switching to another paid plan starts a new subscription; when it activates, the previous one is cancelled at Razorpay immediately, with no refund for unused days. A failed renewal (`past_due`) drops the user to Free limits until a payment succeeds.
+
+**Webhook.** Configure it in the Razorpay Dashboard for the `subscription.*` events (at least activated, charged, pending, halted, cancelled, completed). The `X-Razorpay-Signature` header must be the HMAC-SHA256 of the raw body with `PAYMENT_WEBHOOK_SECRET`, or the request is refused with 400 `INVALID_SIGNATURE`. Each `X-Razorpay-Event-Id` is processed once (`{"duplicate": true}` on redelivery). The payload only signals that something changed: the subscription's current state is always re-read from Razorpay's API, so events arriving out of order can't move it backwards. If Razorpay can't be reached, the webhook answers 502 and nothing is recorded, so Razorpay retries it.
+
 ## Other endpoints
 
 | Method | Path | Notes |
@@ -206,4 +224,4 @@ Called only by the agent (`python -m agent`). It authenticates with `Authorizati
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
 | GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
-Billing and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).
+Admin endpoints are added in a later phase (see `docs/SAAS_ROADMAP.md`).

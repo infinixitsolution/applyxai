@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.models import ApplicationStatus, AutomationJob, AutomationStatus
+from backend.app.models import Application, ApplicationStatus, AutomationJob, AutomationStatus, Job
 from backend.app.services import notification_service
 from backend.tests.conftest import csrf_headers
 from backend.tests.factories import add_application, user_id
@@ -25,6 +25,10 @@ def history(alice, db):
     add_application(db, EMAIL, "2", title="Backend Engineer", company="Globex", applied_at=NOW)
     add_application(db, EMAIL, "3", ApplicationStatus.FAILED, title="Data Engineer", company="Acme")
     add_application(db, EMAIL, "4", ApplicationStatus.SKIPPED, title="100% Remote_Dev", company="Initech")
+    # Windows clocks can give rows created back to back the same timestamp; make the order explicit.
+    for app in db.query(Application).join(Job).all():
+        app.created_at = NOW - timedelta(seconds=10 - int(app.job.external_id))
+    db.commit()
     return alice
 
 

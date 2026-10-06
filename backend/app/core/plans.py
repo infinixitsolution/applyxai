@@ -1,7 +1,7 @@
 """
-Default plan catalogue. The single place limits are defined in code: Phase 9 seeds these into
-the `plans` table, after which the database row (admin-editable) is authoritative. Prices are
-placeholders and are never referenced outside this catalogue.
+Default plan catalogue. The single place limits are defined in code: billing seeds these into
+an empty `plans` table (`python -m backend.app.cli seed-plans`), after which the database row is
+authoritative. Prices are never referenced outside this catalogue and that table.
 """
 
 FREE_PLAN = "free"

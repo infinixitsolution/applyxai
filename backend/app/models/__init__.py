@@ -11,6 +11,7 @@ from backend.app.models.agent import AgentDevice
 from backend.app.models.automation import AutomationJob, AutomationLog
 from backend.app.models.application import Application
 from backend.app.models.subscription import Plan, Subscription
+from backend.app.models.billing import BillingEvent, Payment
 from backend.app.models.usage import UsageCounter
 from backend.app.models.notification import Notification
 
@@ -19,5 +20,5 @@ __all__ = [
     "ApplicationStatus", "AutomationStatus", "SubscriptionStatus", "TokenPurpose",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
     "AutomationJob",
-    "AutomationLog", "Application", "Plan", "Subscription", "UsageCounter", "Notification",
+    "AutomationLog", "Application", "Plan", "Subscription", "Payment", "BillingEvent", "UsageCounter", "Notification",
 ]

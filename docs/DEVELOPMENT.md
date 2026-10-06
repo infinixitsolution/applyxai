@@ -65,6 +65,22 @@ venv\Scripts\celery -A backend.app.worker worker --beat --pool=solo --loglevel=i
 
 Without the worker, the Automation page still cleans up the signed-in user's stale runs when it loads, so development works without Redis.
 
+### Payments
+
+With the default `PAYMENT_PROVIDER=null`, choosing a plan on the Billing page activates it at once without any payment (the page says it's in test mode). This is for development only; production refuses to start with it.
+
+To try real Razorpay checkout in test mode:
+
+1. In the Razorpay Dashboard (Test Mode), create API keys and a webhook pointing at `https://<public-url>/api/billing/webhook/razorpay` with the `subscription.*` events. Locally, expose port 8000 with a tunnel (for example ngrok) for the webhook; checkout itself works without it.
+2. In `.env`: `PAYMENT_PROVIDER=razorpay`, `PAYMENT_KEY_ID=rzp_test_...`, `PAYMENT_SECRET=...`, `PAYMENT_WEBHOOK_SECRET=...`.
+3. Create the plans at Razorpay (once; it stores their IDs in the `plans` table):
+
+```powershell
+venv\Scripts\python -m backend.app.cli sync-plans
+```
+
+Prices come from the `plans` table, seeded from `backend/app/core/plans.py` (`seed-plans` does only that). Changing a price later needs a new Razorpay plan: clear that row's `provider_plan_id` and run `sync-plans` again. Existing subscribers stay on the old Razorpay plan.
+
 ### Web app
 
 Needs Node.js 20 or newer. With the API running on port 8000:

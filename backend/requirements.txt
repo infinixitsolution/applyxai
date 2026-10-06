@@ -18,5 +18,5 @@ limits>=3.13,<6
 # background jobs (scheduled housekeeping)
 celery[redis]>=5.4,<6
 
-# tests
+# payment provider API calls (also used by FastAPI's TestClient)
 httpx>=0.27,<1
