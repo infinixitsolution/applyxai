@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
+from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, utcnow
 
 
 class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -26,6 +26,6 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     employment_type: Mapped[str] = mapped_column(String(32), default="")
     work_setting: Mapped[str] = mapped_column(String(32), default="")
     experience_level: Mapped[str] = mapped_column(String(32), default="")
-    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    discovered_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
 
     __table_args__ = (UniqueConstraint("platform", "external_id"),)

@@ -97,7 +97,7 @@ def get_resume(db: Session, user: User, resume_id: uuid.UUID) -> Resume:
 
 
 async def upload_resume(db: Session, user: User, upload: UploadFile, name: str | None = None) -> Resume:
-    limit = plan_limits(db, user)["resumes"]
+    limit = plan_limits(db, user.id)["resumes"]
     count = db.scalar(select(func.count()).select_from(Resume).where(Resume.user_id == user.id))
     if count >= limit:
         raise AppError("PLAN_LIMIT_REACHED",

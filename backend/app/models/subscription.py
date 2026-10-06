@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.models.base import Base, JSONType, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
+from backend.app.models.base import Base, JSONType, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 from backend.app.models.enums import SubscriptionStatus
 
 
@@ -35,8 +35,8 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(32), default="")
     provider_customer_id: Mapped[str] = mapped_column(String(255), default="")
     provider_subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
-    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_start: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    current_period_end: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
 
     plan: Mapped[Plan] = relationship()

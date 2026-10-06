@@ -23,7 +23,7 @@ def _out(resume) -> dict:
 @router.get("", summary="List your resumes")
 def list_resumes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ok({"resumes": [_out(r) for r in resume_service.list_resumes(db, user)],
-               "limit": plan_limits(db, user)["resumes"]})
+               "limit": plan_limits(db, user.id)["resumes"]})
 
 
 @router.post("", status_code=201, summary="Upload a PDF or DOCX resume")

@@ -6,6 +6,7 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 ## Conventions
 
 - Primary keys are UUIDs (`id`). Every table has `created_at` / `updated_at` (UTC, timezone-aware).
+- Timestamp columns use `UTCDateTime`. It converts values to UTC on write, rejects naive datetimes, and always returns aware datetimes, including on SQLite (which stores no offset).
 - Every user-owned table has a non-null, indexed `user_id` with `ON DELETE CASCADE`. Deleting a user removes all of their data except the shared `jobs` catalogue.
 - Status columns are stored as lowercase strings with a CHECK constraint (not native Postgres enums), so adding a status is a normal migration.
 - Lists and free-form settings are `JSON` (`JSONB` on PostgreSQL).
@@ -25,7 +26,8 @@ Production uses PostgreSQL; local development and tests default to SQLite (`stor
 | `automation_jobs` | One automation run | status ∈ queued, running, paused, completed, failed, cancelled; partial unique index: one queued/running/paused run per user |
 | `plans` | Plan catalogue (limits + price) | unique `code` |
 | `subscriptions` | A user's plan subscription | unique `provider_subscription_id`; status ∈ pending, trialing, active, past_due, cancelled, expired |
-| `usage_counters` | Monthly usage per user | unique `(user_id, period)`, period = `YYYY-MM` |
+| `usage_counters` | Monthly usage per user | unique `(user_id, period)`, period = `YYYY-MM`; updated with atomic `n = n + x` |
+| `notifications` | In-app notifications | index `(user_id, created_at)`; `link` is always an in-app path |
 
 `jobs` has no `user_id` on purpose. User-facing queries must always reach jobs **through the user's own `applications`**, never by listing `jobs` directly.
 

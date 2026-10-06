@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
+from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 from backend.app.models.enums import ApplicationStatus
 from backend.app.models.job import Job
 
@@ -21,7 +21,7 @@ class Application(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[ApplicationStatus] = mapped_column(
         str_enum(ApplicationStatus, "application_status"), default=ApplicationStatus.DISCOVERED
     )
-    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     failure_reason: Mapped[str] = mapped_column(Text, default="")
     external_application_id: Mapped[str] = mapped_column(String(255), default="")
 

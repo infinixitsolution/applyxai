@@ -52,6 +52,48 @@ def test_profile_and_preferences_are_private(two_users):
     assert alice.get("/api/preferences/search").json()["data"]["keywords"] == ["Alice role"]
 
 
+def test_applications_jobs_and_stats_are_private(two_users, db):
+    alice, bob = two_users
+    from backend.app.models import ApplicationStatus
+    from backend.tests.factories import add_application
+
+    mine = add_application(db, "alice@example.com", "100", title="Alice-only job")
+    shared_a = add_application(db, "alice@example.com", "200", title="Shared job")
+    shared_b = add_application(db, "bob@example.com", "200", ApplicationStatus.FAILED, title="Shared job")
+    assert shared_a.job_id == shared_b.job_id
+
+    assert bob.get(f"/api/applications/{mine.id}").status_code == 404
+    assert bob.get(f"/api/applications/{shared_a.id}").status_code == 404
+    assert bob.get(f"/api/jobs/{mine.job_id}").status_code == 404           # never encountered it
+
+    # The shared job is visible to Bob, but only with Bob's own application on it.
+    job = bob.get(f"/api/jobs/{shared_b.job_id}").json()["data"]
+    assert job["application"]["id"] == str(shared_b.id) and job["application"]["status"] == "failed"
+
+    bob_apps = bob.get("/api/applications").json()["data"]
+    assert [a["id"] for a in bob_apps["items"]] == [str(shared_b.id)]
+    assert [j["title"] for j in bob.get("/api/jobs?q=job").json()["data"]["items"]] == ["Shared job"]
+    assert "Alice-only" not in bob.get("/api/applications/export").text
+
+    bob_stats = bob.get("/api/dashboard/stats").json()["data"]
+    assert bob_stats["total_applied"] == 0 and bob_stats["applications_by_status"]["failed"] == 1
+    assert bob.get("/api/usage").json()["data"]["applications"]["used"] == 0
+    assert alice.get("/api/usage").json()["data"]["applications"]["used"] == 2
+
+
+def test_notifications_are_private(two_users, db):
+    alice, bob = two_users
+    from backend.app.services import notification_service
+    from backend.tests.factories import user_id
+
+    note = notification_service.notify(db, user_id(db, "alice@example.com"), "run_finished", "Alice's run")
+    db.commit()
+    assert bob.get("/api/notifications").json()["data"]["total"] == 0
+    assert bob.post(f"/api/notifications/{note.id}/read", headers=csrf_headers(bob)).status_code == 404
+    assert bob.post("/api/notifications/read-all", headers=csrf_headers(bob)).json()["data"] == {"marked": 0}
+    assert alice.get("/api/notifications").json()["data"]["unread_count"] == 1
+
+
 def test_one_users_csrf_token_does_not_work_for_another(two_users):
     alice, bob = two_users
     resp = bob.put("/api/profile", json={}, headers=csrf_headers(alice))

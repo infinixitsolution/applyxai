@@ -11,10 +11,11 @@ from backend.app.models.automation import AutomationJob
 from backend.app.models.application import Application
 from backend.app.models.subscription import Plan, Subscription
 from backend.app.models.usage import UsageCounter
+from backend.app.models.notification import Notification
 
 __all__ = [
     "Base",
     "ApplicationStatus", "AutomationStatus", "SubscriptionStatus", "TokenPurpose",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AutomationJob",
-    "Application", "Plan", "Subscription", "UsageCounter",
+    "Application", "Plan", "Subscription", "UsageCounter", "Notification",
 ]

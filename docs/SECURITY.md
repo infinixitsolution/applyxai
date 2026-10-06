@@ -43,6 +43,10 @@ What is implemented today. Planned hardening is listed at the end.
 ## SaaS backend: user data
 
 - Every profile, preference, and resume query is filtered by the logged-in user's ID. Another user's resource answers `404`, not `403`, so IDs can't be probed. `backend/tests/test_isolation.py` checks this with two real sessions.
+- Jobs are a shared catalogue, but every jobs query starts from the caller's own applications. A user can see a job only if their automation encountered it, and only with their own application status.
+- Applications, usage counters, and notifications are written server-side only (by the automation worker). The browser has read-only access, apart from marking notifications as read.
+- The CSV export escapes cells beginning with `= + - @` (CSV/formula injection), since job titles and companies come from third-party pages.
+- Search input is matched literally: `%` and `_` are escaped before `ILIKE`. Sort columns come from a fixed whitelist.
 - Preferences only accept whitelisted engine settings, validated against the engine's own rules. The API never accepts LinkedIn credentials or AI API keys (those stay on the user's machine, with the desktop agent).
 - Resume uploads:
   - PDF and DOCX only. The content must match: `%PDF-` header, or a real DOCX zip with `word/document.xml`. Macro-enabled documents are rejected, and so is a declared MIME type that contradicts the extension.
@@ -57,7 +61,7 @@ What is implemented today. Planned hardening is listed at the end.
 
 ## Planned (later phases)
 
-- The same per-user scoping and isolation tests for jobs, applications, and automation runs (Phase 5)
+- The same per-user scoping and isolation tests for automation runs and their logs (Phase 8)
 - Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
 - Razorpay webhook signature verification; plan status only from verified server-side events (Phase 9)
 - Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)

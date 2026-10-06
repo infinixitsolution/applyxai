@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, str_enum
+from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, AutomationStatus
 
 _ACTIVE_STATUS_SQL = text(
@@ -19,8 +19,8 @@ class AutomationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[AutomationStatus] = mapped_column(
         str_enum(AutomationStatus, "automation_status"), default=AutomationStatus.QUEUED, index=True
     )
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     current_job: Mapped[str] = mapped_column(String(500), default="")
     total_jobs: Mapped[int] = mapped_column(Integer, default=0)
     successful_count: Mapped[int] = mapped_column(Integer, default=0)

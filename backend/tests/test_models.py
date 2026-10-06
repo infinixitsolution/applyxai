@@ -137,3 +137,25 @@ def test_search_config_keeps_exact_engine_strings(db):
     assert cfg.experience_level == ["Entry level", "Mid-Senior level"]
     assert cfg.job_type == ["Full-time"]
     assert cfg.on_site == ["Remote", "Hybrid"]
+
+
+def test_datetimes_are_stored_as_utc_and_returned_aware(db):
+    from datetime import datetime, timedelta, timezone
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    user = User(email="tz@example.com", password_hash="x", last_login_at=datetime(2026, 10, 7, 9, 0, tzinfo=ist))
+    db.add(user)
+    db.commit()
+    db.expire_all()
+    loaded = db.get(User, user.id)
+    assert loaded.last_login_at == datetime(2026, 10, 7, 3, 30, tzinfo=timezone.utc)
+    assert loaded.last_login_at.tzinfo is not None and loaded.created_at.tzinfo is not None
+
+
+def test_naive_datetimes_are_rejected(db):
+    from datetime import datetime
+
+    db.add(User(email="naive@example.com", password_hash="x", last_login_at=datetime(2026, 10, 7, 9, 0)))
+    with pytest.raises(StatementError):
+        db.commit()
+    db.rollback()

@@ -109,7 +109,8 @@ def test_rename_default_delete_and_download(alice, db, storage_dir):
     give_plan(db, "alice@example.com", "pro", resumes=10)
     h = csrf_headers(alice)
     first = upload(alice, name="One").json()["data"]
-    second = upload(alice, filename="two.docx", data=make_docx(), mime=DOCX_MIME).json()["data"]
+    docx = make_docx()                          # zip entries embed a timestamp; build once to compare bytes
+    second = upload(alice, filename="two.docx", data=docx, mime=DOCX_MIME).json()["data"]
     third = upload(alice, name="Three").json()["data"]
     assert [first["is_default"], second["is_default"], third["is_default"]] == [True, False, False]
 
@@ -122,7 +123,7 @@ def test_rename_default_delete_and_download(alice, db, storage_dir):
     assert listed[0]["id"] == second["id"]
 
     resp = alice.get(f"/api/resumes/{second['id']}/download")
-    assert resp.status_code == 200 and resp.content == make_docx()
+    assert resp.status_code == 200 and resp.content == docx
     assert resp.headers["content-type"] == DOCX_MIME
     assert resp.headers["x-content-type-options"] == "nosniff"
     assert resp.headers["content-disposition"].startswith("attachment;")

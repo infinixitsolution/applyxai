@@ -113,10 +113,64 @@ Option values are the exact strings the automation engine uses (it clicks Linked
 
 Resume object: `{id, name, filename, file_type, file_size, is_default, created_at}`. `filename` is the sanitised upload name, for display only.
 
+## Lists and pagination
+
+List endpoints take `page` (default 1) and `page_size` (default 20, max 100) and return:
+
+```json
+{ "items": [ ], "total": 42, "page": 1, "page_size": 20 }
+```
+
+All timestamps are ISO 8601 in UTC with an offset (`2026-10-07T03:30:00+00:00`).
+
+## Applications and jobs
+
+Applications and jobs are created by the automation worker, never by the browser, so these endpoints are read-only.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/applications` | Filters: `status` (repeatable), `q` (title/company/location), `company`, `applied_from`/`applied_to` (YYYY-MM-DD, UTC, inclusive), `automation_job_id`. `sort`: `created_at`, `applied_at`, `updated_at`, `company`, `title`, with `-` for descending (default `-created_at`) |
+| GET | `/applications/export` | The same filters, as a CSV attachment (max 10,000 rows, 20/hour). Cells starting with `= + - @` are prefixed with `'` so spreadsheets don't run them as formulas |
+| GET | `/applications/{id}` | Includes the full job description |
+| GET | `/jobs` | Jobs your automation has encountered, newest first, each with your `application` (`id, status, applied_at`). Filters: `q`, `company`, `work_setting` |
+| GET | `/jobs/{id}` | 404 unless you have an application for it |
+
+Application statuses: `discovered`, `queued`, `running`, `applied`, `failed`, `skipped`, `external`, `cancelled`.
+
+Application object: `{id, status, applied_at, failure_reason, resume_id, automation_job_id, created_at, updated_at, job: {id, platform, external_id, title, company, location, job_url, work_setting, employment_type, experience_level, salary_min, salary_max, discovered_at}}`.
+
+## Dashboard and usage
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/dashboard/stats` | See below |
+| GET | `/usage` | `{plan, plan_name, period, resets_at, applications: {used, limit, remaining}, resumes: {...}, jobs_discovered, runtime_seconds, limit_reached}` |
+
+`/dashboard/stats` returns:
+- `applications_by_status` (all-time counts), `total_applied`, `applied_today`
+- `success_rate`: applied ÷ (applied + failed), or `null` with no attempts yet
+- `daily`: the last 30 UTC days as `{date, applied, failed}`
+- `top_companies`: up to 5 `{company, applied}`
+- `recent_applications`: 5 application objects
+- `automation`: `{active, last}`, each a run summary or `null`
+- `usage`: the same object as `/usage`
+
+Usage resets on the first of each month (UTC). Only the first successful submission for a job counts toward the monthly limit.
+
+## Notifications
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/notifications` | Newest first; `unread_only=true` to filter. The response also has `unread_count` |
+| POST | `/notifications/{id}/read` | Mark one as read |
+| POST | `/notifications/read-all` | Returns `{marked}` |
+
+Notification object: `{id, type, title, body, link, read_at, created_at}`. `link` is always an in-app path (for example `/automation`).
+
 ## Other endpoints
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
 
-Jobs, applications, automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).
+Automation, billing, and admin endpoints are added in later phases (see `docs/SAAS_ROADMAP.md`).
