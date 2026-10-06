@@ -441,6 +441,7 @@ function RecentRuns({ runs }: { runs: AutomationRun[] }) {
               </div>
               <p className="text-slate-700">{r.successful_count} applied &middot; {r.failed_count} failed &middot; {r.skipped_count} skipped</p>
               {r.stop_reason === "plan_limit" && <p className="text-xs text-amber-700">Stopped at the monthly limit.</p>}
+              {r.stop_reason === "admin" && <p className="text-xs text-amber-700">Stopped by ApplyXAI support.</p>}
               {r.error_message && <p className="line-clamp-2 text-xs text-red-700">{r.error_message}</p>}
             </li>
           ))}

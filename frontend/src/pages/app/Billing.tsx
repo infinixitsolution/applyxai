@@ -154,14 +154,18 @@ export function BillingPage() {
   );
 }
 
+/** Plans an admin gave away carry this provider; there's nothing to pay or cancel. */
+const COMPLIMENTARY = "admin";
+
 function CurrentPlan({ data, onCancel }: { data: BillingOverview; onCancel: () => void }) {
   const { usage: u, subscription: sub } = data;
   return (
     <Card title="Current plan">
       <div className="flex items-center justify-between gap-2">
         <p className="text-2xl font-semibold">{u.plan_name}</p>
-        {sub ? (sub.cancel_at_period_end ? <Badge tone="amber">Cancelled</Badge> : <Badge tone="green">Active</Badge>)
-             : <Badge>Free</Badge>}
+        {!sub ? <Badge>Free</Badge>
+          : sub.provider === COMPLIMENTARY ? <Badge tone="brand">Complimentary</Badge>
+          : sub.cancel_at_period_end ? <Badge tone="amber">Cancelled</Badge> : <Badge tone="green">Active</Badge>}
       </div>
       <p className="mt-1 text-sm text-slate-600">{planLine(sub)}</p>
       <div className="mt-4 space-y-4">
@@ -179,6 +183,7 @@ function CurrentPlan({ data, onCancel }: { data: BillingOverview; onCancel: () =
 function planLine(sub: Subscription | null): string {
   if (!sub) return "Free, with no card needed. Upgrade any time.";
   const end = formatDate(sub.current_period_end);
+  if (sub.provider === COMPLIMENTARY) return `Given to you by ApplyXAI until ${end}. No payment is needed.`;
   if (sub.cancel_at_period_end) return `Active until ${end}. You won't be charged again.`;
   return `Renews on ${end} for ${formatMoney(sub.plan.price_cents, sub.plan.currency)}.`;
 }

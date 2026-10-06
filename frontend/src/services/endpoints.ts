@@ -1,7 +1,9 @@
 import type {
-  AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus, AutomationOverview, AutomationRun,
-  BillingOverview, CheckoutResult, DashboardStats, Subscription, JobWithApplication, Notification, Page, Plan, PreferenceOptions, Profile, ProfileInput, Resume,
-  RunLogLine, SearchConfig, SearchConfigOut, Usage, User,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminUserDetail, AdminWorkers, AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus,
+  AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, JobWithApplication, LogLevel,
+  Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, RunLogLine, SearchConfig,
+  SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
 } from "../types";
 import { buildUrl, request } from "./api";
 
@@ -112,4 +114,29 @@ export const billing = {
   confirm: (body: { payment_id: string; subscription_id: string; signature: string }) =>
     request<{ subscription: Subscription }>("/billing/confirm", { method: "POST", body }),
   cancel: () => request<{ subscription: Subscription }>("/billing/cancel", { method: "POST" }),
+};
+
+type Paged = { page?: number; page_size?: number };
+
+export const admin = {
+  analytics: () => request<AdminAnalytics>("/admin/analytics"),
+  users: (query: Paged & { q?: string; status?: string; plan?: string }) =>
+    request<Page<AdminUser>>("/admin/users", { query }),
+  user: (id: string) => request<AdminUserDetail>(`/admin/users/${id}`),
+  updateUser: (id: string, body: { is_active?: boolean; is_admin?: boolean }) =>
+    request<AdminUserDetail>(`/admin/users/${id}`, { method: "PATCH", body }),
+  grantPlan: (id: string, body: { plan: string; months: number; note: string }) =>
+    request<AdminUserDetail>(`/admin/users/${id}/grant-plan`, { method: "POST", body }),
+  revokePlan: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/revoke-plan`, { method: "POST" }),
+  subscriptions: (query: Paged & { status?: SubscriptionStatus | ""; plan?: string }) =>
+    request<Page<AdminSubscription>>("/admin/subscriptions", { query }),
+  runs: (query: Paged & { status?: string }) => request<Page<AdminRun>>("/admin/automation-jobs", { query }),
+  stopRun: (id: string) => request<AutomationRun>(`/admin/automation-jobs/${id}/stop`, { method: "POST" }),
+  applications: (query: Paged & { status?: ApplicationStatus | ""; q?: string }) =>
+    request<Page<AdminApplication>>("/admin/applications", { query }),
+  logs: (query: Paged & { level: LogLevel[]; q?: string }) => request<Page<AdminLogLine>>("/admin/logs", { query }),
+  audit: (query: Paged) => request<Page<AdminAuditEntry>>("/admin/audit-log", { query }),
+  workers: () => request<AdminWorkers>("/admin/workers"),
+  plans: () => request<{ plans: AdminPlan[] }>("/admin/plans").then((d) => d.plans),
+  updatePlan: (code: string, body: PlanUpdate) => request<AdminPlan>(`/admin/plans/${code}`, { method: "PUT", body }),
 };

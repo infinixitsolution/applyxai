@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { MailCheck } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { safeNext, useSetSession } from "../auth/session";
+import { homeFor, safeNext, useSetSession } from "../auth/session";
 import { TextInput } from "../components/form";
 import { Alert, Button, ButtonLink, Spinner } from "../components/ui";
 import { AuthCard } from "../layouts/PublicLayout";
@@ -29,7 +29,7 @@ export function LoginPage() {
 
   const login = useMutation({
     mutationFn: () => auth.login(email, password),
-    onSuccess: (user) => { setSession(user); navigate(safeNext(params.get("next")), { replace: true }); },
+    onSuccess: (user) => { setSession(user); navigate(safeNext(params.get("next"), homeFor(user)), { replace: true }); },
   });
   const resend = useMutation({ mutationFn: () => auth.resendVerification(email), onSuccess: () => setResent(true) });
   const notVerified = login.error instanceof ApiError && login.error.code === "EMAIL_NOT_VERIFIED";

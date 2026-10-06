@@ -1,17 +1,17 @@
 import { useMutation } from "@tanstack/react-query";
 import {
-  Bot, Briefcase, CreditCard, FileText, LayoutDashboard, ListChecks, LogOut, Menu, Settings, SlidersHorizontal,
-  UserRound, X,
+  ArrowLeft, Bot, Briefcase, CreditCard, FileText, LayoutDashboard, ListChecks, LogOut, Menu, Package, Receipt,
+  ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../auth/session";
 import { Logo } from "../components/Logo";
 import { NotificationBell } from "../components/NotificationBell";
 import { cx } from "../components/ui";
 import { auth } from "../services/endpoints";
 
-const NAV = [
+const APP_NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/app/jobs", label: "Jobs", icon: Briefcase },
   { to: "/app/applications", label: "Applications", icon: ListChecks },
@@ -23,10 +23,22 @@ const NAV = [
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
 
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+const ADMIN_NAV = [
+  { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
+  { to: "/admin/runs", label: "Automation runs", icon: Bot },
+  { to: "/admin/applications", label: "Applications", icon: ListChecks },
+  { to: "/admin/plans", label: "Plans", icon: Package },
+  { to: "/admin/system", label: "System", icon: ServerCog },
+];
+
+type Variant = "app" | "admin";
+
+function SidebarNav({ variant, onNavigate }: { variant: Variant; onNavigate?: () => void }) {
   return (
     <nav className="flex flex-1 flex-col gap-1 px-3 py-4" aria-label="Main">
-      {NAV.map(({ to, label, icon: Icon, end }) => (
+      {(variant === "admin" ? ADMIN_NAV : APP_NAV).map(({ to, label, icon: Icon, end }) => (
         <NavLink key={to} to={to} end={end} onClick={onNavigate}
                  className={({ isActive }) => cx(
                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -40,7 +52,18 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-export function AppShell() {
+function Brand({ variant }: { variant: Variant }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Logo to={variant === "admin" ? "/admin" : "/app"} />
+      {variant === "admin" && (
+        <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Admin</span>
+      )}
+    </div>
+  );
+}
+
+export function AppShell({ variant = "app" }: { variant?: Variant }) {
   const [drawer, setDrawer] = useState(false);
   const { data: user } = useSession();
   const setSession = useSetSession();
@@ -54,12 +77,13 @@ export function AppShell() {
   useEffect(() => setDrawer(false), [location.pathname]);
 
   const name = user ? [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email : "";
+  const switchLink = "hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 sm:inline-flex";
 
   return (
     <div className="min-h-screen bg-slate-50">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
-        <div className="flex h-16 items-center px-6"><Logo to="/app" /></div>
-        <SidebarNav />
+        <div className="flex h-16 items-center px-6"><Brand variant={variant} /></div>
+        <SidebarNav variant={variant} />
       </aside>
 
       {drawer && (
@@ -67,12 +91,12 @@ export function AppShell() {
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setDrawer(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-72 flex-col bg-white shadow-xl">
             <div className="flex h-16 items-center justify-between px-6">
-              <Logo to="/app" />
+              <Brand variant={variant} />
               <button type="button" aria-label="Close menu" onClick={() => setDrawer(false)} className="text-slate-500">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <SidebarNav onNavigate={() => setDrawer(false)} />
+            <SidebarNav variant={variant} onNavigate={() => setDrawer(false)} />
           </aside>
         </div>
       )}
@@ -84,7 +108,12 @@ export function AppShell() {
             <Menu className="h-5 w-5" />
           </button>
           <div className="flex-1" />
-          <NotificationBell />
+          {variant === "admin" ? (
+            <Link to="/app" className={switchLink}><ArrowLeft className="h-4 w-4" aria-hidden /> Back to app</Link>
+          ) : user?.is_admin ? (
+            <Link to="/admin" className={switchLink}><Shield className="h-4 w-4" aria-hidden /> Admin</Link>
+          ) : null}
+          {variant === "app" && <NotificationBell />}
           <div className="hidden text-right text-sm sm:block">
             <p className="font-medium text-slate-900">{name}</p>
             {name !== user?.email && <p className="text-xs text-slate-500">{user?.email}</p>}
@@ -94,7 +123,7 @@ export function AppShell() {
             <LogOut className="h-5 w-5" />
           </button>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6"><Outlet /></main>
+        <main className={cx("mx-auto px-4 py-8 sm:px-6", variant === "admin" ? "max-w-7xl" : "max-w-6xl")}><Outlet /></main>
       </div>
     </div>
   );

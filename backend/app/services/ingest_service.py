@@ -81,6 +81,8 @@ def _stopped_message(stop_reason: str) -> str:
         return "Run stopped at your request."
     if stop_reason == "plan_limit":
         return "Run stopped at this month's application limit."
+    if stop_reason == "admin":
+        return "Run stopped by ApplyXAI support."
     return "Run stopped."
 
 

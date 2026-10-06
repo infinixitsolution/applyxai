@@ -170,7 +170,7 @@ export interface AutomationRun {
   failed_count: number;
   skipped_count: number;
   error_message: string;
-  stop_reason: "" | "user" | "plan_limit";
+  stop_reason: "" | "user" | "plan_limit" | "admin";
   claimed: boolean;
 }
 
@@ -275,4 +275,98 @@ export interface CheckoutResult {
   subscription: Subscription;
   checkout: CheckoutOptions | null;
   replaces: Subscription | null;
+}
+
+// ------------------------------------------------------------------------------------------ admin
+export interface AdminAnalytics {
+  users: { total: number; active: number; verified: number; admins: number; new_7d: number; new_30d: number; active_30d: number };
+  subscriptions: { by_plan: { code: string; name: string; count: number }[]; mrr_cents: Record<string, number>; past_due: number };
+  revenue_30d_cents: Record<string, number>;
+  applications: { this_month_by_status: Record<ApplicationStatus, number>; daily: { date: string; applied: number; failed: number }[] };
+  automation: { active_runs: number; last_24h_by_status: Record<RunStatus, number>; devices: number; devices_online: number };
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_verified: boolean;
+  is_admin: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  plan: string;
+  plan_name: string;
+  applications_this_month: number;
+}
+
+export interface AdminUserDetail {
+  user: AdminUser;
+  usage: Usage;
+  subscription: Subscription | null;
+  subscriptions: Subscription[];
+  payments: PaymentRecord[];
+  runs: AutomationRun[];
+  devices: AgentDevice[];
+  applications_by_status: Record<ApplicationStatus, number>;
+  resumes: number;
+}
+
+export interface WithOwner {
+  user_id: string;
+  user_email: string;
+}
+
+export type AdminSubscription = Subscription & WithOwner;
+export type AdminRun = AutomationRun & WithOwner & { device: string };
+
+export interface AdminApplication extends WithOwner {
+  id: string;
+  status: ApplicationStatus;
+  applied_at: string | null;
+  updated_at: string | null;
+  failure_reason: string;
+  job: { title: string; company: string; location: string; job_url: string };
+}
+
+export type LogLevel = "info" | "warning" | "error";
+
+export interface AdminLogLine extends WithOwner {
+  ts: string;
+  level: LogLevel;
+  event: string;
+  message: string;
+  run_id: string;
+}
+
+export interface AdminAuditEntry {
+  id: string;
+  created_at: string;
+  admin_email: string;
+  action: string;
+  target: string;
+  target_user_id: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface AdminWorkers {
+  celery: { broker: "ok" | "unreachable"; workers: string[] };
+  devices: (AgentDevice & WithOwner & { running: boolean })[];
+}
+
+export interface AdminPlan extends Plan {
+  is_active: boolean;
+  sort_order: number;
+  provider_plan_id: string;
+  subscribers: number;
+}
+
+export interface PlanUpdate {
+  name: string;
+  price_cents: number;
+  applications_per_month: number;
+  resumes: number;
+  is_active: boolean;
+  sort_order: number;
 }

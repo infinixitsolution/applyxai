@@ -29,7 +29,7 @@ QUEUED_EXPIRY = timedelta(hours=24)
 MAX_BATCH_EVENTS = 200
 RECENT_RUNS = 10
 
-STOP_USER, STOP_PLAN_LIMIT = "user", "plan_limit"
+STOP_USER, STOP_PLAN_LIMIT, STOP_ADMIN = "user", "plan_limit", "admin"
 _NO_RESUME = "Upload a resume and make it your default."
 _LOST_AGENT = ("Lost contact with the desktop agent on your computer. "
                "Everything it reported before that is saved.")
@@ -161,17 +161,19 @@ def resume_run(db: Session, user_id: uuid.UUID, run_id: uuid.UUID) -> Automation
     return run
 
 
-def stop_run(db: Session, user_id: uuid.UUID, run_id: uuid.UUID) -> AutomationJob:
+def stop_run(db: Session, user_id: uuid.UUID, run_id: uuid.UUID, *, reason: str = STOP_USER) -> AutomationJob:
     run = get_run(db, user_id, run_id)
     if not is_active(run):
         raise _finished_error()
     if run.status == AutomationStatus.QUEUED and run.device_id is None:
         run.control = CONTROL_STOP
-        run.stop_reason = STOP_USER
+        run.stop_reason = reason
         _end(db, run, AutomationStatus.CANCELLED, "Run cancelled before it started.", notify=False)
     elif run.control != CONTROL_STOP:
         run.control = CONTROL_STOP
-        run.stop_reason = STOP_USER
+        run.stop_reason = reason
+        if reason == STOP_ADMIN:
+            _log(db, run, "warning", "stopping", "ApplyXAI support stopped this run. It ends after the current job.")
     return run
 
 

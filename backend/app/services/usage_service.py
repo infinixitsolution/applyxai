@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
-from backend.app.models import Resume, Subscription, SubscriptionStatus, UsageCounter
+from backend.app.models import Plan, Resume, Subscription, SubscriptionStatus, UsageCounter
 
 _ENTITLED = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
 _COUNTERS = ("applications", "jobs_discovered", "runtime_seconds")
@@ -37,9 +37,15 @@ def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
     ).all()
     for sub in subs:
         if sub.current_period_end is None or _aware(sub.current_period_end) > now:
-            defaults = PLAN_LIMITS.get(sub.plan.code, PLAN_LIMITS[FREE_PLAN])
-            return {"plan": sub.plan.code, **defaults, **(sub.plan.limits or {})}
-    return {"plan": FREE_PLAN, **PLAN_LIMITS[FREE_PLAN]}
+            return _limits_of(sub.plan)
+    free = db.scalar(select(Plan).where(Plan.code == FREE_PLAN))
+    return _limits_of(free) if free is not None else {"plan": FREE_PLAN, **PLAN_LIMITS[FREE_PLAN]}
+
+
+def _limits_of(plan: Plan) -> dict:
+    """The catalogue defaults, overridden by what an admin set on the plan row."""
+    defaults = PLAN_LIMITS.get(plan.code, PLAN_LIMITS[FREE_PLAN])
+    return {**defaults, "plan": plan.code, "name": plan.name, "price_cents": plan.price_cents, **(plan.limits or {})}
 
 
 def get_counter(db: Session, user_id: uuid.UUID, period: str | None = None) -> UsageCounter | None:

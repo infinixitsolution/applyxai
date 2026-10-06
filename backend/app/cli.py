@@ -14,6 +14,11 @@ Imported rows don't count toward the monthly plan limit.
 seed-plans copies the default catalogue (backend/app/core/plans.py) into an empty plans
 table. sync-plans also creates each paid plan at the payment provider (PAYMENT_PROVIDER) and
 stores its ID, so it can be bought online. Both are safe to repeat.
+
+    venv\\Scripts\\python -m backend.app.cli make-admin --email you@example.com
+
+make-admin gives an existing account admin access (it opens /admin in the web app). Register
+and verify the account first. Use --revoke to take admin access away.
 """
 
 import argparse
@@ -88,9 +93,24 @@ def sync_plans() -> int:
     return 0
 
 
+def make_admin(email: str, revoke: bool) -> int:
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == email.strip().lower()))
+        if user is None:
+            print(f"No ApplyXAI account with the email {email}. Register it first.", file=sys.stderr)
+            return 1
+        user.is_admin = not revoke
+        db.commit()
+    print(f"{user.email} is {'no longer' if revoke else 'now'} an admin.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.app.cli")
     commands = parser.add_subparsers(dest="command", required=True)
+    admin = commands.add_parser("make-admin", help="Give an existing account admin access")
+    admin.add_argument("--email", required=True)
+    admin.add_argument("--revoke", action="store_true", help="Take admin access away instead")
     commands.add_parser("seed-plans", help="Copy the default plan catalogue into an empty plans table")
     commands.add_parser("sync-plans", help="Create paid plans at the payment provider")
     history = commands.add_parser("import-history", help="Import the engine's CSV history into an account")
@@ -104,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         return seed_plans()
     if args.command == "sync-plans":
         return sync_plans()
+    if args.command == "make-admin":
+        return make_admin(args.email, args.revoke)
     return 2
 
 

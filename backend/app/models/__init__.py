@@ -14,6 +14,7 @@ from backend.app.models.subscription import Plan, Subscription
 from backend.app.models.billing import BillingEvent, Payment
 from backend.app.models.usage import UsageCounter
 from backend.app.models.notification import Notification
+from backend.app.models.admin import AdminAction
 
 __all__ = [
     "Base",
@@ -21,4 +22,5 @@ __all__ = [
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
     "AutomationJob",
     "AutomationLog", "Application", "Plan", "Subscription", "Payment", "BillingEvent", "UsageCounter", "Notification",
+    "AdminAction",
 ]

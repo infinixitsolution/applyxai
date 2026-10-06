@@ -41,8 +41,13 @@ export function useSetSession() {
 }
 
 /** Only allow same-site relative paths as post-login destinations (no open redirects). */
-export function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/app";
+export function safeNext(next: string | null, fallback = "/app"): string {
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : fallback;
+}
+
+/** Where a signed-in user lands by default. */
+export function homeFor(user: User): string {
+  return user.is_admin ? "/admin" : "/app";
 }
 
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -59,7 +64,15 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 export function GuestOnly({ children }: { children: ReactNode }) {
   const { data: user, isLoading } = useSession();
   if (isLoading) return <Spinner />;
-  if (user) return <Navigate to="/app" replace />;
+  if (user) return <Navigate to={homeFor(user)} replace />;
+  return <>{children}</>;
+}
+
+/** Admin pages. The API enforces this too; the guard only keeps non-admins out of a broken UI. */
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { data: user, isLoading } = useSession();
+  if (isLoading) return <Spinner />;
+  if (!user?.is_admin) return <Navigate to="/app" replace />;
   return <>{children}</>;
 }
 

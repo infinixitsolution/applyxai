@@ -1,8 +1,13 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { GuestOnly, RequireAuth, RequireOnboarded } from "./auth/session";
+import { GuestOnly, RequireAdmin, RequireAuth, RequireOnboarded } from "./auth/session";
 import { AppShell } from "./layouts/AppShell";
 import { PublicLayout } from "./layouts/PublicLayout";
+import { AdminApplicationsPage, AdminRunsPage, AdminSubscriptionsPage } from "./pages/admin/Lists";
+import { AdminOverviewPage } from "./pages/admin/Overview";
+import { AdminPlansPage } from "./pages/admin/Plans";
+import { AdminSystemPage } from "./pages/admin/System";
+import { AdminUserPage, AdminUsersPage } from "./pages/admin/Users";
 import { ApplicationsPage } from "./pages/app/Applications";
 import { AutomationPage } from "./pages/app/Automation";
 import { BillingPage } from "./pages/app/Billing";
@@ -64,6 +69,18 @@ export function App() {
         <Route path="billing" element={<BillingPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+
+      <Route path="admin" element={<RequireAuth><RequireAdmin><AppShell variant="admin" /></RequireAdmin></RequireAuth>}>
+        <Route index element={<AdminOverviewPage />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="users/:id" element={<AdminUserPage />} />
+        <Route path="subscriptions" element={<AdminSubscriptionsPage />} />
+        <Route path="runs" element={<AdminRunsPage />} />
+        <Route path="applications" element={<AdminApplicationsPage />} />
+        <Route path="plans" element={<AdminPlansPage />} />
+        <Route path="system" element={<AdminSystemPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

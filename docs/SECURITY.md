@@ -73,6 +73,15 @@ What is implemented today. Planned hardening is listed at the end.
 - Card and UPI details never reach ApplyXAI; Checkout runs on Razorpay. Webhook payloads (which contain contact details) aren't stored, and Razorpay's error descriptions are logged server-side, not shown to users.
 - `PAYMENT_PROVIDER=null` (plans for free) is refused in production, and production also requires `PAYMENT_KEY_ID`, `PAYMENT_SECRET`, and `PAYMENT_WEBHOOK_SECRET`.
 
+## Admin
+
+- Every `/api/admin/*` route depends on `require_admin`, which reloads the user from the database on each request, so removing `is_admin` takes effect immediately. Non-admins get 403; the web app's `/admin` guard is only for convenience. `backend/tests/test_admin_api.py` checks every admin route with a regular user.
+- Admins can't disable themselves or remove their own admin access, so the last admin can't lock everyone out by accident. Grant admin access from the command line with `python -m backend.app.cli make-admin --email ...`.
+- Admin views show account, plan, usage, and run data, but never password hashes, resume files, form answers, tokens, or payment details.
+- Every change an admin makes (account flags, complimentary plans, plan edits, stopping a run) is recorded in `admin_actions` with the admin's email, the target, and the before/after values. The rows outlive deleted accounts (foreign keys are `SET NULL`).
+- Disabling an account revokes its sessions and desktop agents at once and stops a run in progress.
+- Complimentary plans never touch the payment provider, and they're refused while the user has a paid plan, so an admin can't silently change what someone is billed for.
+
 ## Never commit
 
 `.env`, `user_config.json`, `storage/`, LinkedIn credentials, API keys, payment secrets, cookies, or session tokens. These paths are in `.gitignore`.
@@ -80,5 +89,4 @@ What is implemented today. Planned hardening is listed at the end.
 ## Planned (later phases)
 
 - Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
-- Admin role checks on `/api/admin/*` (`require_admin` dependency exists) (Phase 10)
 - Security headers (HSTS, CSP, frame-ancestors), structured JSON logs with secret redaction, dependency pinning, and backups (Phase 12)

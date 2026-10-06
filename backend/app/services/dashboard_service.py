@@ -12,6 +12,23 @@ from backend.app.services.automation_service import run_out
 CHART_DAYS = 30
 
 
+def daily_series(db: Session, chart_start: datetime, *filters) -> dict[str, dict[str, int]]:
+    """Applied and failed counts per UTC day from `chart_start`, for applications matching `filters`."""
+    daily = {(chart_start + timedelta(days=i)).date().isoformat(): {"applied": 0, "failed": 0}
+             for i in range(CHART_DAYS)}
+    for (applied_at,) in db.execute(select(Application.applied_at).where(
+            *filters, Application.status == ApplicationStatus.APPLIED, Application.applied_at >= chart_start)):
+        day = applied_at.date().isoformat()
+        if day in daily:
+            daily[day]["applied"] += 1
+    for (updated_at,) in db.execute(select(Application.updated_at).where(
+            *filters, Application.status == ApplicationStatus.FAILED, Application.updated_at >= chart_start)):
+        day = updated_at.date().isoformat()
+        if day in daily:
+            daily[day]["failed"] += 1
+    return daily
+
+
 def stats(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
@@ -23,19 +40,7 @@ def stats(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> dict:
         by_status[status.value] = count
     applied, failed = by_status["applied"], by_status["failed"]
 
-    daily = {(chart_start + timedelta(days=i)).date().isoformat(): {"applied": 0, "failed": 0}
-             for i in range(CHART_DAYS)}
-    for (applied_at,) in db.execute(select(Application.applied_at).where(
-            mine, Application.status == ApplicationStatus.APPLIED, Application.applied_at >= chart_start)):
-        day = applied_at.date().isoformat()
-        if day in daily:
-            daily[day]["applied"] += 1
-    for (updated_at,) in db.execute(select(Application.updated_at).where(
-            mine, Application.status == ApplicationStatus.FAILED, Application.updated_at >= chart_start)):
-        day = updated_at.date().isoformat()
-        if day in daily:
-            daily[day]["failed"] += 1
-
+    daily = daily_series(db, chart_start, mine)
     applied_today = daily[today.date().isoformat()]["applied"]
 
     top_companies = [

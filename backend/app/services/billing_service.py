@@ -237,6 +237,10 @@ def cancel(db: Session, user: User, provider: PaymentProvider) -> dict:
     sub = current_subscription(db, user.id)
     if sub is None:
         raise AppError("NO_SUBSCRIPTION", "You're on the Free plan; there's nothing to cancel.", 404)
+    if sub.provider != provider.name:
+        # A complimentary plan from an admin: nothing is charged, and it ends by itself.
+        raise AppError("COMPLIMENTARY_PLAN", "This plan was given to you by ApplyXAI and ends by itself. "
+                       "You won't be charged.", 409)
     if not sub.cancel_at_period_end:
         remote = provider.cancel_subscription(sub.provider_subscription_id or "", at_period_end=True)
         sub.cancel_at_period_end = True

@@ -79,7 +79,18 @@ To try real Razorpay checkout in test mode:
 venv\Scripts\python -m backend.app.cli sync-plans
 ```
 
-Prices come from the `plans` table, seeded from `backend/app/core/plans.py` (`seed-plans` does only that). Changing a price later needs a new Razorpay plan: clear that row's `provider_plan_id` and run `sync-plans` again. Existing subscribers stay on the old Razorpay plan.
+Prices come from the `plans` table, seeded from `backend/app/core/plans.py` (`seed-plans` does only that). Change prices and limits on the admin Plans page: a new price creates a new Razorpay plan for new subscribers, and existing subscribers stay on the old one.
+
+### Admin area
+
+Give an account admin access (register and verify it first), then sign in and open http://localhost:5173/admin. Admins land there after signing in; the header links between the admin area and the regular app.
+
+```powershell
+venv\Scripts\python -m backend.app.cli make-admin --email you@example.com
+venv\Scripts\python -m backend.app.cli make-admin --email you@example.com --revoke   # take it away
+```
+
+The System page pings the Celery workers through Redis; without Redis it shows "Unreachable" after about two seconds, and everything else still works.
 
 ### Web app
 

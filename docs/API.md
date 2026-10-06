@@ -208,7 +208,7 @@ For the logged-in user (cookie session, CSRF on POST). Plans and prices come fro
 | GET | `/billing` | `{provider, subscription, pending, usage, payments}`. `subscription` is the paid plan in force (null on Free); `pending` is a checkout started in the last hour that the provider hasn't activated yet; `payments` are the 24 most recent |
 | POST | `/billing/checkout` | Body `{plan}`. Creates a provider subscription and returns `{subscription, checkout, replaces}`. `checkout` holds what Razorpay Checkout needs (`key`, `subscription_id`, `name`, `description`, `prefill`); it's null with the development provider, which activates the plan at once. `replaces` is the plan that ends when this one activates. Errors: `FREE_PLAN` 400, `PLAN_NOT_FOUND` 404, `ALREADY_SUBSCRIBED` 409, `PLAN_NOT_AVAILABLE` 503 (plan not created at Razorpay yet). 20/hour |
 | POST | `/billing/confirm` | Body `{payment_id, subscription_id, signature}` from Razorpay Checkout. The signature is checked, then the subscription and payment are fetched from Razorpay; only that decides the status. `INVALID_PAYMENT_SIGNATURE` 400; another user's subscription is 404. 30/hour |
-| POST | `/billing/cancel` | Cancels at the end of the paid period (`cancel_at_period_end: true`). `NO_SUBSCRIPTION` 404 on Free. Repeating it is harmless |
+| POST | `/billing/cancel` | Cancels at the end of the paid period (`cancel_at_period_end: true`). `NO_SUBSCRIPTION` 404 on Free; `COMPLIMENTARY_PLAN` 409 for a plan an admin gave (it ends by itself). Repeating it is harmless |
 | POST | `/billing/webhook/razorpay` | Razorpay only (no session). See below |
 
 Subscription object: `{id, plan: {code, name, price_cents, currency, interval}, status, provider, current_period_start, current_period_end, cancel_at_period_end, created_at}`. `status` ∈ pending, trialing, active, past_due, cancelled, expired. Payment object: `{id, amount_cents, currency, status, method, description, paid_at}`; amounts are in the currency's minor unit (paise).
@@ -224,4 +224,24 @@ Switching to another paid plan starts a new subscription; when it activates, the
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
 | GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
-Admin endpoints are added in a later phase (see `docs/SAAS_ROADMAP.md`).
+## Admin
+
+Every route under `/admin` needs a session whose user has `is_admin`; anyone else gets 403 `FORBIDDEN` (401 without a session). Lists take `page` and `page_size` and return the usual page object. Every change is written to the admin audit log.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/admin/analytics` | `{users: {total, active, verified, admins, new_7d, new_30d, active_30d}, subscriptions: {by_plan, mrr_cents, past_due}, revenue_30d_cents, applications: {this_month_by_status, daily}, automation: {active_runs, last_24h_by_status, devices, devices_online}}`. Money is keyed by currency. `mrr_cents` counts only paid plans that will renew (complimentary and cancelled plans are left out) |
+| GET | `/admin/users` | Filters: `q` (email or name), `status` (active, disabled, admin), `plan` (plan code; `free` means no paid or complimentary plan). Each row: account flags, `plan`, `plan_name`, `applications_this_month` |
+| GET | `/admin/users/{id}` | `{user, usage, subscription, subscriptions, payments, runs, devices, applications_by_status, resumes}`. Never resume files, form answers, or card details |
+| PATCH | `/admin/users/{id}` | Body `{is_active?, is_admin?}`. Disabling signs the user out everywhere, disconnects their desktop agents, and stops a run in progress (`stop_reason: admin`). `CANNOT_CHANGE_SELF` 400 for disabling yourself or removing your own admin access |
+| POST | `/admin/users/{id}/grant-plan` | Body `{plan, months (1-24), note}`. A complimentary plan (`provider: "admin"`), with no payment, that ends by itself; it replaces an earlier grant. `FREE_PLAN` 400, `PLAN_NOT_FOUND` 404, `HAS_SUBSCRIPTION` 409 while the user pays for a plan. The user can't cancel it (`COMPLIMENTARY_PLAN` 409 on `/billing/cancel`); buying a plan ends it |
+| POST | `/admin/users/{id}/revoke-plan` | Ends the complimentary plan now. `NO_GRANT` 404 |
+| GET | `/admin/subscriptions` | Filters: `status`, `plan`. Subscription objects plus `user_id`, `user_email` |
+| GET | `/admin/automation-jobs` | Filter: `status` (a run status, or `active` for queued/running/paused). Run objects plus `user_id`, `user_email`, `device` |
+| POST | `/admin/automation-jobs/{id}/stop` | Stops the run after its current job; the user sees "stopped by ApplyXAI support". `RUN_FINISHED` 409 if it already ended |
+| GET | `/admin/applications` | Filters: `status`, `q` (title, company, or user email) |
+| GET | `/admin/logs` | Automation log lines from all runs. `level` can repeat (`?level=error&level=warning`, the default); `q` searches messages |
+| GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions: `user.update`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop` |
+| GET | `/admin/workers` | `{celery: {broker: ok or unreachable, workers}, devices}`. Never fails when Redis is down |
+| GET | `/admin/plans` | Every plan, including hidden ones, with `limits`, `is_active`, `sort_order`, `provider_plan_id`, `subscribers` |
+| PUT | `/admin/plans/{code}` | Body `{name, price_cents, applications_per_month, resumes, is_active, sort_order}`. Limits apply at once to everyone on the plan. A new price creates a new Razorpay plan for new subscribers; existing subscribers keep paying the old price. Paid plans cost at least 100 minor units; the Free plan must stay free and on sale (`INVALID_PRICE`, `CANNOT_DISABLE_FREE` 422) |
