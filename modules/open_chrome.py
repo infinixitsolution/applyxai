@@ -60,7 +60,7 @@ def get_managed_driver_path() -> str | None:
         # UC rewrites the driver in place, so never hand it the shared ~/.cache/selenium
         # copy that other tools use. Work on our own copy, in UC's own data dir.
         os.makedirs(uc.Patcher.data_path, exist_ok=True)
-        target = os.path.join(uc.Patcher.data_path, "chromedriver")
+        target = os.path.join(uc.Patcher.data_path, "chromedriver.exe")
         shutil.copy2(source, target)                    # fresh copy each run, so it can never go stale against a Chrome update
         uc.Patcher(executable_path=target).auto()       # applies UC's cdc_ patch in place
         _adhoc_sign(target)                             # ...which breaks the code signature, hence the re-sign, in this order
