@@ -50,6 +50,15 @@ editing `config/*.py` by hand still works exactly as before — see
 > can see what it would say before you trust it.
 > [More on dry runs](docs/config-settings.md#dry-runs-stop_before_submit).
 
+## 🏗️ ApplyXAI SaaS (in development)
+
+This repository is being extended into **ApplyXAI**, a multi-user web application built around
+the automation engine above. The classic control panel keeps working unchanged throughout.
+
+- [Architecture audit](docs/ARCHITECTURE_AUDIT.md) and [SaaS roadmap](docs/SAAS_ROADMAP.md)
+- [Local development](docs/DEVELOPMENT.md): running the API (`backend/`) next to `python app.py`
+- [Database](docs/DATABASE.md): models, migrations, PostgreSQL setup
+
 ## 📚 Documentation
 
 Full documentation lives in **[`docs/`](docs/README.md)**.
