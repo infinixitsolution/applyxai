@@ -237,3 +237,13 @@ def test_forgot_password_is_rate_limited(api):
     codes = [api.post("/api/auth/forgot-password", json={"email": "alice@example.com"}).status_code
              for _ in range(4)]
     assert codes == [202, 202, 202, 429]
+
+
+def test_without_email_verification_new_accounts_log_in_straight_away(api, outbox, monkeypatch):
+    from backend.app.core.config import settings
+    monkeypatch.setattr(settings, "REQUIRE_EMAIL_VERIFICATION", False)
+    resp = api.post("/api/auth/register", json={"email": "quick@example.com", "password": PASSWORD})
+    assert resp.status_code == 202 and resp.json()["data"]["verification_required"] is False
+    assert not any(e.to == "quick@example.com" and "token=" in e.body for e in outbox.sent)
+    login = api.post("/api/auth/login", json={"email": "quick@example.com", "password": PASSWORD})
+    assert login.status_code == 200 and login.json()["data"]["user"]["is_verified"] is True

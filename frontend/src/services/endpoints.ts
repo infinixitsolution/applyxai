@@ -23,7 +23,7 @@ export const auth = {
   login: (email: string, password: string) =>
     request<{ user: User }>("/auth/login", { method: "POST", body: { email, password } }).then((d) => d.user),
   register: (body: { email: string; password: string; first_name?: string; last_name?: string }) =>
-    request<{ message: string }>("/auth/register", { method: "POST", body }),
+    request<{ message: string; verification_required?: boolean }>("/auth/register", { method: "POST", body }),
   logout: () => request("/auth/logout", { method: "POST" }),
   logoutAll: () => request("/auth/logout-all", { method: "POST" }),
   verifyEmail: (token: string) =>

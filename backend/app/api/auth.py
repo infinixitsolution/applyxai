@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import client_ip, get_current_user
+from backend.app.core.config import settings
 from backend.app.core.cookies import REFRESH_COOKIE, clear_session_cookies, set_session_cookies
 from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, error_response, ok
@@ -32,7 +33,9 @@ def register(body: RegisterIn, request: Request, background: BackgroundTasks, db
     elif token:
         background.add_task(mailer.send, verification_email(user.email, token))
     # Identical answer whether or not the email was already registered.
-    return ok({"message": _CHECK_EMAIL})
+    if not settings.REQUIRE_EMAIL_VERIFICATION:
+        return ok({"message": "You can log in now.", "verification_required": False})
+    return ok({"message": _CHECK_EMAIL, "verification_required": True})
 
 
 @router.post("/login", summary="Log in; sets HttpOnly session cookies")

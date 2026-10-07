@@ -41,6 +41,7 @@ export function LoginPage() {
       <form onSubmit={submit} className="space-y-4" noValidate>
         {params.get("reset") === "1" && <Alert kind="success">Password updated. Log in with your new password.</Alert>}
         {params.get("verified") === "1" && <Alert kind="success">Email verified. You can log in now.</Alert>}
+        {params.get("registered") === "1" && <Alert kind="success">Your account is ready. Log in to get started.</Alert>}
         {login.error && !notVerified && <Alert kind="error">{errorMessage(login.error)}</Alert>}
         {notVerified && (
           <Alert kind="info">
@@ -71,7 +72,8 @@ export function RegisterPage() {
 
   const register = useMutation({
     mutationFn: () => auth.register({ email: form.email, password: form.password, first_name: form.first_name, last_name: form.last_name }),
-    onSuccess: () => navigate(`/check-email?email=${encodeURIComponent(form.email)}`),
+    onSuccess: (result) => navigate(result.verification_required === false
+      ? "/login?registered=1" : `/check-email?email=${encodeURIComponent(form.email)}`),
     onError: (error) => setErrors(fieldErrors(error)),
   });
 

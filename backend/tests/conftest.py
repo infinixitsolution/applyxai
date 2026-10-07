@@ -48,6 +48,13 @@ else:
         monkeypatch.setattr(get_settings(), "STORAGE_DIR", path)
         return path
 
+    @pytest.fixture(autouse=True)
+    def default_email_settings(monkeypatch):
+        """Tests assume the shipped defaults, whatever a developer's .env says."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "REQUIRE_EMAIL_VERIFICATION", True)
+        monkeypatch.setattr(settings, "SMTP_HOST", "")
+
     @pytest.fixture
     def outbox():
         return Outbox()
