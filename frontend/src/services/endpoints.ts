@@ -1,5 +1,5 @@
 import type {
-  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
   AdminUserDetail, AdminWorkers, AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus,
   AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, JobWithApplication, LogLevel,
   Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, RunLogLine, SearchConfig,
@@ -137,6 +137,11 @@ export const admin = {
   logs: (query: Paged & { level: LogLevel[]; q?: string }) => request<Page<AdminLogLine>>("/admin/logs", { query }),
   audit: (query: Paged) => request<Page<AdminAuditEntry>>("/admin/audit-log", { query }),
   workers: () => request<AdminWorkers>("/admin/workers"),
+  email: () => request<AdminEmailStatus>("/admin/email"),
+  testEmail: (to: string) => request<TestEmailResult>("/admin/email/test", { method: "POST", body: { to: to || null } }),
+  verifyEmail: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/verify-email`, { method: "POST" }),
+  resendVerification: (id: string) =>
+    request<AdminUserDetail>(`/admin/users/${id}/resend-verification`, { method: "POST" }),
   plans: () => request<{ plans: AdminPlan[] }>("/admin/plans").then((d) => d.plans),
   updatePlan: (code: string, body: PlanUpdate) => request<AdminPlan>(`/admin/plans/${code}`, { method: "PUT", body }),
 };

@@ -64,7 +64,7 @@ def add_run(db, user, status=AutomationStatus.RUNNING, **kw):
 
 # ----------------------------------------------------------------------------- access
 ADMIN_GETS = ["/analytics", "/users", "/subscriptions", "/automation-jobs", "/applications", "/logs",
-              "/audit-log", "/workers", "/plans"]
+              "/audit-log", "/workers", "/plans", "/email"]
 
 
 @pytest.mark.parametrize("path", ADMIN_GETS)
@@ -301,6 +301,73 @@ def test_make_admin_command(alice, engine, monkeypatch, capsys):
     assert get(alice, "/analytics").status_code == 403
     assert cli.main(["make-admin", "--email", "nobody@example.com"]) == 1
     assert "Register it first" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------------------- email
+def test_email_status_never_shows_smtp_secrets(admin, alice, db, monkeypatch):
+    from backend.app.core.config import settings
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setattr(settings, "SMTP_PORT", 465)
+    monkeypatch.setattr(settings, "SMTP_USERNAME", "mailer-user")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "s3cret-pass")
+    alice.user.is_verified = False
+    db.commit()
+    resp = get(admin, "/email")
+    out = data(resp)
+    assert out["mode"] == "smtp" and out["host"] == "smtp.example.com" and out["security"] == "ssl"
+    assert out["authenticated"] is True and out["unverified_users"] == 1
+    assert "s3cret-pass" not in resp.text and "mailer-user" not in resp.text
+
+
+def test_test_email_reports_delivery(admin, outbox, db):
+    out = data(send(admin, "POST", "/email/test", {"to": "ops@example.com"}))
+    assert out["delivered"] is True and out["error"] == ""
+    assert outbox.sent[-1].to == "ops@example.com" and "test email" in outbox.sent[-1].subject
+    data(send(admin, "POST", "/email/test", {}))
+    assert outbox.sent[-1].to == "boss@example.com"
+    assert send(admin, "POST", "/email/test", {"to": "not-an-email"}).status_code == 422
+    assert db.scalar(select(AdminAction).where(AdminAction.action == "email.test")).details == {"delivered": True}
+
+
+def test_test_email_shows_the_smtp_error(admin, app):
+    import smtplib
+
+    from backend.app.services.email_service import get_email_sender
+
+    class Broken:
+        def deliver(self, email):
+            raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+
+        def send(self, email):
+            raise AssertionError("the test email must not be sent in the background")
+
+    app.dependency_overrides[get_email_sender] = lambda: Broken()
+    out = data(send(admin, "POST", "/email/test", {}))
+    assert out["delivered"] is False and out["error"].startswith("SMTPAuthenticationError")
+    assert "not accepted" in out["error"]
+
+
+def test_admin_verifies_or_resends_verification(admin, app, outbox, db):
+    TestClient(app).post("/api/auth/register", json={"email": "new@example.com", "password": "correct horse battery"})
+    new = db.scalar(select(User).where(User.email == "new@example.com"))
+    first_link = outbox.last_token("new@example.com")
+
+    data(send(admin, "POST", f"/users/{new.id}/resend-verification"))
+    second_link = outbox.last_token("new@example.com")
+    assert second_link != first_link
+    assert TestClient(app).post("/api/auth/verify-email", json={"token": first_link}).status_code == 400
+
+    out = data(send(admin, "POST", f"/users/{new.id}/verify-email"))
+    assert out["user"]["is_verified"] is True
+    login = TestClient(app).post("/api/auth/login", json={"email": "new@example.com", "password": "correct horse battery"})
+    assert login.status_code == 200
+    assert TestClient(app).post("/api/auth/verify-email", json={"token": second_link}).status_code == 400
+
+    for path in ("verify-email", "resend-verification"):
+        resp = send(admin, "POST", f"/users/{new.id}/{path}")
+        assert resp.status_code == 409 and resp.json()["error"]["code"] == "ALREADY_VERIFIED"
+    actions = {a.action for a in db.scalars(select(AdminAction))}
+    assert {"user.verify", "user.resend_verification"} <= actions
 
 
 # ----------------------------------------------------------------------------- plans

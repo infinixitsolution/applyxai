@@ -1,8 +1,10 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { useSession } from "../../auth/session";
 import { ChipSelect, TextInput } from "../../components/form";
 import { Pagination } from "../../components/Pagination";
-import { Alert, Badge, Card, PageHeader, Spinner } from "../../components/ui";
+import { Alert, Badge, Button, Card, PageHeader, Spinner } from "../../components/ui";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
@@ -13,13 +15,86 @@ import { FilterBar, PAGE_SIZE, Table, Td, UserLink } from "./shared";
 export function AdminSystemPage() {
   return (
     <>
-      <PageHeader title="System" description="Background workers, desktop agents, automation logs, and the admin audit log." />
+      <PageHeader title="System" description="Email, background workers, desktop agents, automation logs, and the admin audit log." />
       <div className="space-y-6">
+        <EmailCard />
         <Workers />
         <Logs />
         <AuditLog />
       </div>
     </>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-4 py-1.5">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-right font-medium text-slate-800">{children}</dd>
+    </div>
+  );
+}
+
+function EmailCard() {
+  const { data: me } = useSession();
+  const [to, setTo] = useState("");
+  const { data, isLoading, error } = useQuery({ queryKey: ["admin", "email"], queryFn: admin.email });
+  const test = useMutation({ mutationFn: () => admin.testEmail(to.trim()) });
+  if (isLoading) return <Card title="Email"><Spinner /></Card>;
+  if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
+  const smtp = data.mode === "smtp";
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card title="Email delivery" actions={<Badge tone={smtp ? "green" : "amber"}>{smtp ? "SMTP" : "Console only"}</Badge>}>
+        {!smtp && (
+          <div className="mb-4">
+            <Alert kind="info">
+              No SMTP server is set, so emails (verification, password reset) are only printed in the API console.
+              Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USERNAME</code>, <code>SMTP_PASSWORD</code>,
+              and <code>SMTP_FROM</code> in <code>.env</code>, then restart the API. Production won't start without them.
+            </Alert>
+          </div>
+        )}
+        <dl className="divide-y divide-slate-100 text-sm">
+          {smtp && <Row label="Server">{data.host}:{data.port} ({data.security === "ssl" ? "SSL" : "STARTTLS"})</Row>}
+          {smtp && <Row label="Signs in">{data.authenticated ? "Yes (username and password set)" : "No"}</Row>}
+          <Row label="From">{data.from}</Row>
+          <Row label="Links point to">{data.frontend_url}</Row>
+        </dl>
+        <p className="mt-3 text-xs text-slate-500">Settings come from <code>.env</code>; the password is never shown here.</p>
+      </Card>
+
+      <Card title="Email verification">
+        <dl className="divide-y divide-slate-100 text-sm">
+          <Row label="New accounts must verify">{data.require_verification ? "Yes" : "No (REQUIRE_EMAIL_VERIFICATION=false)"}</Row>
+          <Row label="Verification links last">{data.verification_hours} hours</Row>
+          <Row label="Unverified accounts">
+            {data.unverified_users > 0
+              ? <Link to="/admin/users?status=unverified" className="text-brand-700 hover:underline">{data.unverified_users}</Link> : 0}
+          </Row>
+        </dl>
+        <p className="mt-3 text-xs text-slate-500">Open a user to resend their verification email or mark them verified.</p>
+
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <TextInput label="Send a test email to" type="email" value={to} onChange={setTo} placeholder={me?.email}
+                         maxLength={320} />
+            </div>
+            <Button variant="secondary" loading={test.isPending} onClick={() => test.mutate()}>Send test</Button>
+          </div>
+          {test.error && <div className="mt-3"><Alert kind="error">{errorMessage(test.error)}</Alert></div>}
+          {test.data && (
+            <div className="mt-3">
+              {!test.data.delivered ? <Alert kind="error">The mail server refused it: {test.data.error}</Alert>
+                : test.data.mode === "console" ? <Alert kind="info">Printed in the API console (no SMTP server is set).</Alert>
+                : <Alert kind="success">The mail server accepted it. Check the inbox (and the spam folder).</Alert>}
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -116,7 +191,8 @@ function Logs() {
 
 const ACTION_LABELS: Record<string, string> = {
   "user.update": "Changed account", "plan.grant": "Gave a plan", "plan.revoke": "Ended a complimentary plan",
-  "plan.update": "Edited a plan", "run.stop": "Stopped a run",
+  "plan.update": "Edited a plan", "run.stop": "Stopped a run", "email.test": "Sent a test email",
+  "user.verify": "Marked email verified", "user.resend_verification": "Resent verification email",
 };
 
 function describe(details: Record<string, unknown>): string {

@@ -3,16 +3,18 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import require_admin
 from backend.app.core.database import get_db
 from backend.app.core.errors import ok
 from backend.app.core.pagination import PageParams, page_params
-from backend.app.models import ApplicationStatus, AutomationStatus, SubscriptionStatus, User
-from backend.app.schemas.admin import GrantPlanIn, PlanUpdateIn, UserUpdateIn
+from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
+from backend.app.models import ApplicationStatus, SubscriptionStatus, User
+from backend.app.schemas.admin import GrantPlanIn, PlanUpdateIn, TestEmailIn, UserUpdateIn
 from backend.app.services import admin_service
+from backend.app.services.email_service import EmailSender, get_email_sender, verification_email
 from backend.app.services.payments import PaymentProvider, get_payment_provider
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -27,7 +29,7 @@ def analytics(db: Session = Depends(get_db)):
 
 @router.get("/users", summary="All users")
 def users(q: str | None = Query(None, max_length=200),
-          status: Literal["active", "disabled", "admin"] | None = None,
+          status: Literal["active", "disabled", "admin", "unverified"] | None = None,
           plan: str | None = Query(None, max_length=32),
           params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
     return ok(admin_service.list_users(db, params, q=q, status=status, plan=plan))
@@ -100,6 +102,36 @@ def audit_log(params: PageParams = Depends(page_params), db: Session = Depends(g
 @router.get("/workers", summary="Background worker and desktop agent status")
 def workers(db: Session = Depends(get_db)):
     return ok(admin_service.workers(db))
+
+
+@router.get("/email", summary="How email is delivered (never the SMTP password), and unverified accounts")
+def email_status(db: Session = Depends(get_db)):
+    return ok(admin_service.email_overview(db))
+
+
+@router.post("/email/test", summary="Send a test email now and report whether it was accepted")
+def email_test(body: TestEmailIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+               limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_email_sender)):
+    limiter.hit("10/hour", "admin-test-email", str(admin.id))
+    result = admin_service.send_test_email(db, admin, mailer, str(body.to or admin.email))
+    db.commit()
+    return ok(result)
+
+
+@router.post("/users/{user_id}/verify-email", summary="Mark a user's email address as verified")
+def verify_email(user_id: uuid.UUID, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    result = admin_service.mark_verified(db, admin, user_id)
+    db.commit()
+    return ok(result)
+
+
+@router.post("/users/{user_id}/resend-verification", summary="Email the user a new verification link")
+def resend_verification(user_id: uuid.UUID, background: BackgroundTasks, admin: User = Depends(require_admin),
+                        db: Session = Depends(get_db), mailer: EmailSender = Depends(get_email_sender)):
+    result, token = admin_service.resend_verification(db, admin, user_id)
+    db.commit()
+    background.add_task(mailer.send, verification_email(result["user"]["email"], token))
+    return ok(result)
 
 
 @router.get("/plans", summary="Plan catalogue, including inactive plans")

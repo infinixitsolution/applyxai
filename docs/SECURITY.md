@@ -80,6 +80,7 @@ What is implemented today. Planned hardening is listed at the end.
 - Admin views show account, plan, usage, and run data, but never password hashes, resume files, form answers, tokens, or payment details.
 - Every change an admin makes (account flags, complimentary plans, plan edits, stopping a run) is recorded in `admin_actions` with the admin's email, the target, and the before/after values. The rows outlive deleted accounts (foreign keys are `SET NULL`).
 - Disabling an account revokes its sessions and desktop agents at once and stops a run in progress.
+- The email status shows the SMTP host, port, and sender, never the username or password. Test emails are limited to 10 an hour per admin. Marking an address verified or resending a link voids earlier verification links.
 - Complimentary plans never touch the payment provider, and they're refused while the user has a paid plan, so an admin can't silently change what someone is billed for.
 
 ## Never commit

@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Search, Users } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../auth/session";
 import { Select, TextArea, TextInput, Toggle } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
@@ -20,6 +20,7 @@ const STATUS_FILTERS = [
   { value: "active", label: "Active" },
   { value: "disabled", label: "Disabled" },
   { value: "admin", label: "Admins" },
+  { value: "unverified", label: "Email not verified" },
 ];
 
 function fullName(u: AdminUser): string {
@@ -32,8 +33,12 @@ function usePlanOptions(first: { value: string; label: string }) {
 }
 
 export function AdminUsersPage() {
+  const [params] = useSearchParams();
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(() => {
+    const initial = params.get("status") ?? "";
+    return STATUS_FILTERS.some((f) => f.value === initial) ? initial : "";
+  });
   const [plan, setPlan] = useState("");
   const [page, setPage] = useState(1);
   const search = useDebounced(q.trim());
@@ -115,6 +120,10 @@ export function AdminUserPage() {
     onSuccess: onDone("Saved."), onError,
   });
   const revoke = useMutation({ mutationFn: () => admin.revokePlan(id), onSuccess: onDone("Complimentary plan ended."), onError });
+  const verify = useMutation({ mutationFn: () => admin.verifyEmail(id), onSuccess: onDone("Email marked as verified."), onError });
+  const resend = useMutation({
+    mutationFn: () => admin.resendVerification(id), onSuccess: onDone("Verification email sent. Earlier links no longer work."), onError,
+  });
 
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
@@ -152,6 +161,20 @@ export function AdminUserPage() {
             <Toggle label="Admin" checked={u.is_admin} onChange={self ? refuseSelf : askAdmin}
                     hint={self ? "You can't remove your own admin access." : "Opens this admin area."} />
           </div>
+          {!u.is_verified && (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <p className="text-sm text-slate-600">This email address isn't verified, so they can't sign in yet.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" loading={resend.isPending} disabled={!u.is_active}
+                        onClick={() => resend.mutate()}>Resend verification email</Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirm({
+                  title: "Mark this email as verified?", danger: false, confirm: "Mark verified",
+                  message: `Only do this if you're sure ${u.email} belongs to this person. They can sign in straight away.`,
+                  run: () => verify.mutate(),
+                })}>Mark verified</Button>
+              </div>
+            </div>
+          )}
         </Card>
 
         <Card title="Plan">
@@ -250,7 +273,7 @@ export function AdminUserPage() {
 
       {confirm && (
         <ConfirmDialog open title={confirm.title} message={confirm.message} confirmLabel={confirm.confirm} danger={confirm.danger}
-                       loading={update.isPending || revoke.isPending} onConfirm={confirm.run} onClose={() => setConfirm(null)} />
+                       loading={update.isPending || revoke.isPending || verify.isPending} onConfirm={confirm.run} onClose={() => setConfirm(null)} />
       )}
       <GrantDialog open={granting} userId={u.id} email={u.email} onClose={() => setGranting(false)}
                    onGranted={onDone("Complimentary plan given.")} />

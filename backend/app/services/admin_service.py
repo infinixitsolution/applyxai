@@ -21,8 +21,8 @@ from backend.app.models import (
 )
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
 from backend.app.services import (
-    agent_service, auth_service, automation_service, billing_service, dashboard_service, notification_service,
-    usage_service,
+    agent_service, auth_service, automation_service, billing_service, dashboard_service, email_service,
+    notification_service, usage_service,
 )
 from backend.app.services.payments.base import PaymentProvider
 
@@ -152,6 +152,8 @@ def list_users(db: Session, params: PageParams, *, q: str | None = None, status:
         stmt = stmt.where(User.is_active.is_(False))
     elif status == "admin":
         stmt = stmt.where(User.is_admin.is_(True))
+    elif status == "unverified":
+        stmt = stmt.where(User.is_verified.is_(False))
     if plan:
         paying = select(Subscription.user_id).join(Subscription.plan).where(*_entitled_filter(_now()))
         if plan == FREE_PLAN:
@@ -366,6 +368,51 @@ def workers(db: Session, now: datetime | None = None) -> dict:
     devices = [{**agent_service.device_out(d, now), "user_id": str(d.user_id), "user_email": email,
                 "running": d.id in busy} for d, email in rows]
     return {"celery": celery_workers(), "devices": devices}
+
+
+# ----------------------------------------------------------------------------- email
+def email_overview(db: Session) -> dict:
+    unverified = db.scalar(select(func.count()).select_from(User).where(User.is_verified.is_(False)))
+    return {**email_service.email_settings(), "unverified_users": unverified}
+
+
+def send_test_email(db: Session, admin: User, sender: email_service.EmailSender, to: str) -> dict:
+    """Send right away (not in the background) so the admin sees whether delivery worked."""
+    settings_now = email_service.email_settings()
+    email = email_service.sample_email(to)
+    try:
+        getattr(sender, "deliver", sender.send)(email)
+    except Exception as exc:              # SMTP refused, timed out, bad credentials, ...
+        logger.warning("Test email to %s failed: %s", to, type(exc).__name__)
+        _audit(db, admin, "email.test", target_label=to, delivered=False)
+        message = str(exc).strip() or "No details from the mail server."
+        return {"delivered": False, "mode": settings_now["mode"], "error": f"{type(exc).__name__}: {message}"[:300]}
+    _audit(db, admin, "email.test", target_label=to, delivered=True)
+    return {"delivered": True, "mode": settings_now["mode"], "error": ""}
+
+
+def mark_verified(db: Session, admin: User, user_id: uuid.UUID) -> dict:
+    user = _get_user(db, user_id)
+    if user.is_verified:
+        raise AppError("ALREADY_VERIFIED", "This email address is already verified.", 409)
+    user.is_verified = True
+    auth_service.invalidate_verification_tokens(db, user.id)
+    _audit(db, admin, "user.verify", user)
+    db.flush()
+    return user_detail(db, user.id)
+
+
+def resend_verification(db: Session, admin: User, user_id: uuid.UUID) -> tuple[dict, str]:
+    """Returns the user detail and a fresh token; the caller emails it."""
+    user = _get_user(db, user_id)
+    if user.is_verified:
+        raise AppError("ALREADY_VERIFIED", "This email address is already verified.", 409)
+    if not user.is_active:
+        raise AppError("ACCOUNT_DISABLED", "Enable the account before sending it a verification email.", 409)
+    token = auth_service.issue_verification_token(db, user)
+    _audit(db, admin, "user.resend_verification", user)
+    db.flush()
+    return user_detail(db, user.id), token
 
 
 # ----------------------------------------------------------------------------- plans

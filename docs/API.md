@@ -231,7 +231,7 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/admin/analytics` | `{users: {total, active, verified, admins, new_7d, new_30d, active_30d}, subscriptions: {by_plan, mrr_cents, past_due}, revenue_30d_cents, applications: {this_month_by_status, daily}, automation: {active_runs, last_24h_by_status, devices, devices_online}}`. Money is keyed by currency. `mrr_cents` counts only paid plans that will renew (complimentary and cancelled plans are left out) |
-| GET | `/admin/users` | Filters: `q` (email or name), `status` (active, disabled, admin), `plan` (plan code; `free` means no paid or complimentary plan). Each row: account flags, `plan`, `plan_name`, `applications_this_month` |
+| GET | `/admin/users` | Filters: `q` (email or name), `status` (active, disabled, admin, unverified), `plan` (plan code; `free` means no paid or complimentary plan). Each row: account flags, `plan`, `plan_name`, `applications_this_month` |
 | GET | `/admin/users/{id}` | `{user, usage, subscription, subscriptions, payments, runs, devices, applications_by_status, resumes}`. Never resume files, form answers, or card details |
 | PATCH | `/admin/users/{id}` | Body `{is_active?, is_admin?}`. Disabling signs the user out everywhere, disconnects their desktop agents, and stops a run in progress (`stop_reason: admin`). `CANNOT_CHANGE_SELF` 400 for disabling yourself or removing your own admin access |
 | POST | `/admin/users/{id}/grant-plan` | Body `{plan, months (1-24), note}`. A complimentary plan (`provider: "admin"`), with no payment, that ends by itself; it replaces an earlier grant. `FREE_PLAN` 400, `PLAN_NOT_FOUND` 404, `HAS_SUBSCRIPTION` 409 while the user pays for a plan. The user can't cancel it (`COMPLIMENTARY_PLAN` 409 on `/billing/cancel`); buying a plan ends it |
@@ -241,7 +241,11 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | POST | `/admin/automation-jobs/{id}/stop` | Stops the run after its current job; the user sees "stopped by ApplyXAI support". `RUN_FINISHED` 409 if it already ended |
 | GET | `/admin/applications` | Filters: `status`, `q` (title, company, or user email) |
 | GET | `/admin/logs` | Automation log lines from all runs. `level` can repeat (`?level=error&level=warning`, the default); `q` searches messages |
-| GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions: `user.update`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop` |
+| GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions: `user.update`, `user.verify`, `user.resend_verification`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop`, `email.test` |
 | GET | `/admin/workers` | `{celery: {broker: ok or unreachable, workers}, devices}`. Never fails when Redis is down |
+| GET | `/admin/email` | `{mode: smtp or console, host, port, security: starttls or ssl, from, authenticated, require_verification, verification_hours, frontend_url, unverified_users}`. Never the SMTP username or password |
+| POST | `/admin/email/test` | Body `{to?}` (defaults to the admin's address). Sends right away and returns `{delivered, mode, error}`; `error` is the mail server's reason when it refuses. 10/hour per admin |
+| POST | `/admin/users/{id}/verify-email` | Marks the address verified and voids outstanding verification links. `ALREADY_VERIFIED` 409 |
+| POST | `/admin/users/{id}/resend-verification` | Emails a new verification link; earlier links stop working. `ALREADY_VERIFIED` 409, `ACCOUNT_DISABLED` 409 |
 | GET | `/admin/plans` | Every plan, including hidden ones, with `limits`, `is_active`, `sort_order`, `provider_plan_id`, `subscribers` |
 | PUT | `/admin/plans/{code}` | Body `{name, price_cents, applications_per_month, resumes, is_active, sort_order}`. Limits apply at once to everyone on the plan. A new price creates a new Razorpay plan for new subscribers; existing subscribers keep paying the old price. Paid plans cost at least 100 minor units; the Free plan must stay free and on sale (`INVALID_PRICE`, `CANNOT_DISABLE_FREE` 422) |

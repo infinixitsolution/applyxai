@@ -125,10 +125,19 @@ def new_verification_token(db: Session, email: str) -> tuple[User | None, str | 
     user = db.scalar(select(User).where(User.email == normalize_email(email)))
     if user is None or user.is_verified or not user.is_active:
         return None, None
-    _invalidate_tokens(db, user.id, TokenPurpose.VERIFY_EMAIL)
-    token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=settings.EMAIL_VERIFICATION_HOURS))
+    token = issue_verification_token(db, user)
     db.commit()
     return user, token
+
+
+def issue_verification_token(db: Session, user: User) -> str:
+    """A new verification link; earlier links stop working. The caller commits."""
+    invalidate_verification_tokens(db, user.id)
+    return _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=settings.EMAIL_VERIFICATION_HOURS))
+
+
+def invalidate_verification_tokens(db: Session, user_id) -> None:
+    _invalidate_tokens(db, user_id, TokenPurpose.VERIFY_EMAIL)
 
 
 # --------------------------------------------------------------------------- sessions

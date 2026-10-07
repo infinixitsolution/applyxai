@@ -9,6 +9,7 @@ import { ToastProvider } from "../../components/Toast";
 import type { AdminPlan, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
 import { AdminRunsPage } from "./Lists";
 import { AdminPlansPage } from "./Plans";
+import { AdminSystemPage } from "./System";
 import { AdminUserPage, AdminUsersPage } from "./Users";
 
 const me: User = {
@@ -147,6 +148,42 @@ describe("admin area", () => {
     expect(calls.find((c) => c.key === "PUT /api/admin/plans/starter")?.body).toEqual({
       name: "Starter", price_cents: 59900, applications_per_month: 100, resumes: 3, is_active: true, sort_order: 1,
     });
+  });
+
+  it("sends a test email and shows the mail server's refusal", async () => {
+    const calls = mockApi({
+      "GET /api/auth/me": { user: me },
+      "GET /api/admin/email": {
+        mode: "smtp", host: "smtp.example.com", port: 587, security: "starttls", from: "ApplyXAI <no-reply@example.com>",
+        authenticated: true, require_verification: true, verification_hours: 24, frontend_url: "http://localhost:5173",
+        unverified_users: 2,
+      },
+      "POST /api/admin/email/test": { delivered: false, mode: "smtp", error: "SMTPAuthenticationError: bad login" },
+      "GET /api/admin/workers": { celery: { broker: "unreachable", workers: [] }, devices: [] },
+      "GET /api/admin/logs": { items: [], total: 0, page: 1, page_size: 25 },
+      "GET /api/admin/audit-log": { items: [], total: 0, page: 1, page_size: 25 },
+    });
+    renderAt("/admin/system", <Route path="/admin/system" element={<AdminSystemPage />} />);
+    expect(await screen.findByText("smtp.example.com:587 (STARTTLS)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "2" })).toHaveAttribute("href", "/admin/users?status=unverified");
+    await userEvent.type(screen.getByLabelText("Send a test email to"), "ops@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(await screen.findByText(/SMTPAuthenticationError: bad login/)).toBeInTheDocument();
+    expect(calls.find((c) => c.key === "POST /api/admin/email/test")?.body).toEqual({ to: "ops@example.com" });
+  });
+
+  it("resends verification for an unverified user", async () => {
+    const unverified = detail({ user: { ...alice, is_verified: false } });
+    const calls = mockApi({
+      "GET /api/auth/me": { user: me },
+      "GET /api/plans": { plans },
+      "GET /api/admin/users/u1": unverified,
+      "POST /api/admin/users/u1/resend-verification": unverified,
+    });
+    renderAt("/admin/users/u1", <Route path="/admin/users/:id" element={<AdminUserPage />} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Resend verification email" }));
+    expect(await screen.findByText(/Verification email sent/)).toBeInTheDocument();
+    expect(calls.some((c) => c.key === "POST /api/admin/users/u1/resend-verification")).toBe(true);
   });
 
   it("stops a user's run after confirmation", async () => {

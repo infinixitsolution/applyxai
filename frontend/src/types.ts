@@ -355,6 +355,25 @@ export interface AdminWorkers {
   devices: (AgentDevice & WithOwner & { running: boolean })[];
 }
 
+export interface AdminEmailStatus {
+  mode: "smtp" | "console";
+  host: string;
+  port: number;
+  security: "ssl" | "starttls";
+  from: string;
+  authenticated: boolean;
+  require_verification: boolean;
+  verification_hours: number;
+  frontend_url: string;
+  unverified_users: number;
+}
+
+export interface TestEmailResult {
+  delivered: boolean;
+  mode: "smtp" | "console";
+  error: string;
+}
+
 export interface AdminPlan extends Plan {
   is_active: boolean;
   sort_order: number;

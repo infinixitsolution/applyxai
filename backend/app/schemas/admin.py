@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class UserUpdateIn(BaseModel):
@@ -10,6 +10,10 @@ class GrantPlanIn(BaseModel):
     plan: str = Field(min_length=1, max_length=32)
     months: int = Field(ge=1, le=24)
     note: str = Field(default="", max_length=500)
+
+
+class TestEmailIn(BaseModel):
+    to: EmailStr | None = None            # defaults to the admin's own address
 
 
 class PlanUpdateIn(BaseModel):

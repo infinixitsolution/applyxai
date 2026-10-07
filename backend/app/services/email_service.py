@@ -31,19 +31,32 @@ class ConsoleEmailSender:
         logger.warning("DEV EMAIL to %s | %s\n%s", email.to, email.subject, email.body)
 
 
+SMTPS_PORT = 465
+
+
 class SmtpEmailSender:
-    def send(self, email: Email) -> None:
+    def deliver(self, email: Email) -> None:
+        """Send now; raises on failure. Port 465 uses implicit TLS, any other port STARTTLS."""
         message = EmailMessage()
         message["From"] = settings.SMTP_FROM
         message["To"] = email.to
         message["Subject"] = email.subject
         message.set_content(email.body)
+        context = ssl.create_default_context()
+        if settings.SMTP_PORT == SMTPS_PORT:
+            smtp = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15, context=context)
+        else:
+            smtp = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15)
+        with smtp:
+            if settings.SMTP_PORT != SMTPS_PORT:
+                smtp.starttls(context=context)
+            if settings.SMTP_USERNAME:
+                smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+            smtp.send_message(message)
+
+    def send(self, email: Email) -> None:
         try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
-                smtp.starttls(context=ssl.create_default_context())
-                if settings.SMTP_USERNAME:
-                    smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-                smtp.send_message(message)
+            self.deliver(email)
         except Exception:
             # Runs as a background task: log and move on rather than failing the request.
             logger.exception("Failed to send email '%s'", email.subject)
@@ -52,6 +65,25 @@ class SmtpEmailSender:
 @lru_cache
 def get_email_sender() -> EmailSender:
     return SmtpEmailSender() if settings.SMTP_HOST else ConsoleEmailSender()
+
+
+def email_settings() -> dict:
+    """What an admin may see about email delivery. Never the SMTP password or username."""
+    return {
+        "mode": "smtp" if settings.SMTP_HOST else "console",
+        "host": settings.SMTP_HOST, "port": settings.SMTP_PORT,
+        "security": "ssl" if settings.SMTP_PORT == SMTPS_PORT else "starttls",
+        "from": settings.SMTP_FROM, "authenticated": bool(settings.SMTP_USERNAME),
+        "require_verification": settings.REQUIRE_EMAIL_VERIFICATION,
+        "verification_hours": settings.EMAIL_VERIFICATION_HOURS,
+        "frontend_url": settings.FRONTEND_URL,
+    }
+
+
+def sample_email(to: str) -> Email:
+    return Email(to, f"{settings.APP_NAME} test email",
+                 f"This is a test email from the {settings.APP_NAME} admin area.\n\n"
+                 "If you can read it, outgoing email works.")
 
 
 def verification_email(to: str, token: str) -> Email:
