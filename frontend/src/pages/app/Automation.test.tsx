@@ -108,7 +108,7 @@ describe("AutomationPage", () => {
     const [headerButton] = await screen.findAllByRole("button", { name: /Connect a computer/ });
     await user.click(headerButton);
     expect(await screen.findByTestId("pairing-code")).toHaveTextContent("ABCD-EFGH");
-    expect(screen.getByText(`python -m agent pair --server ${window.location.origin}`)).toBeInTheDocument();
-    expect(screen.getByText("python -m agent run")).toBeInTheDocument();
+    expect(screen.getByText(`venv/bin/python -m agent pair --server ${window.location.origin} --code ABCD-EFGH`)).toBeInTheDocument();
+    expect(screen.getByText("venv/bin/python -m agent run")).toBeInTheDocument();
   });
 });

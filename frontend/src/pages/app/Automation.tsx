@@ -136,7 +136,7 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
         {devices.length > 0 && !overview.agent_online && (
           <Alert kind="info">
             None of your computers is online. You can still start: the run waits until you open{" "}
-            <code>python -m agent run</code>.
+            <code>{AGENT} run</code> in the ApplyXAI folder.
           </Alert>
         )}
         {usage.limit_reached && (
@@ -173,7 +173,7 @@ function statusLine(run: AutomationRun, agentOnline: boolean): string {
     if (run.claimed) return "Your computer is opening the browser\u2026";
     return agentOnline
       ? "Waiting for your computer to pick this up\u2026"
-      : "Waiting for a computer. Open python -m agent run on a connected computer to begin.";
+      : `Waiting for a computer. Run ${AGENT} run in the ApplyXAI folder on a connected computer to begin.`;
   }
   if (run.status === "paused") return "Paused. Resume when you're ready.";
   if (run.control === "pause") return "Pausing after the current job\u2026";
@@ -352,6 +352,10 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
   );
 }
 
+const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+/** The agent needs the project's virtual environment, run from the project folder. */
+const AGENT = IS_WINDOWS ? "venv\\Scripts\\python -m agent" : "venv/bin/python -m agent";
+
 function CopyLine({ text }: { text: string }) {
   const toast = useToast();
   const copy = () => navigator.clipboard?.writeText(text).then(() => toast.success("Copied."), () => toast.error("Couldn't copy."));
@@ -390,16 +394,20 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-500" aria-hidden />
           <p className="font-medium text-slate-900">{connected.name} is connected</p>
-          <p>Leave <code>python -m agent run</code> open on it, then start a run from this page.</p>
+          <p>Leave <code>{AGENT} run</code> open on it, then start a run from this page.</p>
         </div>
       ) : (
         <ol className="space-y-5">
           <li>
-            <p className="font-medium text-slate-900">1. On your computer, open a terminal in the ApplyXAI folder and run:</p>
-            <CopyLine text={`python -m agent pair --server ${server}`} />
+            <p className="font-medium text-slate-900">1. Open a terminal in the ApplyXAI folder (the one that contains <code>app.py</code> and <code>venv</code>):</p>
+            <CopyLine text={IS_WINDOWS ? "cd C:\\path\\to\\applyxai" : "cd /path/to/applyxai"} />
+            <p className="mt-1 text-xs text-slate-500">
+              Use the project's <code>venv</code> Python as shown below. Running plain <code>python</code> from another folder gives
+              &quot;No module named agent&quot;.
+            </p>
           </li>
           <li>
-            <p className="font-medium text-slate-900">2. When it asks, enter this code:</p>
+            <p className="font-medium text-slate-900">2. Connect this computer with your one-time code:</p>
             {code.isPending ? <Spinner label="Getting a code\u2026" /> : code.isError ? (
               <div className="mt-2"><Alert kind="error">{errorMessage(code.error)}</Alert></div>
             ) : code.data && (
@@ -412,10 +420,11 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
                 </span>
               </div>
             )}
+            <CopyLine text={`${AGENT} pair --server ${server}${code.data ? ` --code ${code.data.code}` : ""}`} />
           </li>
           <li>
             <p className="font-medium text-slate-900">3. Start the agent and leave it running while you use automation:</p>
-            <CopyLine text="python -m agent run" />
+            <CopyLine text={`${AGENT} run`} />
           </li>
           <li className="text-xs text-slate-500">
             The agent opens a browser on this computer and asks you to sign in to LinkedIn there. Your LinkedIn password
