@@ -30,7 +30,7 @@ def _pair(args) -> int:
         return 2
     code = args.code or input("Pairing code from the Automation page: ").strip()
     try:
-        data = ApiClient(server).pair(code, args.name or config.default_device_name())
+        data = ApiClient(server, verify_ssl=False).pair(code, args.name or config.default_device_name())
     except (ApiError, NetworkError) as exc:
         print(getattr(exc, "message", None) or exc)
         return 1
@@ -51,7 +51,8 @@ def _run(args) -> int:
     cfg = _load(args)
     if cfg is None:
         return 2
-    supervisor = Supervisor(ApiClient(cfg.server, cfg.token), _home(args), cfg.user_id)
+    # Disable SSL verification for self-signed certificates in development
+    supervisor = Supervisor(ApiClient(cfg.server, cfg.token, verify_ssl=False), _home(args), cfg.user_id)
     logging.getLogger("applyxai.agent").info(
         "ApplyXAI agent %s connected to %s. Waiting for runs; press Ctrl+C to quit.", AGENT_VERSION, cfg.server)
     try:

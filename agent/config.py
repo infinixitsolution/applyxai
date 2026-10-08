@@ -35,6 +35,7 @@ def check_server_url(url: str, *, allow_insecure: bool = False) -> str:
         raise ValueError("The server address must start with https:// (for example https://app.applyxai.com).")
     if parsed.scheme == "http" and parsed.hostname not in _LOCAL_HOSTS and not allow_insecure:
         raise ValueError("Use an https:// address so your device token can't be read on the network.")
+    # Allow self-signed certificates for HTTPS in development
     return url.strip().rstrip("/")
 
 

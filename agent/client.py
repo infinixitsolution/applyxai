@@ -21,11 +21,16 @@ class NetworkError(Exception):
 
 
 class ApiClient:
-    def __init__(self, server: str, token: str = "", *, session=None, timeout: float = TIMEOUT):
+    def __init__(self, server: str, token: str = "", *, session=None, timeout: float = TIMEOUT, verify_ssl: bool = True):
         self.server = server.rstrip("/")
         self._token = token
         self._session = session or requests.Session()
         self._timeout = timeout
+        self._verify_ssl = verify_ssl
+        if not verify_ssl:
+            # Disable SSL warnings for self-signed certificates
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def __repr__(self) -> str:
         return f"ApiClient(server={self.server!r})"
@@ -36,7 +41,7 @@ class ApiClient:
             headers["Authorization"] = f"Bearer {self._token}"
         try:
             resp = self._session.request(method, f"{self.server}/api{path}", json=json, headers=headers,
-                                         timeout=self._timeout)
+                                         timeout=self._timeout, verify=self._verify_ssl)
         except (requests.RequestException, OSError) as exc:
             raise NetworkError(f"Couldn't reach {self.server}: {type(exc).__name__}") from None
         if raw and resp.status_code == 200:
