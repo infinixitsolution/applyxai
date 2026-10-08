@@ -20,6 +20,10 @@ AFTER="$(git rev-parse HEAD)"
 
 ./venv/bin/pip install -q -r requirements.txt
 
+if [[ -f backend/alembic.ini ]]; then
+  ./venv/bin/alembic -c backend/alembic.ini upgrade head
+fi
+
 if [[ "$BEFORE" != "$AFTER" ]] && git diff --name-only "$BEFORE" "$AFTER" | grep -q '^frontend/'; then
   (cd frontend && npm ci && npm run build)
 fi
