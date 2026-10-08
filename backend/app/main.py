@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api import (
     admin, agent, applications, auth, automation, billing, dashboard, health, jobs, notifications, plans, profile,
-    resumes,
+    resumes, site,
 )
 from backend.app.core.config import settings
 from backend.app.core.csrf import CSRFMiddleware
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(agent.router, prefix="/api")
     app.include_router(billing.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
+    app.include_router(site.router, prefix="/api")
     return app
 
 

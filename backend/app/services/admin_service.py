@@ -371,15 +371,28 @@ def workers(db: Session, now: datetime | None = None) -> dict:
 
 
 # ----------------------------------------------------------------------------- email
+def settings_overview(db: Session) -> dict:
+    from backend.app.services import platform_settings_service as ps
+
+    unverified = db.scalar(select(func.count()).select_from(User).where(User.is_verified.is_(False)))
+    view = ps.build_admin_view(db)
+    view["unverified_users"] = unverified
+    return view
+
+
+def audit_settings(db: Session, admin: User, action: str, details: dict) -> None:
+    _audit(db, admin, action, target_label="platform", **details)
+
+
 def email_overview(db: Session) -> dict:
     unverified = db.scalar(select(func.count()).select_from(User).where(User.is_verified.is_(False)))
-    return {**email_service.email_settings(), "unverified_users": unverified}
+    return {**email_service.email_settings(db), "unverified_users": unverified}
 
 
 def send_test_email(db: Session, admin: User, sender: email_service.EmailSender, to: str) -> dict:
     """Send right away (not in the background) so the admin sees whether delivery worked."""
-    settings_now = email_service.email_settings()
-    email = email_service.sample_email(to)
+    settings_now = email_service.email_settings(db)
+    email = email_service.sample_email(to, db)
     try:
         getattr(sender, "deliver", sender.send)(email)
     except Exception as exc:              # SMTP refused, timed out, bad credentials, ...

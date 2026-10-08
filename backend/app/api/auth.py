@@ -1,8 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import client_ip, get_current_user
-from backend.app.core.config import settings
+from backend.app.api.deps import client_ip, get_current_user, get_mailer
 from backend.app.core.cookies import REFRESH_COOKIE, clear_session_cookies, set_session_cookies
 from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, error_response, ok
@@ -10,8 +9,9 @@ from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import User
 from backend.app.schemas.auth import EmailIn, LoginIn, RegisterIn, ResetPasswordIn, TokenIn, UserOut
 from backend.app.services import auth_service
+from backend.app.services import platform_settings_service as ps
 from backend.app.services.email_service import (
-    EmailSender, account_exists_email, get_email_sender, password_reset_email, verification_email,
+    EmailSender, account_exists_email, password_reset_email, verification_email,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -25,15 +25,15 @@ def _user(user: User) -> dict:
 
 @router.post("/register", status_code=202, summary="Create an account and send a verification email")
 def register(body: RegisterIn, request: Request, background: BackgroundTasks, db: Session = Depends(get_db),
-             limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_email_sender)):
+             limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
     limiter.hit("10/hour", "register", client_ip(request))
     user, token = auth_service.register(db, body.email, body.password, body.first_name, body.last_name)
     if user is None:
-        background.add_task(mailer.send, account_exists_email(auth_service.normalize_email(body.email)))
+        background.add_task(mailer.send, account_exists_email(auth_service.normalize_email(body.email), db))
     elif token:
-        background.add_task(mailer.send, verification_email(user.email, token))
+        background.add_task(mailer.send, verification_email(user.email, token, db))
     # Identical answer whether or not the email was already registered.
-    if not settings.REQUIRE_EMAIL_VERIFICATION:
+    if not ps.get_effective_auth(db).require_verification:
         return ok({"message": "You can log in now.", "verification_required": False})
     return ok({"message": _CHECK_EMAIL, "verification_required": True})
 
@@ -95,23 +95,23 @@ def verify_email(body: TokenIn, request: Request, db: Session = Depends(get_db),
 
 @router.post("/resend-verification", status_code=202, summary="Send a new verification email")
 def resend_verification(body: EmailIn, request: Request, background: BackgroundTasks, db: Session = Depends(get_db),
-                        limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_email_sender)):
+                        limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
     limiter.hit("5/hour", "resend-ip", client_ip(request))
     limiter.hit("3/hour", "resend-email", auth_service.normalize_email(body.email))
     user, token = auth_service.new_verification_token(db, body.email)
     if user and token:
-        background.add_task(mailer.send, verification_email(user.email, token))
+        background.add_task(mailer.send, verification_email(user.email, token, db))
     return ok({"message": _CHECK_EMAIL})
 
 
 @router.post("/forgot-password", status_code=202, summary="Email a password-reset link")
 def forgot_password(body: EmailIn, request: Request, background: BackgroundTasks, db: Session = Depends(get_db),
-                    limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_email_sender)):
+                    limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
     limiter.hit("5/hour", "forgot-ip", client_ip(request))
     limiter.hit("3/hour", "forgot-email", auth_service.normalize_email(body.email))
     user, token = auth_service.new_password_reset_token(db, body.email)
     if user and token:
-        background.add_task(mailer.send, password_reset_email(user.email, token))
+        background.add_task(mailer.send, password_reset_email(user.email, token, db))
     return ok({"message": _CHECK_EMAIL})
 
 

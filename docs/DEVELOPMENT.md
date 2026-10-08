@@ -90,7 +90,7 @@ venv\Scripts\python -m backend.app.cli make-admin --email you@example.com
 venv\Scripts\python -m backend.app.cli make-admin --email you@example.com --revoke   # take it away
 ```
 
-The System page shows how email is delivered and can send a test email; it reports the mail server's error if delivery fails. To send real email in development, set `SMTP_HOST`, `SMTP_PORT` (587 for STARTTLS, 465 for SSL), `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM` in `.env` and restart the API (Gmail needs an App Password). From a user's page you can resend their verification email or mark the address verified.
+The **Settings** page (`/admin/system`) lets admins edit CMS copy, SMTP, auth policy, and notification email toggles without restarting the API (secrets for DB, JWT, and payments stay in `.env`). It also shows workers, logs, and audit history. The System page shows how email is delivered and can send a test email; it reports the mail server's error if delivery fails. To send real email in development, set `SMTP_HOST`, `SMTP_PORT` (587 for STARTTLS, 465 for SSL), `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM` in `.env` and restart the API (Gmail needs an App Password). From a user's page you can resend their verification email or mark the address verified.
 
 The System page pings the Celery workers through Redis; without Redis it shows "Unreachable" after about two seconds, and everything else still works.
 

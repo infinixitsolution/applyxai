@@ -41,7 +41,6 @@ PRODUCTION_OK = dict(
 @pytest.mark.parametrize("override, expected", [
     ({"PAYMENT_PROVIDER": "null"}, "PAYMENT_PROVIDER"),
     ({"PAYMENT_WEBHOOK_SECRET": ""}, "PAYMENT_WEBHOOK_SECRET"),
-    ({"SMTP_HOST": ""}, "SMTP_HOST"),
     ({"COOKIE_SECURE": False}, "COOKIE_SECURE"),
     ({"RATE_LIMIT_STORAGE_URL": "memory://"}, "RATE_LIMIT_STORAGE_URL"),
 ])

@@ -5,7 +5,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
-from backend.app.models import Notification
+from backend.app.models import Notification, User
+from backend.app.services import platform_settings_service as ps
+from backend.app.services.email_service import get_email_sender, notification_email, smtp_configured
 
 
 def notify(db: Session, user_id: uuid.UUID, type: str, title: str, body: str = "", link: str = "") -> Notification:
@@ -15,6 +17,13 @@ def notify(db: Session, user_id: uuid.UUID, type: str, title: str, body: str = "
     note = Notification(user_id=user_id, type=type[:50], title=title[:255], body=body[:5000], link=link[:512])
     db.add(note)
     db.flush()
+    if ps.notification_email_enabled(db, type) and smtp_configured(db):
+        user = db.get(User, user_id)
+        if user and user.is_verified and user.is_active:
+            try:
+                get_email_sender(db).send(notification_email(user.email, title, body, link, db))
+            except Exception:
+                pass
     return note
 
 

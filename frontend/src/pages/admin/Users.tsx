@@ -7,21 +7,49 @@ import { Select, TextArea, TextInput, Toggle } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
+import { Alert, Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner, cx } from "../../components/ui";
 import { formatDate, formatDateTime, formatMoney, formatRelative, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminUser, type AdminUserDetail } from "../../types";
-import { FilterBar, PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
+import { PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
 
-const STATUS_FILTERS = [
-  { value: "", label: "Everyone" },
+const USER_STATUS_FILTERS = [
   { value: "active", label: "Active" },
   { value: "disabled", label: "Disabled" },
   { value: "admin", label: "Admins" },
-  { value: "unverified", label: "Email not verified" },
-];
+  { value: "unverified", label: "Unverified" },
+] as const;
+
+type UserListStatus = (typeof USER_STATUS_FILTERS)[number]["value"] | "";
+
+function userStatusLabel(value: UserListStatus): string {
+  if (!value) return "All";
+  return USER_STATUS_FILTERS.find((f) => f.value === value)?.label ?? value;
+}
+
+function AdminUserStatusFilters({ value, onChange }: { value: UserListStatus; onChange: (v: UserListStatus) => void }) {
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={value === ""} onClick={() => onChange("")}
+                className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
+                  value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+          All
+        </button>
+        {USER_STATUS_FILTERS.map((f) => (
+          <button key={f.value} type="button" aria-pressed={value === f.value} onClick={() => onChange(value === f.value ? "" : f.value)}
+                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
+                    value === f.value ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function fullName(u: AdminUser): string {
   return [u.first_name, u.last_name].filter(Boolean).join(" ");
@@ -35,47 +63,80 @@ function usePlanOptions(first: { value: string; label: string }) {
 export function AdminUsersPage() {
   const [params] = useSearchParams();
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState(() => {
+  const [status, setStatus] = useState<UserListStatus>(() => {
     const initial = params.get("status") ?? "";
-    return STATUS_FILTERS.some((f) => f.value === initial) ? initial : "";
+    return USER_STATUS_FILTERS.some((f) => f.value === initial) ? (initial as UserListStatus) : "";
   });
   const [plan, setPlan] = useState("");
   const [page, setPage] = useState(1);
   const search = useDebounced(q.trim());
-  const planOptions = usePlanOptions({ value: "", label: "Any plan" });
+  const planOptions = usePlanOptions({ value: "", label: "All plans" });
   const query = { q: search || undefined, status: status || undefined, plan: plan || undefined, page, page_size: PAGE_SIZE };
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["admin", "users", query], queryFn: () => admin.users(query), placeholderData: keepPreviousData,
   });
-  const reset = (setter: (v: string) => void) => (v: string) => { setter(v); setPage(1); };
+  const resetPage = () => setPage(1);
+  const hasFilters = Boolean(search || status || plan);
+  const planLabel = planOptions.find((o) => o.value === plan)?.label;
 
   return (
     <>
-      <PageHeader title="Users" description="Everyone with an ApplyXAI account." />
+      <PageHeader title="Users" description="Accounts, plans, and activity across the platform." />
       <Card>
-        <FilterBar>
-          <div className="relative sm:col-span-2">
-            <TextInput label="Search" value={q} onChange={reset(setQ)} placeholder="Email or name" maxLength={200} className="pl-9" />
-            <Search className="pointer-events-none absolute bottom-2.5 left-3 h-4 w-4 text-slate-400" aria-hidden />
-          </div>
-          <Select label="Status" value={status} onChange={reset(setStatus)} options={STATUS_FILTERS} />
-          <Select label="Plan" value={plan} onChange={reset(setPlan)} options={planOptions} />
-        </FilterBar>
+        <div className="relative mb-6 max-w-xl">
+          <TextInput label="Search" value={q} onChange={(v) => { setQ(v); resetPage(); }}
+                     placeholder="Email or name" maxLength={200} className="pl-9" />
+          <Search className="pointer-events-none absolute bottom-2.5 left-3 h-4 w-4 text-slate-400" aria-hidden />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,14rem)] lg:items-end">
+          <AdminUserStatusFilters value={status} onChange={(v) => { setStatus(v); resetPage(); }} />
+          <Select label="Plan" value={plan} onChange={(v) => { setPlan(v); resetPage(); }} options={planOptions} />
+        </div>
+        {hasFilters && (
+          <p className="mt-3 text-xs text-slate-500">
+            Filtering{search ? ` for “${search}”` : ""}{status ? ` · ${userStatusLabel(status)}` : ""}{plan ? ` · ${planLabel ?? plan}` : ""}.{" "}
+            <button type="button" className="font-medium text-brand-700 hover:underline"
+                    onClick={() => { setQ(""); setStatus(""); setPlan(""); resetPage(); }}>Clear filters</button>
+          </p>
+        )}
+      </Card>
+
+      <div className="mt-6">
         {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : data.total === 0 ? (
-          <EmptyState icon={<Users className="h-10 w-10" />} title="No users match" />
+          <Card>
+            <EmptyState icon={<Users className="h-10 w-10" />} title="No users found">
+              {hasFilters ? "Try different search terms or clear filters." : "Users appear here when someone creates an account."}
+            </EmptyState>
+          </Card>
         ) : (
-          <>
-            <Table head={["User", "Plan", "Applied this month", "Joined", "Last login", ""]} dim={isFetching}>
+          <Card className={cx(isFetching && "opacity-70 transition-opacity")}>
+            <p className="mb-4 text-sm text-slate-600">
+              Showing <span className="font-medium text-slate-900">{data.items.length}</span> of{" "}
+              <span className="font-medium text-slate-900">{data.total.toLocaleString()}</span> users
+            </p>
+            <Table head={["User", "Plan", "Applications", "Joined", "Last sign-in", "Account"]} dim={isFetching}>
               {data.items.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50">
+                <tr key={u.id} className="hover:bg-slate-50/80">
                   <Td>
                     <UserLink id={u.id} email={u.email} />
-                    {fullName(u) && <p className="text-slate-500">{fullName(u)}</p>}
+                    {fullName(u) && <p className="text-sm text-slate-500">{fullName(u)}</p>}
                   </Td>
-                  <Td>{u.plan_name}</Td>
-                  <Td>{u.applications_this_month}</Td>
-                  <Td className="whitespace-nowrap">{formatDate(u.created_at)}</Td>
-                  <Td className="whitespace-nowrap">{u.last_login_at ? formatRelative(u.last_login_at) : "Never"}</Td>
+                  <Td>
+                    <p className="font-medium text-slate-900">{u.plan_name}</p>
+                    <p className="text-xs text-slate-500">{u.plan}</p>
+                  </Td>
+                  <Td className="tabular-nums text-slate-700">{u.applications_this_month.toLocaleString()}</Td>
+                  <Td className="whitespace-nowrap text-slate-600">{formatDate(u.created_at)}</Td>
+                  <Td className="whitespace-nowrap text-slate-600">
+                    {u.last_login_at ? (
+                      <>
+                        <p>{formatRelative(u.last_login_at)}</p>
+                        <p className="text-xs text-slate-500">{formatDateTime(u.last_login_at)}</p>
+                      </>
+                    ) : (
+                      <span className="text-slate-400">Never</span>
+                    )}
+                  </Td>
                   <Td>
                     <div className="flex flex-wrap gap-1">
                       {!u.is_active && <Badge tone="red">Disabled</Badge>}
@@ -87,9 +148,9 @@ export function AdminUsersPage() {
               ))}
             </Table>
             <Pagination page={data.page} pageSize={data.page_size} total={data.total} onPage={setPage} />
-          </>
+          </Card>
         )}
-      </Card>
+      </div>
     </>
   );
 }

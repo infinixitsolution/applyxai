@@ -374,6 +374,68 @@ export interface TestEmailResult {
   error: string;
 }
 
+export interface PlatformCms {
+  branding: {
+    app_name: string;
+    contact_email: string;
+    footer_line: string;
+    social_links: { twitter: string; linkedin: string; github: string };
+  };
+  banner: { enabled: boolean; message: string; tone: "info" | "warning" | "success" };
+  landing: {
+    hero_badge: string;
+    hero_title: string;
+    hero_subtitle: string;
+    hero_cta_primary: string;
+    hero_cta_secondary: string;
+    hero_footnote: string;
+    features_heading: string;
+    features: { icon: string; title: string; text: string }[];
+    steps_heading: string;
+    steps: { title: string; text: string }[];
+    pricing_heading: string;
+    pricing_subtitle: string;
+    faq_heading: string;
+    faq: { question: string; answer: string }[];
+    faq_contact_line: string;
+  };
+  legal: { privacy_md: string; terms_md: string; refund_md: string };
+}
+
+export interface AdminPlatformSettings {
+  cms: PlatformCms;
+  smtp: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    security: "ssl" | "starttls";
+    username: string;
+    from_address: string;
+    password_configured: boolean;
+    mode: "smtp" | "console";
+    source: "database" | "environment";
+  };
+  auth_email: {
+    require_verification: boolean;
+    verification_hours: number;
+    password_reset_minutes: number;
+    frontend_url: string;
+  };
+  notifications: Record<string, { email: boolean; label: string; description: string }>;
+  infrastructure: {
+    app_env: string;
+    app_version: string;
+    database: string;
+    redis_url_set: boolean;
+    cors_origins: string[];
+    payment_provider: string;
+    payment_keys_configured: boolean;
+  };
+  unverified_users: number;
+}
+
+export type PublicSite = Pick<PlatformCms, "branding" | "banner" | "landing" | "legal">;
+
 export interface AdminPlan extends Plan {
   is_active: boolean;
   sort_order: number;

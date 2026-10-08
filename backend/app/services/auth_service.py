@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.errors import AppError
+from backend.app.services import platform_settings_service as ps
 from backend.app.core.security import (
     burn_password_check, create_access_token, generate_token, hash_password, hash_token,
     password_needs_rehash, verify_password,
@@ -101,13 +102,14 @@ def register(db: Session, email: str, password: str, first_name: str, last_name:
     if db.scalar(select(User.id).where(User.email == email)) is not None:
         return None, None
 
+    auth = ps.get_effective_auth(db)
     user = User(email=email, password_hash=hash_password(password), first_name=first_name, last_name=last_name,
-                is_verified=not settings.REQUIRE_EMAIL_VERIFICATION)
+                is_verified=not auth.require_verification)
     db.add(user)
     db.flush()
     token = None
-    if settings.REQUIRE_EMAIL_VERIFICATION:
-        token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=settings.EMAIL_VERIFICATION_HOURS))
+    if auth.require_verification:
+        token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=auth.verification_hours))
     db.commit()
     logger.info("user registered", extra={"user_id": str(user.id), "event": "user_registered"})
     return user, token
@@ -133,7 +135,8 @@ def new_verification_token(db: Session, email: str) -> tuple[User | None, str | 
 def issue_verification_token(db: Session, user: User) -> str:
     """A new verification link; earlier links stop working. The caller commits."""
     invalidate_verification_tokens(db, user.id)
-    return _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=settings.EMAIL_VERIFICATION_HOURS))
+    auth = ps.get_effective_auth(db)
+    return _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=auth.verification_hours))
 
 
 def invalidate_verification_tokens(db: Session, user_id) -> None:
@@ -156,7 +159,8 @@ def login(db: Session, email: str, password: str) -> SessionTokens:
     # Only reachable with the correct password, so these don't reveal anything to a guesser.
     if not user.is_active:
         raise AppError("ACCOUNT_DISABLED", "This account has been disabled.", 403)
-    if settings.REQUIRE_EMAIL_VERIFICATION and not user.is_verified:
+    auth = ps.get_effective_auth(db)
+    if auth.require_verification and not user.is_verified:
         raise AppError("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in.", 403)
 
     if password_needs_rehash(user.password_hash):
@@ -214,7 +218,8 @@ def new_password_reset_token(db: Session, email: str) -> tuple[User | None, str 
     if user is None or not user.is_active:
         return None, None
     _invalidate_tokens(db, user.id, TokenPurpose.RESET_PASSWORD)
-    token = _issue_token(db, user, TokenPurpose.RESET_PASSWORD, timedelta(minutes=settings.PASSWORD_RESET_MINUTES))
+    auth = ps.get_effective_auth(db)
+    token = _issue_token(db, user, TokenPurpose.RESET_PASSWORD, timedelta(minutes=auth.password_reset_minutes))
     db.commit()
     return user, token
 

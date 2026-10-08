@@ -332,7 +332,7 @@ def test_test_email_reports_delivery(admin, outbox, db):
 def test_test_email_shows_the_smtp_error(admin, app):
     import smtplib
 
-    from backend.app.services.email_service import get_email_sender
+    from backend.app.api.deps import get_mailer
 
     class Broken:
         def deliver(self, email):
@@ -341,7 +341,7 @@ def test_test_email_shows_the_smtp_error(admin, app):
         def send(self, email):
             raise AssertionError("the test email must not be sent in the background")
 
-    app.dependency_overrides[get_email_sender] = lambda: Broken()
+    app.dependency_overrides[get_mailer] = lambda: Broken()
     out = data(send(admin, "POST", "/email/test", {}))
     assert out["delivered"] is False and out["error"].startswith("SMTPAuthenticationError")
     assert "not accepted" in out["error"]

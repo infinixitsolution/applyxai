@@ -222,6 +222,7 @@ Switching to another paid plan starts a new subscription; when it activates, the
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
+| GET | `/site/public` | Public. `{branding, banner, landing, legal}` for the marketing site (no auth) |
 | GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
 ## Admin
@@ -241,9 +242,14 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | POST | `/admin/automation-jobs/{id}/stop` | Stops the run after its current job; the user sees "stopped by ApplyXAI support". `RUN_FINISHED` 409 if it already ended |
 | GET | `/admin/applications` | Filters: `status`, `q` (title, company, or user email) |
 | GET | `/admin/logs` | Automation log lines from all runs. `level` can repeat (`?level=error&level=warning`, the default); `q` searches messages |
-| GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions: `user.update`, `user.verify`, `user.resend_verification`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop`, `email.test` |
+| GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions include `user.update`, `user.verify`, `user.resend_verification`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop`, `email.test`, `settings.cms`, `settings.smtp`, `settings.auth_email`, `settings.notifications` |
 | GET | `/admin/workers` | `{celery: {broker: ok or unreachable, workers}, devices}`. Never fails when Redis is down |
-| GET | `/admin/email` | `{mode: smtp or console, host, port, security: starttls or ssl, from, authenticated, require_verification, verification_hours, frontend_url, unverified_users}`. Never the SMTP username or password |
+| GET | `/admin/settings` | `{cms, smtp, auth_email, notifications, infrastructure, unverified_users}`. SMTP never includes the password; `smtp.password_configured` is boolean |
+| PUT | `/admin/settings/cms` | Full CMS document (branding, banner, landing, legal markdown). 30/hour per admin |
+| PUT | `/admin/settings/smtp` | `{enabled, host, port, username, password?, from_address}`. Empty `password` keeps the stored password; empty `host` clears DB SMTP and falls back to `.env` |
+| PUT | `/admin/settings/auth-email` | `{require_verification, verification_hours, password_reset_minutes, frontend_url}` |
+| PUT | `/admin/settings/notifications` | `{types: {event_type: {email: bool}}}` for known event types only |
+| GET | `/admin/email` | Legacy summary; prefer `/admin/settings`. `{mode, host, port, …, unverified_users}` |
 | POST | `/admin/email/test` | Body `{to?}` (defaults to the admin's address). Sends right away and returns `{delivered, mode, error}`; `error` is the mail server's reason when it refuses. 10/hour per admin |
 | POST | `/admin/users/{id}/verify-email` | Marks the address verified and voids outstanding verification links. `ALREADY_VERIFIED` 409 |
 | POST | `/admin/users/{id}/resend-verification` | Emails a new verification link; earlier links stop working. `ALREADY_VERIFIED` 409, `ACCOUNT_DISABLED` 409 |

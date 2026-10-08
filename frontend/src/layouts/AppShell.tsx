@@ -30,7 +30,7 @@ const ADMIN_NAV = [
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
   { to: "/admin/plans", label: "Plans", icon: Package },
-  { to: "/admin/system", label: "System", icon: ServerCog },
+  { to: "/admin/system", label: "Settings", icon: ServerCog },
 ];
 
 type Variant = "app" | "admin";

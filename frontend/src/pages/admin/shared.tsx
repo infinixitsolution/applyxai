@@ -1,19 +1,28 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { Badge, cx } from "../../components/ui";
 import { formatMoney } from "../../lib/format";
 import type { RunStatus, Subscription, SubscriptionStatus } from "../../types";
 
 export const PAGE_SIZE = 25;
 
-export function Stat({ icon, label, value, sub }: { icon?: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
-  return (
-    <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-center gap-2 text-sm text-slate-500">{icon}{label}</div>
+export function Stat({ icon, label, value, sub, to }: { icon?: ReactNode; label: string; value: ReactNode; sub?: ReactNode; to?: string }) {
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm text-slate-500">{icon}{label}</div>
+        {to && <ChevronRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" aria-hidden />}
+      </div>
       <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{value}</p>
-      {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
-    </div>
+      {sub && <p className="mt-1 text-xs leading-relaxed text-slate-500">{sub}</p>}
+    </>
   );
+  const className = "group rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200 transition-[box-shadow,ring-color] hover:shadow-md";
+  if (to) {
+    return <Link to={to} className={cx(className, "block hover:ring-brand-200")}>{body}</Link>;
+  }
+  return <div className={className}>{body}</div>;
 }
 
 /** A table that scrolls sideways on small screens instead of squashing columns. */
@@ -42,6 +51,10 @@ export function UserLink({ id, email }: { id: string; email: string }) {
 
 export const RUN_TONES: Record<RunStatus, "blue" | "amber" | "green" | "red" | "slate"> = {
   queued: "blue", running: "blue", paused: "amber", completed: "green", failed: "red", cancelled: "slate",
+};
+
+export const RUN_LABELS: Record<RunStatus, string> = {
+  queued: "Waiting", running: "Running", paused: "Paused", completed: "Finished", failed: "Failed", cancelled: "Stopped",
 };
 
 export const SUB_TONES: Record<SubscriptionStatus, "blue" | "amber" | "green" | "red" | "slate"> = {

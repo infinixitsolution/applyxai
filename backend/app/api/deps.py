@@ -11,6 +11,7 @@ from backend.app.core.errors import AppError
 from backend.app.core.security import decode_access_token
 from backend.app.models import AgentDevice, User
 from backend.app.services import agent_service
+from backend.app.services.email_service import EmailSender, get_email_sender
 
 
 def _unauthorized() -> AppError:
@@ -44,6 +45,10 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
         raise AppError("FORBIDDEN", "You don't have permission to do that.", 403)
     return user
+
+
+def get_mailer(db: Session = Depends(get_db)) -> EmailSender:
+    return get_email_sender(db)
 
 
 def client_ip(request: Request) -> str:

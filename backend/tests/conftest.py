@@ -16,13 +16,13 @@ else:
 
     import re
 
+    from backend.app.api.deps import get_mailer
     from backend.app.core.config import get_settings
     from backend.app.core.cookies import CSRF_COOKIE, CSRF_HEADER
     from backend.app.core.database import build_engine, get_db
     from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
     from backend.app.main import create_app
     from backend.app.models import Base
-    from backend.app.services.email_service import get_email_sender
 
     class Outbox:
         """Captures emails instead of sending them."""
@@ -80,7 +80,7 @@ else:
     @pytest.fixture
     def app(engine, outbox, limiter):
         application = create_app()
-        application.dependency_overrides[get_email_sender] = lambda: outbox
+        application.dependency_overrides[get_mailer] = lambda: outbox
         application.dependency_overrides[get_rate_limiter] = lambda: limiter
         factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 

@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RequireAdmin } from "../../auth/session";
 import { ToastProvider } from "../../components/Toast";
-import type { AdminPlan, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
+import type { AdminPlan, AdminPlatformSettings, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
 import { AdminRunsPage } from "./Lists";
 import { AdminPlansPage } from "./Plans";
 import { AdminSystemPage } from "./System";
@@ -35,6 +35,30 @@ const plans = [
   { code: "free", name: "Free", price_cents: 0, currency: "INR", interval: "month", limits: { applications_per_month: 10, resumes: 1 } },
   { code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month", limits: { applications_per_month: 100, resumes: 3 } },
 ];
+
+const adminSettings: AdminPlatformSettings = {
+  cms: {
+    branding: { app_name: "ApplyXAI", contact_email: "hello@example.com", footer_line: "", social_links: { twitter: "", linkedin: "", github: "" } },
+    banner: { enabled: false, message: "", tone: "info" },
+    landing: {
+      hero_badge: "", hero_title: "", hero_subtitle: "", hero_cta_primary: "", hero_cta_secondary: "", hero_footnote: "",
+      features_heading: "", features: [], steps_heading: "", steps: [], pricing_heading: "", pricing_subtitle: "",
+      faq_heading: "", faq: [], faq_contact_line: "",
+    },
+    legal: { privacy_md: "", terms_md: "", refund_md: "" },
+  },
+  smtp: {
+    enabled: true, host: "smtp.example.com", port: 587, security: "starttls", username: "mailer", from_address: "ApplyXAI <no-reply@example.com>",
+    password_configured: true, mode: "smtp", source: "environment",
+  },
+  auth_email: { require_verification: true, verification_hours: 24, password_reset_minutes: 60, frontend_url: "http://localhost:5173" },
+  notifications: { run_finished: { email: false, label: "Run finished", description: "When a run completes" } },
+  infrastructure: {
+    app_env: "development", app_version: "test", database: "sqlite", redis_url_set: false, cors_origins: ["http://localhost:5173"],
+    payment_provider: "null", payment_keys_configured: false,
+  },
+  unverified_users: 2,
+};
 
 const ok = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200 });
 
@@ -81,7 +105,7 @@ describe("admin area", () => {
     });
     renderAt("/admin/users", <Route path="/admin/users" element={<AdminUsersPage />} />);
     expect(await screen.findByRole("link", { name: "alice@example.com" })).toHaveAttribute("href", "/admin/users/u1");
-    await userEvent.selectOptions(screen.getByLabelText("Status"), "disabled");
+    await userEvent.click(screen.getByRole("button", { name: "Disabled" }));
     await vi.waitFor(() => expect(calls.some((c) => c.url.includes("status=disabled"))).toBe(true));
   });
 
@@ -153,20 +177,14 @@ describe("admin area", () => {
   it("sends a test email and shows the mail server's refusal", async () => {
     const calls = mockApi({
       "GET /api/auth/me": { user: me },
-      "GET /api/admin/email": {
-        mode: "smtp", host: "smtp.example.com", port: 587, security: "starttls", from: "ApplyXAI <no-reply@example.com>",
-        authenticated: true, require_verification: true, verification_hours: 24, frontend_url: "http://localhost:5173",
-        unverified_users: 2,
-      },
+      "GET /api/admin/settings": adminSettings,
       "POST /api/admin/email/test": { delivered: false, mode: "smtp", error: "SMTPAuthenticationError: bad login" },
-      "GET /api/admin/workers": { celery: { broker: "unreachable", workers: [] }, devices: [] },
-      "GET /api/admin/logs": { items: [], total: 0, page: 1, page_size: 25 },
-      "GET /api/admin/audit-log": { items: [], total: 0, page: 1, page_size: 25 },
     });
     renderAt("/admin/system", <Route path="/admin/system" element={<AdminSystemPage />} />);
-    expect(await screen.findByText("smtp.example.com:587 (STARTTLS)")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Email & SMTP" }));
+    expect(await screen.findByDisplayValue("smtp.example.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "2" })).toHaveAttribute("href", "/admin/users?status=unverified");
-    await userEvent.type(screen.getByLabelText("Send a test email to"), "ops@example.com");
+    await userEvent.type(screen.getByLabelText("To"), "ops@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Send test" }));
     expect(await screen.findByText(/SMTPAuthenticationError: bad login/)).toBeInTheDocument();
     expect(calls.find((c) => c.key === "POST /api/admin/email/test")?.body).toEqual({ to: "ops@example.com" });
@@ -201,7 +219,7 @@ describe("admin area", () => {
     renderAt("/admin/runs", <Route path="/admin/runs" element={<AdminRunsPage />} />);
     await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Stop run" }));
-    expect(await screen.findByText("Stopped by an admin")).toBeInTheDocument();
+    expect(await screen.findByText("Stopped by ApplyXAI support")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 });

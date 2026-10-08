@@ -99,8 +99,7 @@ class Settings(BaseSettings):
             problems.append("PAYMENT_PROVIDER 'null' grants plans for free and is not allowed")
         elif not (self.PAYMENT_KEY_ID and self.PAYMENT_SECRET and self.PAYMENT_WEBHOOK_SECRET):
             problems.append("PAYMENT_KEY_ID, PAYMENT_SECRET, and PAYMENT_WEBHOOK_SECRET must be set")
-        if not self.SMTP_HOST:
-            problems.append("SMTP_HOST must be set so verification and reset emails are delivered")
+        # SMTP may be configured in the admin settings table after deploy.
         if not self.cookie_secure:
             problems.append("COOKIE_SECURE cannot be disabled in production")
         if self.RATE_LIMIT_STORAGE_URL.startswith("memory"):

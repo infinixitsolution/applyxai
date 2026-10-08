@@ -1,6 +1,7 @@
 import type {
-  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, AdminPlatformSettings, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
   AdminUserDetail, AdminWorkers, AgentDevice, Answers, Application, ApplicationDetail, ApplicationStatus,
+  PlatformCms, PublicSite,
   AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, JobWithApplication, LogLevel,
   Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, RunLogLine, SearchConfig,
   SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
@@ -118,6 +119,10 @@ export const billing = {
 
 type Paged = { page?: number; page_size?: number };
 
+export const site = {
+  public: () => request<PublicSite>("/site/public"),
+};
+
 export const admin = {
   analytics: () => request<AdminAnalytics>("/admin/analytics"),
   users: (query: Paged & { q?: string; status?: string; plan?: string }) =>
@@ -137,6 +142,15 @@ export const admin = {
   logs: (query: Paged & { level: LogLevel[]; q?: string }) => request<Page<AdminLogLine>>("/admin/logs", { query }),
   audit: (query: Paged) => request<Page<AdminAuditEntry>>("/admin/audit-log", { query }),
   workers: () => request<AdminWorkers>("/admin/workers"),
+  settings: () => request<AdminPlatformSettings>("/admin/settings"),
+  updateCms: (body: PlatformCms) => request<{ cms: PlatformCms }>("/admin/settings/cms", { method: "PUT", body }),
+  updateSmtp: (body: {
+    enabled: boolean; host: string; port: number; username: string; password: string; from_address: string;
+  }) => request<{ smtp: AdminPlatformSettings["smtp"] }>("/admin/settings/smtp", { method: "PUT", body }),
+  updateAuthEmail: (body: AdminPlatformSettings["auth_email"]) =>
+    request<{ auth_email: AdminPlatformSettings["auth_email"] }>("/admin/settings/auth-email", { method: "PUT", body }),
+  updateNotifications: (body: { types: Record<string, { email: boolean }> }) =>
+    request<{ notifications: AdminPlatformSettings["notifications"] }>("/admin/settings/notifications", { method: "PUT", body }),
   email: () => request<AdminEmailStatus>("/admin/email"),
   testEmail: (to: string) => request<TestEmailResult>("/admin/email/test", { method: "POST", body: { to: to || null } }),
   verifyEmail: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/verify-email`, { method: "POST" }),
