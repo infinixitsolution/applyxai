@@ -11,7 +11,7 @@ import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminRun, type ApplicationStatus, type SubscriptionStatus } from "../../types";
-import { FilterBar, PAGE_SIZE, providerLabel, RUN_LABELS, RUN_TONES, SUB_LABELS, SubBadge, Table, Td, UserLink } from "./shared";
+import { PAGE_SIZE, providerLabel, RUN_LABELS, RUN_TONES, SUB_LABELS, SubBadge, Table, Td, UserLink } from "./shared";
 
 // ------------------------------------------------------------------------------------------ subscriptions
 const SUB_STATUSES: SubscriptionStatus[] = ["active", "pending", "past_due", "trialing", "cancelled", "expired"];
