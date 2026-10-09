@@ -67,13 +67,11 @@ export function BillingPage() {
       return { plan, status: confirmed.subscription.status };
     },
     onSuccess: ({ plan, status }) => {
-      setSwitchTo(null);
       refresh();
       if (status === "active" || status === "trialing") toast.success(`You're on the ${plan.name} plan now.`);
       else if (status !== "dismissed") setAwaiting(true);
     },
     onError: (e) => {
-      setSwitchTo(null);
       refresh();
       toast.error(checkoutError(e));
     },
@@ -146,7 +144,13 @@ export function BillingPage() {
       <ConfirmDialog
         open={switchTo !== null} onClose={() => setSwitchTo(null)} title={`Switch to ${switchTo?.name ?? ""}?`}
         confirmLabel={switchTo && sub ? `Pay ${formatMoney(switchTo.price_cents, switchTo.currency)}` : "Continue"}
-        loading={buy.isPending} onConfirm={() => switchTo && buy.mutate(switchTo)}
+        loading={buy.isPending}
+        onConfirm={() => {
+          if (!switchTo) return;
+          const plan = switchTo;
+          setSwitchTo(null);
+          buy.mutate(plan);
+        }}
         message={switchTo && sub ? (
           <>
             Your {sub.plan.name} plan ends as soon as the payment for {switchTo.name} goes through, and unused days
