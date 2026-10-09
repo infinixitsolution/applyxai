@@ -13,11 +13,14 @@ from backend.app.core.errors import AppError
 from backend.app.core.pagination import PageParams, page_response, paginate
 from backend.app.core.security import hash_password
 from backend.app.models import (
+    AssignmentStatus,
     CommissionStatus,
     Institute,
+    InstituteAssignment,
     InstituteStatus,
     KycStatus,
     Partner,
+    PartnerCommissionMode,
     PartnerAttribution,
     PartnerCampaign,
     PartnerCommission,
@@ -97,6 +100,9 @@ def create_by_admin(
     contact_name: str = "",
     phone: str = "",
     approve: bool = True,
+    commission_mode: PartnerCommissionMode = PartnerCommissionMode.PERCENT_PAYMENT,
+    commission_bps: int = 2000,
+    commission_flat_cents: int = 0,
 ) -> Partner:
     """Create a partner and its login. The contact can sign in immediately."""
     from backend.app.services.auth_service import normalize_email
@@ -119,6 +125,9 @@ def create_by_admin(
     partner = register(
         db, user, organization=organization, contact_name=contact_name or organization, phone=phone,
     )
+    partner.commission_mode = commission_mode
+    partner.commission_bps = max(0, min(int(commission_bps), 10_000))
+    partner.commission_flat_cents = max(0, int(commission_flat_cents))
     if approve:
         partner.status = PartnerStatus.APPROVED
         partner.kyc_status = KycStatus.NOT_REQUIRED
@@ -137,7 +146,9 @@ def partner_out(db: Session, partner: Partner) -> dict:
         "referral_code": partner.referral_code,
         "status": partner.status.value,
         "kyc_status": partner.kyc_status.value,
+        "commission_mode": partner.commission_mode.value,
         "commission_bps": partner.commission_bps,
+        "commission_flat_cents": partner.commission_flat_cents,
         "gstin": partner.gstin,
         "pan_number": partner.pan_number,
         "payout_account": partner.payout_account,
@@ -349,8 +360,59 @@ def add_kyc_document(db: Session, partner: Partner, filename: str, note: str = "
     return partner
 
 
-def update_by_admin(db: Session, partner: Partner, *, organization: str, contact_name: str = "", phone: str = "") -> Partner:
-    save_profile(db, partner, {"organization": organization, "contact_name": contact_name, "phone": phone})
+def update_by_admin(
+    db: Session,
+    partner: Partner,
+    *,
+    organization: str,
+    contact_name: str = "",
+    phone: str = "",
+    commission_mode: PartnerCommissionMode,
+    commission_bps: int,
+    commission_flat_cents: int = 0,
+    status: PartnerStatus,
+    kyc_status: KycStatus,
+    gstin: str = "",
+    pan_number: str = "",
+    payout_account: str = "",
+    payout_ifsc: str = "",
+    email: str | None = None,
+) -> Partner:
+    from backend.app.services.auth_service import normalize_email
+
+    partner.organization = organization.strip()[:190]
+    partner.contact_name = (contact_name or "").strip()[:190]
+    partner.phone = str(phone or "")[:32]
+    partner.commission_mode = commission_mode
+    partner.commission_bps = max(0, min(int(commission_bps), 10_000))
+    partner.commission_flat_cents = max(0, int(commission_flat_cents))
+    partner.status = status
+    partner.kyc_status = kyc_status
+    save_tax(
+        db,
+        partner,
+        {
+            "gstin": gstin,
+            "pan_number": pan_number,
+            "payout_account": payout_account,
+            "payout_ifsc": payout_ifsc,
+        },
+    )
+    if email is not None:
+        email_norm = normalize_email(email)
+        user = partner_user(db, partner)
+        if user is None:
+            raise AppError("NO_USER", "This partner has no login to attach an email to.", 400)
+        if user.email != email_norm:
+            if db.scalar(select(User.id).where(User.email == email_norm, User.id != user.id)) is not None:
+                raise AppError("EMAIL_TAKEN", "That email already has an account.", 409)
+            user.email = email_norm
+            contact = partner.contact_name.strip()
+            if contact:
+                first, _, last = contact.partition(" ")
+                user.first_name = (first or partner.organization)[:100]
+                user.last_name = last.strip()[:100]
+    db.flush()
     return partner
 
 
@@ -382,6 +444,33 @@ def commercial_ready(partner: Partner) -> bool:
     return partner.status in COMMERCIAL and partner.kyc_status in KYC_ELIGIBLE
 
 
+def _payment_commission(db: Session, partner: Partner, payment: Payment, sub: Subscription, institute: Institute) -> tuple[int, str] | None:
+    mode = partner.commission_mode
+    if mode == PartnerCommissionMode.FLAT_CANDIDATE:
+        return None
+    if mode == PartnerCommissionMode.PERCENT_PAYMENT:
+        amount = max(0, int(payment.amount_cents * partner.commission_bps / 10_000))
+        note = f"{institute.name} payment ({partner.commission_bps / 100:g}% of payment)"
+    elif mode == PartnerCommissionMode.FLAT_PAYMENT:
+        amount = max(0, int(partner.commission_flat_cents))
+        note = f"{institute.name} payment (flat per payment)"
+    elif mode == PartnerCommissionMode.FLAT_SEAT:
+        from backend.app.services import institute_service
+
+        seats = max(1, institute_service.seat_count_for_plan(sub.plan) if sub.plan else 1)
+        amount = max(0, int(partner.commission_flat_cents) * seats)
+        note = f"{institute.name} payment ({seats} seat{'s' if seats != 1 else ''} × flat rate)"
+    else:
+        return None
+    if amount <= 0:
+        return None
+    return amount, note[:255]
+
+
+def _commission_snapshot(partner: Partner) -> tuple[PartnerCommissionMode, int, int]:
+    return partner.commission_mode, partner.commission_bps, partner.commission_flat_cents
+
+
 def maybe_accrue_commission(db: Session, payment: Payment, sub: Subscription | None) -> PartnerCommission | None:
     if sub is None or sub.institute_id is None or payment is None:
         return None
@@ -397,9 +486,11 @@ def maybe_accrue_commission(db: Session, payment: Payment, sub: Subscription | N
     partner = db.get(Partner, institute.partner_id)
     if partner is None or not commercial_ready(partner):
         return None
-    amount = max(0, int(payment.amount_cents * partner.commission_bps / 10_000))
-    if amount <= 0:
+    computed = _payment_commission(db, partner, payment, sub, institute)
+    if computed is None:
         return None
+    amount, note = computed
+    mode, rate_bps, rate_flat = _commission_snapshot(partner)
     row = PartnerCommission(
         partner_id=partner.id,
         institute_id=institute.id,
@@ -407,9 +498,46 @@ def maybe_accrue_commission(db: Session, payment: Payment, sub: Subscription | N
         payment_id=payment.id,
         amount_cents=amount,
         currency=payment.currency or "INR",
-        rate_bps=partner.commission_bps,
+        commission_mode=mode,
+        rate_bps=rate_bps,
+        rate_flat_cents=rate_flat,
         status=CommissionStatus.ACCRUED,
-        note=f"{institute.name} payment",
+        note=note,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def maybe_accrue_candidate_commission(db: Session, assignment: InstituteAssignment) -> PartnerCommission | None:
+    if assignment.status != AssignmentStatus.ACTIVE:
+        return None
+    if db.scalar(select(PartnerCommission.id).where(PartnerCommission.assignment_id == assignment.id)):
+        return None
+    institute = db.get(Institute, assignment.institute_id)
+    if institute is None or institute.partner_id is None:
+        return None
+    partner = db.get(Partner, institute.partner_id)
+    if partner is None or not commercial_ready(partner):
+        return None
+    if partner.commission_mode != PartnerCommissionMode.FLAT_CANDIDATE:
+        return None
+    amount = max(0, int(partner.commission_flat_cents))
+    if amount <= 0:
+        return None
+    mode, rate_bps, rate_flat = _commission_snapshot(partner)
+    note = f"{institute.name} candidate {assignment.candidate_email} (active seat)"
+    row = PartnerCommission(
+        partner_id=partner.id,
+        institute_id=institute.id,
+        assignment_id=assignment.id,
+        amount_cents=amount,
+        currency="INR",
+        commission_mode=mode,
+        rate_bps=rate_bps,
+        rate_flat_cents=rate_flat,
+        status=CommissionStatus.ACCRUED,
+        note=note[:255],
     )
     db.add(row)
     db.flush()
@@ -422,7 +550,9 @@ def commission_out(row: PartnerCommission) -> dict:
         "institute_id": str(row.institute_id) if row.institute_id else None,
         "amount_cents": row.amount_cents,
         "currency": row.currency,
+        "commission_mode": row.commission_mode.value,
         "rate_bps": row.rate_bps,
+        "rate_flat_cents": row.rate_flat_cents,
         "status": row.status.value,
         "note": row.note,
         "created_at": _iso(row.created_at),

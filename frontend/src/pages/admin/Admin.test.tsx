@@ -442,7 +442,8 @@ describe("admin area", () => {
   it("creates a partner from the list page", async () => {
     const created = {
       id: "p1", user_id: "u2", organization: "Ally Partners", contact_name: "", phone: "",
-      referral_code: "ABCD1234", status: "approved", kyc_status: "not_required", commission_bps: 0,
+      referral_code: "ABCD1234", status: "approved", kyc_status: "not_required",
+      commission_mode: "percent_payment", commission_bps: 0, commission_flat_cents: 0,
       gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
     };
     const calls = mockApi({
@@ -472,7 +473,8 @@ describe("admin area", () => {
         items: [{
           id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
           phone: "555", referral_code: "WCR1", status: "approved", kyc_status: "not_required",
-          commission_bps: 1000, gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
+          commission_mode: "percent_payment", commission_bps: 1000, commission_flat_cents: 0,
+          gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
           kyc_documents: [], click_count: 0, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },
           created_at: "2026-10-09T00:00:00+00:00",
         }],
@@ -497,7 +499,8 @@ describe("admin area", () => {
     const partner = {
       id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
       phone: "555", referral_code: "WCR1", status: "approved", kyc_status: "not_required",
-      commission_bps: 1000, gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
+      commission_mode: "percent_payment", commission_bps: 1000, commission_flat_cents: 0,
+      gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
       kyc_documents: [], click_count: 0, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },
       created_at: "2026-10-09T00:00:00+00:00",
     };
@@ -513,7 +516,14 @@ describe("admin area", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
     await vi.waitFor(() => expect(calls.some((c) => c.key === "PUT /api/admin/partners/p1")).toBe(true));
     expect(calls.find((c) => c.key === "PUT /api/admin/partners/p1")?.body).toMatchObject({
-      organization: "Pacific Referral", contact_name: "Alex West", phone: "555",
+      organization: "Pacific Referral",
+      contact_name: "Alex West",
+      phone: "555",
+      commission_mode: "percent_payment",
+      commission_bps: 1000,
+      commission_flat_cents: 0,
+      status: "approved",
+      kyc_status: "not_required",
     });
   });
 
@@ -521,7 +531,8 @@ describe("admin area", () => {
     const partner = {
       id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
       phone: "", referral_code: "WCR1", status: "approved", kyc_status: "not_required",
-      commission_bps: 0, gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
+      commission_mode: "percent_payment", commission_bps: 0, commission_flat_cents: 0,
+      gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
       kyc_documents: [], click_count: 0, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },
       created_at: "2026-10-09T00:00:00+00:00",
     };
@@ -545,7 +556,8 @@ describe("admin area", () => {
     const partner = {
       id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
       phone: "", referral_code: "WCR1", status: "suspended", kyc_status: "not_required",
-      commission_bps: 0, gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
+      commission_mode: "percent_payment", commission_bps: 0, commission_flat_cents: 0,
+      gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
       kyc_documents: [], click_count: 0, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },
       created_at: "2026-10-09T00:00:00+00:00",
     };
@@ -568,7 +580,8 @@ describe("admin area", () => {
     const partner = {
       id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
       phone: "888", referral_code: "WEST01", status: "approved", kyc_status: "not_required",
-      commission_bps: 2000, gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
+      commission_mode: "percent_payment", commission_bps: 2000, commission_flat_cents: 0,
+      gstin: "", pan_number: "", payout_account: "", payout_ifsc: "",
       kyc_documents: [] as { filename: string; note: string; uploaded_at: string }[],
       click_count: 4, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },
       created_at: "2026-10-09T00:00:00+00:00",

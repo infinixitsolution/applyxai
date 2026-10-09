@@ -710,7 +710,9 @@ export interface Partner {
   referral_code: string;
   status: string;
   kyc_status: string;
+  commission_mode: string;
   commission_bps: number;
+  commission_flat_cents: number;
   gstin: string;
   pan_number: string;
   payout_account: string;
@@ -727,7 +729,9 @@ export interface PartnerCommission {
   institute_name?: string | null;
   amount_cents: number;
   currency: string;
+  commission_mode?: string;
   rate_bps: number;
+  rate_flat_cents?: number;
   status: string;
   note: string;
   created_at: string;

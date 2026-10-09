@@ -3,7 +3,8 @@
 from backend.app.models.base import Base
 from backend.app.models.enums import (
     OPEN_ASSIGNMENT_STATUSES, ApplicationStatus, AssignmentStatus, AutomationStatus, CommissionStatus,
-    InstituteMemberRole, InstituteStatus, KycStatus, PartnerStatus, PayoutStatus, PlanKind, SeatStatus,
+    InstituteMemberRole, InstituteStatus, KycStatus, PartnerCommissionMode, PartnerStatus, PayoutStatus, PlanKind,
+    SeatStatus,
     SubscriptionStatus, TokenPurpose,
 )
 from backend.app.models.user import User, UserProfile
@@ -28,7 +29,7 @@ __all__ = [
     "Base",
     "OPEN_ASSIGNMENT_STATUSES",
     "ApplicationStatus", "AssignmentStatus", "AutomationStatus", "CommissionStatus", "InstituteMemberRole",
-    "InstituteStatus", "KycStatus", "PartnerStatus", "PayoutStatus", "PlanKind", "SeatStatus",
+    "InstituteStatus", "KycStatus", "PartnerCommissionMode", "PartnerStatus", "PayoutStatus", "PlanKind", "SeatStatus",
     "SubscriptionStatus", "TokenPurpose",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
     "AgentConnectSession",

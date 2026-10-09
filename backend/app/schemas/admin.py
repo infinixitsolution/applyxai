@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from backend.app.models.enums import KycStatus, PartnerCommissionMode, PartnerStatus
 from backend.app.schemas.auth import _check_password
 
 
@@ -52,6 +53,9 @@ class PartnerCreateIn(BaseModel):
     contact_name: str = Field(default="", max_length=190)
     phone: str = Field(default="", max_length=32)
     approve: bool = True
+    commission_mode: PartnerCommissionMode = PartnerCommissionMode.PERCENT_PAYMENT
+    commission_bps: int = Field(default=2000, ge=0, le=10_000)
+    commission_flat_cents: int = Field(default=0, ge=0, le=100_000_000)
 
     _password = field_validator("password")(_check_password)
 
@@ -60,16 +64,47 @@ class PartnerCreateIn(BaseModel):
     def _strip(cls, value: str) -> str:
         return value.strip()
 
+    @model_validator(mode="after")
+    def _commission(self) -> "PartnerCreateIn":
+        if self.commission_mode == PartnerCommissionMode.PERCENT_PAYMENT:
+            return self
+        if self.commission_flat_cents <= 0:
+            raise ValueError("Enter a positive flat commission amount in INR.")
+        return self
+
 
 class PartnerUpdateIn(BaseModel):
     organization: str = Field(min_length=1, max_length=190)
     contact_name: str = Field(default="", max_length=190)
     phone: str = Field(default="", max_length=32)
+    commission_mode: PartnerCommissionMode
+    commission_bps: int = Field(ge=0, le=10_000)
+    commission_flat_cents: int = Field(ge=0, le=100_000_000)
+    status: PartnerStatus
+    kyc_status: KycStatus
+    gstin: str = Field(default="", max_length=15)
+    pan_number: str = Field(default="", max_length=10)
+    payout_account: str = Field(default="", max_length=255)
+    payout_ifsc: str = Field(default="", max_length=20)
+    email: EmailStr | None = None
 
-    @field_validator("organization", "contact_name", "phone")
+    @field_validator("organization", "contact_name", "phone", "payout_account")
     @classmethod
     def _strip(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("gstin", "pan_number", "payout_ifsc")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def _commission(self) -> "PartnerUpdateIn":
+        if self.commission_mode == PartnerCommissionMode.PERCENT_PAYMENT:
+            return self
+        if self.commission_flat_cents <= 0:
+            raise ValueError("Enter a positive flat commission amount in INR.")
+        return self
 
 
 class PlanUpdateIn(BaseModel):

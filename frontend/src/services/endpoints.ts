@@ -233,11 +233,32 @@ export const admin = {
   instituteLoginAs: (id: string) => request<{ user: User }>(`/admin/institutes/${id}/login-as`, { method: "POST" }),
   partners: (query: Paged & { q?: string; status?: string }) => request<Page<Partner>>("/admin/partners", { query }),
   createPartner: (body: {
-    organization: string; email: string; password: string; contact_name?: string; phone?: string; approve?: boolean;
+    organization: string;
+    email: string;
+    password: string;
+    contact_name?: string;
+    phone?: string;
+    approve?: boolean;
+    commission_mode?: string;
+    commission_bps?: number;
+    commission_flat_cents?: number;
   }) => request<Partner>("/admin/partners", { method: "POST", body }),
   partner: (id: string) => request<AdminPartnerDetail>(`/admin/partners/${id}`),
-  updatePartner: (id: string, body: { organization: string; contact_name?: string; phone?: string }) =>
-    request<Partner>(`/admin/partners/${id}`, { method: "PUT", body }),
+  updatePartner: (id: string, body: {
+    organization: string;
+    contact_name?: string;
+    phone?: string;
+    commission_mode: string;
+    commission_bps: number;
+    commission_flat_cents: number;
+    status: string;
+    kyc_status: string;
+    gstin?: string;
+    pan_number?: string;
+    payout_account?: string;
+    payout_ifsc?: string;
+    email?: string | null;
+  }) => request<Partner>(`/admin/partners/${id}`, { method: "PUT", body }),
   setPartnerStatus: (id: string, status: string) =>
     request<Partner>(`/admin/partners/${id}/status`, { method: "POST", body: { status } }),
   setPartnerKyc: (id: string, status: string) =>

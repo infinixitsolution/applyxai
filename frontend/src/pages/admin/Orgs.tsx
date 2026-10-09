@@ -3,7 +3,7 @@ import { ArrowLeft, Building2, GraduationCap, Layers, Mail, MousePointerClick, P
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { forgetUser, homeFor, useSetSession } from "../../auth/session";
-import { TextInput, Toggle } from "../../components/form";
+import { Select, TextInput, Toggle } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
@@ -721,6 +721,13 @@ const PARTNER_STATUS_FILTERS = [
   { value: "closed", label: "Closed" },
 ] as const;
 
+const PARTNER_KYC_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "verified", label: "Verified" },
+  { value: "rejected", label: "Rejected" },
+  { value: "not_required", label: "Not required" },
+] as const;
+
 type PartnerListStatus = (typeof PARTNER_STATUS_FILTERS)[number]["value"] | "";
 
 function partnerEnabled(status: string): boolean {
@@ -827,7 +834,7 @@ export function AdminPartnersPage() {
                     <p className="text-xs text-slate-400">Code {p.referral_code}</p>
                   </Td>
                   <Td>{kycBadge(p.kyc_status)}</Td>
-                  <Td className="tabular-nums text-slate-700">{rateLabel(p.commission_bps)}</Td>
+                  <Td className="tabular-nums text-slate-700">{commissionSummary(p)}</Td>
                   <Td className="whitespace-nowrap text-slate-600">{formatDate(p.created_at)}</Td>
                   <Td>{partnerBadge(p.status)}</Td>
                   <Td className="whitespace-nowrap">
@@ -872,8 +879,12 @@ function AddPartnerDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     organization: "", email: "", password: "", contact_name: "", phone: "", approve: true,
+    commission_mode: "percent_payment" as CommissionMode, commission_percent: "20", commission_inr: "",
   });
   const set = (key: keyof typeof form) => (value: string | boolean) => setForm((f) => ({ ...f, [key]: value }));
+  const commissionBps = percentInputToBps(form.commission_percent);
+  const commissionFlatCents = inrInputToCents(form.commission_inr);
+  const isPercent = form.commission_mode === "percent_payment";
   const save = useMutation({
     mutationFn: () => admin.createPartner({
       organization: form.organization.trim(),
@@ -882,6 +893,9 @@ function AddPartnerDialog({ onClose }: { onClose: () => void }) {
       contact_name: form.contact_name.trim(),
       phone: form.phone.trim(),
       approve: form.approve,
+      commission_mode: form.commission_mode,
+      commission_bps: isPercent ? (commissionBps ?? 2000) : 0,
+      commission_flat_cents: isPercent ? 0 : commissionFlatCents!,
     }),
     onSuccess: (partner) => {
       toast.success(`${partner.organization} added.`);
@@ -891,7 +905,8 @@ function AddPartnerDialog({ onClose }: { onClose: () => void }) {
     },
   });
   const errors = fieldErrors(save.error);
-  const invalid = !form.organization.trim() || !form.email.trim() || form.password.length < 10;
+  const invalid = !form.organization.trim() || !form.email.trim() || form.password.length < 10
+    || (isPercent ? commissionBps === null : commissionFlatCents === null);
 
   return (
     <Modal open onClose={onClose} title="Add partner" footer={
@@ -909,6 +924,16 @@ function AddPartnerDialog({ onClose }: { onClose: () => void }) {
         <TextInput label="Phone" value={form.phone} onChange={set("phone")} maxLength={32} error={errors.phone} />
         <TextInput label="Password" type="password" required value={form.password} onChange={set("password")}
                    error={errors.password} hint="At least 10 characters. Share this with the partner." />
+        <PartnerCommissionFields
+          mode={form.commission_mode}
+          onModeChange={(v) => setForm((f) => ({ ...f, commission_mode: v }))}
+          commissionPercent={form.commission_percent}
+          onCommissionPercent={set("commission_percent")}
+          commissionInr={form.commission_inr}
+          onCommissionInr={set("commission_inr")}
+          percentError={isPercent && commissionBps === null ? "Enter a percentage from 0 to 100." : undefined}
+          inrError={!isPercent && commissionFlatCents === null ? "Enter a positive amount in INR." : undefined}
+        />
         <Toggle label="Approve now" checked={form.approve} onChange={set("approve")}
                 hint="Approved partners can enroll institutes. KYC is marked as not required." />
       </div>
@@ -916,20 +941,48 @@ function AddPartnerDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EditPartnerDialog({ partner, onClose }: { partner: Partner; onClose: () => void }) {
+function EditPartnerDialog({ partner, onClose, loginEmail }: {
+  partner: Partner;
+  onClose: () => void;
+  loginEmail?: string | null;
+}) {
   const client = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
     organization: partner.organization,
     contact_name: partner.contact_name,
     phone: partner.phone,
+    commission_mode: (partner.commission_mode || "percent_payment") as CommissionMode,
+    commission_percent: bpsToPercentInput(partner.commission_bps),
+    commission_inr: centsToInrInput(partner.commission_flat_cents),
+    status: partner.status,
+    kyc_status: partner.kyc_status,
+    gstin: partner.gstin,
+    pan_number: partner.pan_number,
+    payout_account: partner.payout_account,
+    payout_ifsc: partner.payout_ifsc,
+    email: typeof loginEmail === "string" ? loginEmail : "",
   });
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
+  const commissionBps = percentInputToBps(form.commission_percent);
+  const commissionFlatCents = inrInputToCents(form.commission_inr);
+  const isPercent = form.commission_mode === "percent_payment";
+  const canEditLoginEmail = typeof loginEmail === "string";
   const save = useMutation({
     mutationFn: () => admin.updatePartner(partner.id, {
       organization: form.organization.trim(),
       contact_name: form.contact_name.trim(),
       phone: form.phone.trim(),
+      commission_mode: form.commission_mode,
+      commission_bps: isPercent ? commissionBps! : 0,
+      commission_flat_cents: isPercent ? 0 : commissionFlatCents!,
+      status: form.status,
+      kyc_status: form.kyc_status,
+      gstin: form.gstin.trim(),
+      pan_number: form.pan_number.trim(),
+      payout_account: form.payout_account.trim(),
+      payout_ifsc: form.payout_ifsc.trim(),
+      email: canEditLoginEmail ? form.email.trim() : undefined,
     }),
     onSuccess: (updated) => {
       toast.success(`${updated.organization} updated.`);
@@ -939,20 +992,66 @@ function EditPartnerDialog({ partner, onClose }: { partner: Partner; onClose: ()
     },
   });
   const errors = fieldErrors(save.error);
-  const invalid = !form.organization.trim();
+  const invalid = !form.organization.trim()
+    || (isPercent ? commissionBps === null : commissionFlatCents === null)
+    || (canEditLoginEmail && !form.email.trim());
 
   return (
-    <Modal open onClose={onClose} title="Edit partner" footer={
+    <Modal open onClose={onClose} title="Edit partner" wide footer={
       <>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Save changes</Button>
       </>
     }>
-      <div className="space-y-4">
+      <div className="space-y-6">
         {save.error && !Object.keys(errors).length && <Alert kind="error">{errorMessage(save.error)}</Alert>}
-        <TextInput label="Organisation" required value={form.organization} onChange={set("organization")} maxLength={190} error={errors.organization} />
-        <TextInput label="Contact name" value={form.contact_name} onChange={set("contact_name")} maxLength={190} error={errors.contact_name} />
-        <TextInput label="Phone" value={form.phone} onChange={set("phone")} maxLength={32} error={errors.phone} />
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Organisation</h3>
+          <TextInput label="Organisation" required value={form.organization} onChange={set("organization")} maxLength={190} error={errors.organization} />
+          <TextInput label="Contact name" value={form.contact_name} onChange={set("contact_name")} maxLength={190} error={errors.contact_name} />
+          <TextInput label="Phone" value={form.phone} onChange={set("phone")} maxLength={32} error={errors.phone} />
+          <TextInput label="Referral code" value={partner.referral_code} readOnly
+                     hint="System-assigned. Share the partner detail link for the full referral URL." />
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Account &amp; status</h3>
+          {canEditLoginEmail ? (
+            <TextInput label="Login email" type="email" required value={form.email} onChange={set("email")} error={errors.email}
+                       hint="Partner sign-in address." />
+          ) : loginEmail === null ? (
+            <p className="text-sm text-slate-500">No login account is linked to this partner.</p>
+          ) : (
+            <p className="text-sm text-slate-500">Open the partner detail page to edit the login email.</p>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select label="Partner status" value={form.status} onChange={set("status")}
+                    options={PARTNER_STATUS_FILTERS.map((o) => ({ value: o.value, label: o.label }))} />
+            <Select label="KYC status" value={form.kyc_status} onChange={set("kyc_status")}
+                    options={PARTNER_KYC_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} />
+          </div>
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Commission</h3>
+          <PartnerCommissionFields
+            mode={form.commission_mode}
+            onModeChange={(v) => setForm((f) => ({ ...f, commission_mode: v }))}
+            commissionPercent={form.commission_percent}
+            onCommissionPercent={set("commission_percent")}
+            commissionInr={form.commission_inr}
+            onCommissionInr={set("commission_inr")}
+            percentError={isPercent && commissionBps === null ? "Enter a percentage from 0 to 100." : undefined}
+            inrError={!isPercent && commissionFlatCents === null ? "Enter a positive amount in INR." : undefined}
+          />
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Tax &amp; payout</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextInput label="GSTIN" value={form.gstin} onChange={set("gstin")} maxLength={15} error={errors.gstin} />
+            <TextInput label="PAN" value={form.pan_number} onChange={set("pan_number")} maxLength={10} error={errors.pan_number} />
+          </div>
+          <TextInput label="Payout account" value={form.payout_account} onChange={set("payout_account")} maxLength={255} error={errors.payout_account} />
+          <TextInput label="Payout IFSC" value={form.payout_ifsc} onChange={set("payout_ifsc")} maxLength={20} error={errors.payout_ifsc} />
+        </section>
       </div>
     </Modal>
   );
@@ -986,8 +1085,86 @@ function kycBadge(status: string) {
   return <Badge tone={KYC_TONES[status] ?? "slate"}>{KYC_LABELS[status] ?? status}</Badge>;
 }
 
+const COMMISSION_MODES = [
+  { value: "percent_payment", label: "Percent of campus payment" },
+  { value: "flat_payment", label: "Fixed INR per payment" },
+  { value: "flat_seat", label: "Fixed INR per seat purchased" },
+  { value: "flat_candidate", label: "Fixed INR per active candidate" },
+] as const;
+
+type CommissionMode = (typeof COMMISSION_MODES)[number]["value"];
+
 function rateLabel(bps: number): string {
   return `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
+}
+
+function commissionSummary(p: Pick<Partner, "commission_mode" | "commission_bps" | "commission_flat_cents">): string {
+  switch (p.commission_mode) {
+    case "flat_payment":
+      return `${formatMoney(p.commission_flat_cents, "INR")} / payment`;
+    case "flat_seat":
+      return `${formatMoney(p.commission_flat_cents, "INR")} / seat`;
+    case "flat_candidate":
+      return `${formatMoney(p.commission_flat_cents, "INR")} / candidate`;
+    default:
+      return rateLabel(p.commission_bps ?? 0);
+  }
+}
+
+function bpsToPercentInput(bps: number): string {
+  const p = bps / 100;
+  return Number.isInteger(p) ? String(p) : p.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function percentInputToBps(raw: string): number | null {
+  const n = parseFloat(raw.trim());
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100);
+}
+
+function centsToInrInput(cents: number): string {
+  if (!cents) return "";
+  const rupees = cents / 100;
+  return Number.isInteger(rupees) ? String(rupees) : rupees.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function inrInputToCents(raw: string): number | null {
+  const n = parseFloat(raw.trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100);
+}
+
+function PartnerCommissionFields({ mode, onModeChange, commissionPercent, onCommissionPercent, commissionInr, onCommissionInr,
+  percentError, inrError }: {
+  mode: CommissionMode;
+  onModeChange: (value: CommissionMode) => void;
+  commissionPercent: string;
+  onCommissionPercent: (value: string) => void;
+  commissionInr: string;
+  onCommissionInr: (value: string) => void;
+  percentError?: string;
+  inrError?: string;
+}) {
+  const isPercent = mode === "percent_payment";
+  const flatHint = mode === "flat_payment"
+    ? "Paid once per successful referred campus subscription payment."
+    : mode === "flat_seat"
+      ? "Multiplied by seats in the campus plan for each payment."
+      : "Paid when a referred campus student accepts their seat and becomes active.";
+  return (
+    <div className="space-y-4">
+      <Select label="Commission basis" value={mode} onChange={(v) => onModeChange(v as CommissionMode)}
+              options={COMMISSION_MODES.map((o) => ({ value: o.value, label: o.label }))}
+              hint="Choose one basis. Changes apply to new accruals only." />
+      {isPercent ? (
+        <TextInput label="Commission rate (%)" required value={commissionPercent} onChange={onCommissionPercent}
+                   error={percentError} hint="Share of referred campus payment amount (0–100)." />
+      ) : (
+        <TextInput label="Commission amount (INR)" required value={commissionInr} onChange={onCommissionInr}
+                   error={inrError} hint={flatHint} />
+      )}
+    </div>
+  );
 }
 
 export function AdminPartnerPage() {
@@ -998,6 +1175,7 @@ export function AdminPartnerPage() {
   const client = useQueryClient();
   const [confirm, setConfirm] = useState<Pending | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const key = ["admin", "partner", id];
   const { data, isLoading, error } = useQuery({ queryKey: key, queryFn: () => admin.partner(id) });
 
@@ -1052,7 +1230,13 @@ export function AdminPartnerPage() {
       <PageHeader
         title={p.organization}
         description={[p.contact_name, `code ${p.referral_code}`, `joined ${formatDate(p.created_at)}`].filter(Boolean).join(" · ")}
-        actions={<span className="flex flex-wrap gap-1">{partnerBadge(p.status)}{kycBadge(p.kyc_status)}</span>}
+        actions={
+          <span className="flex flex-wrap items-center gap-2">
+            {partnerBadge(p.status)}
+            {kycBadge(p.kyc_status)}
+            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Edit partner</Button>
+          </span>
+        }
       />
 
       <div className="mb-6 flex flex-wrap gap-2">
@@ -1102,7 +1286,7 @@ export function AdminPartnerPage() {
               sub={`${data.campaigns.length} campaign${data.campaigns.length === 1 ? "" : "s"}`} />
         <Stat icon={<Wallet className="h-4 w-4" />} label="Available" value={formatMoney(p.wallet.available_cents, "INR")}
               sub={`${formatMoney(p.wallet.accrued_cents, "INR")} accrued · ${formatMoney(p.wallet.approved_cents, "INR")} approved`} />
-        <Stat icon={<Percent className="h-4 w-4" />} label="Commission rate" value={rateLabel(p.commission_bps)}
+        <Stat icon={<Percent className="h-4 w-4" />} label="Commission" value={commissionSummary(p)}
               sub={data.login?.last_login_at ? `Last signed in ${formatRelative(data.login.last_login_at)}` : "Never signed in"} />
       </div>
 
@@ -1115,6 +1299,7 @@ export function AdminPartnerPage() {
             <Row label="Phone">{p.phone || "—"}</Row>
             <Row label="GSTIN">{p.gstin || "—"}</Row>
             <Row label="PAN">{p.pan_number || "—"}</Row>
+            <Row label="Commission">{commissionSummary(p)}</Row>
           </dl>
         </Card>
 
@@ -1308,6 +1493,13 @@ export function AdminPartnerPage() {
       {resetting && (
         <ResetPartnerPasswordDialog partnerId={id} email={data.login?.email ?? p.contact_name}
                                     onClose={() => setResetting(false)} />
+      )}
+      {editing && (
+        <EditPartnerDialog
+          partner={p}
+          loginEmail={data.login ? data.login.email : null}
+          onClose={() => setEditing(false)}
+        />
       )}
     </>
   );

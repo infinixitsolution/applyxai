@@ -493,6 +493,9 @@ def accept_invite(db: Session, user: User, raw_token: str) -> InstituteAssignmen
         if seat is not None:
             seat.status = SeatStatus.ASSIGNED
     db.flush()
+    from backend.app.services import partner_service
+
+    partner_service.maybe_accrue_candidate_commission(db, assignment)
     return assignment
 
 

@@ -99,6 +99,13 @@ class KycStatus(str, enum.Enum):
     NOT_REQUIRED = "not_required"
 
 
+class PartnerCommissionMode(str, enum.Enum):
+    PERCENT_PAYMENT = "percent_payment"
+    FLAT_PAYMENT = "flat_payment"
+    FLAT_SEAT = "flat_seat"
+    FLAT_CANDIDATE = "flat_candidate"
+
+
 class CommissionStatus(str, enum.Enum):
     ACCRUED = "accrued"
     APPROVED = "approved"

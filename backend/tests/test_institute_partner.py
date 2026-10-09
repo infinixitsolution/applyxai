@@ -5,7 +5,7 @@ from sqlalchemy import select
 from backend.app.core.security import hash_password
 from backend.app.models import (
     AssignmentStatus, CommissionStatus, Institute, InstituteAssignment, InstituteSeat, InstituteStatus,
-    KycStatus, Partner, PartnerCommission, PartnerStatus, Payment, Plan, PlanKind, SeatStatus,
+    KycStatus, Partner, PartnerCommission, PartnerCommissionMode, PartnerStatus, Payment, Plan, PlanKind, SeatStatus,
     Subscription, SubscriptionStatus, User,
 )
 from backend.tests.conftest import PASSWORD, csrf_headers
@@ -235,6 +235,65 @@ def test_commission_accrues_only_when_approved_and_kyc(api, db, outbox):
     assert partner_service.maybe_accrue_commission(db, payment, sub) is None
 
 
+def test_commission_flat_per_payment(api, db):
+    from backend.app.services import partner_service
+
+    _register(api, "ally@example.com", "partner", organization="Ally", agreed=True)
+    partner = db.scalars(select(Partner)).one()
+    partner.status = PartnerStatus.APPROVED
+    partner.kyc_status = KycStatus.VERIFIED
+    partner.commission_mode = PartnerCommissionMode.FLAT_PAYMENT
+    partner.commission_flat_cents = 50000
+    db.flush()
+
+    institute = Institute(name="Flat Pay U", email="flat@example.com", status=InstituteStatus.ACTIVE, partner_id=partner.id, source="referral")
+    db.add(institute)
+    db.flush()
+    campus = db.scalar(select(Plan).where(Plan.code == "campus"))
+    if campus is None:
+        from backend.app.services import billing_service
+        billing_service.seed_plans(db)
+        db.commit()
+        campus = db.scalar(select(Plan).where(Plan.code == "campus"))
+    payer = db.scalar(select(User).where(User.email == "ally@example.com"))
+    sub = Subscription(user_id=payer.id, institute_id=institute.id, plan_id=campus.id, plan=campus,
+                       status=SubscriptionStatus.ACTIVE, provider="razorpay")
+    db.add(sub)
+    db.flush()
+    payment = Payment(user_id=payer.id, subscription_id=sub.id, provider="razorpay",
+                      provider_payment_id="pay_flat_1", amount_cents=49900, currency="INR", status="captured")
+    db.add(payment)
+    db.flush()
+    row = partner_service.maybe_accrue_commission(db, payment, sub)
+    assert row is not None and row.amount_cents == 50000
+
+
+def test_commission_flat_per_candidate(api, db):
+    from backend.app.services import partner_service
+
+    _register(api, "ally@example.com", "partner", organization="Ally", agreed=True)
+    partner = db.scalars(select(Partner)).one()
+    partner.status = PartnerStatus.APPROVED
+    partner.kyc_status = KycStatus.VERIFIED
+    partner.commission_mode = PartnerCommissionMode.FLAT_CANDIDATE
+    partner.commission_flat_cents = 25000
+    db.flush()
+
+    institute = Institute(name="Flat Cand U", email="cand@example.com", status=InstituteStatus.ACTIVE, partner_id=partner.id, source="referral")
+    db.add(institute)
+    db.flush()
+    assignment = InstituteAssignment(
+        institute_id=institute.id,
+        candidate_email="student@example.com",
+        status=AssignmentStatus.ACTIVE,
+    )
+    db.add(assignment)
+    db.flush()
+    row = partner_service.maybe_accrue_candidate_commission(db, assignment)
+    assert row is not None and row.amount_cents == 25000
+    assert partner_service.maybe_accrue_candidate_commission(db, assignment) is None
+
+
 def test_admin_impersonate_writes_audit(api, db, outbox):
     from backend.app.models import AdminAction
     _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
@@ -341,13 +400,31 @@ def test_admin_updates_partner(api, db):
     }, headers=csrf_headers(admin))
     partner_id = created.json()["data"]["id"]
     updated = admin.put(f"/api/admin/partners/{partner_id}", json={
-        "organization": "Pacific Referral", "contact_name": "Alex Pacific", "phone": "999",
+        "organization": "Pacific Referral",
+        "contact_name": "Alex Pacific",
+        "phone": "999",
+        "commission_mode": "percent_payment",
+        "commission_bps": 2000,
+        "commission_flat_cents": 0,
+        "status": "approved",
+        "kyc_status": "not_required",
+        "gstin": "29ABCDE1234F1Z5",
+        "pan_number": "ABCDE1234F",
+        "payout_account": "1234567890",
+        "payout_ifsc": "HDFC0001234",
+        "email": "pacific@admin.edu",
     }, headers=csrf_headers(admin))
     assert updated.status_code == 200, updated.text
     data = updated.json()["data"]
     assert data["organization"] == "Pacific Referral"
     assert data["contact_name"] == "Alex Pacific"
     assert data["phone"] == "999"
+    assert data["gstin"] == "29ABCDE1234F1Z5"
+    assert data["pan_number"] == "ABCDE1234F"
+    assert data["payout_account"] == "1234567890"
+    assert data["payout_ifsc"] == "HDFC0001234"
+    detail = admin.get(f"/api/admin/partners/{partner_id}")
+    assert detail.json()["data"]["login"]["email"] == "pacific@admin.edu"
 
 
 def test_admin_creates_partner(api, db):
