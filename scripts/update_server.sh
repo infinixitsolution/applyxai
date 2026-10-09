@@ -18,7 +18,7 @@ git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 AFTER="$(git rev-parse HEAD)"
 
-./venv/bin/pip install -q -r requirements.txt
+./venv/bin/pip install -q -r requirements.txt -r backend/requirements.txt
 
 if [[ -f backend/alembic.ini ]]; then
   ./venv/bin/alembic -c backend/alembic.ini upgrade head
