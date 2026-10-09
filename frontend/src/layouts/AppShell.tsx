@@ -8,6 +8,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { useSession, useSetSession } from "../auth/session";
 import { Logo } from "../components/Logo";
 import { AgentDownloadButton } from "../components/AgentDownloadButton";
+import { CandidateWelcomeModal } from "../features/CandidateWelcomeModal";
 import { NotificationBell } from "../components/NotificationBell";
 import { cx } from "../components/ui";
 import { auth } from "../services/endpoints";
@@ -129,6 +130,7 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
 
   return (
     <div className="min-h-screen bg-[#f4f7ff] font-sans text-slate-900">
+      {variant === "app" && <CandidateWelcomeModal />}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white/95 backdrop-blur md:flex">
         <div className="flex h-16 items-center px-6"><Brand variant={variant} /></div>
         <SidebarNav variant={variant} />

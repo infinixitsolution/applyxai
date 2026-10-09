@@ -7,6 +7,7 @@ import { Logo } from "../components/Logo";
 import { Button, Card, cx, Spinner } from "../components/ui";
 import { ApplicationPreferencesForm } from "../features/ApplicationPreferencesForm";
 import { ProfileForm } from "../features/ProfileForm";
+import { CandidateWelcomeModal } from "../features/CandidateWelcomeModal";
 import { ResumeManager } from "../features/ResumeManager";
 import { SearchPreferencesForm } from "../features/SearchPreferencesForm";
 import { profile as profileApi, resumes as resumesApi } from "../services/endpoints";
@@ -54,6 +55,7 @@ export function OnboardingPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <CandidateWelcomeModal />
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-16 max-w-3xl items-center px-3 sm:px-4"><Logo to="/onboarding" /></div>
       </header>
