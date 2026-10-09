@@ -39,12 +39,13 @@ async def _lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    public_docs = settings.APP_ENV != "production"
     app = FastAPI(
         title=f"{settings.APP_NAME} API",
         version=settings.APP_VERSION,
-        docs_url="/api/docs",
+        docs_url="/api/docs" if public_docs else None,
         redoc_url=None,
-        openapi_url="/api/openapi.json",
+        openapi_url="/api/openapi.json" if public_docs else None,
         lifespan=_lifespan,
     )
     app.add_middleware(CSRFMiddleware)

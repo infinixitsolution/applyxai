@@ -264,7 +264,11 @@ def record_payment(db: Session, provider: PaymentProvider, user_id: uuid.UUID, s
 def checkout(db: Session, user: User, provider: PaymentProvider, plan_code: str,
              institute_id: uuid.UUID | None = None) -> dict:
     from backend.app.models.enums import PlanKind
+    from backend.app.core.plans import is_public_checkout_plan
+
     plan = get_plan(db, plan_code)
+    if not is_public_checkout_plan(plan.code):
+        raise AppError("PLAN_NOT_AVAILABLE", "That plan is not available for self-service checkout.", 400)
     wanted = PlanKind.INSTITUTE if institute_id else PlanKind.PERSONAL
     if getattr(plan, "kind", PlanKind.PERSONAL) != wanted:
         raise AppError("WRONG_PLAN_KIND", "That plan is not available for this workspace.", 400)

@@ -491,6 +491,14 @@ def sync_platform_defaults(db: Session) -> bool:
             )
         changed = True
 
+    cms = row.cms or {}
+    contact = (cms.get("branding") or {}).get("contact_email") or ""
+    if contact.strip() in ("", "support@applyxai.example"):
+        merged_cms = _deep_merge(dict(DEFAULT_CMS), cms)
+        merged_cms.setdefault("branding", {})["contact_email"] = "support@applyxai.com"
+        row.cms = merged_cms
+        changed = True
+
     if changed:
         invalidate_caches()
     return changed

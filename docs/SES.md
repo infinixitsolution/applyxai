@@ -2,6 +2,17 @@
 
 ApplyXAI sends mail as **`no-reply@applyxai.com`**. That needs **Amazon SES** in the same region as your server: **ap-southeast-2 (Sydney)**.
 
+### Mail Manager SMTP (current production path)
+
+If you created an **ingress SMTP endpoint** in SES Mail Manager (host like `*.mail-manager-smtp.amazonaws.com`):
+
+1. Download the **CSV** from AWS when you create SMTP credentials — use the **username and password exactly as shown** (do not run `ses_smtp_password.py`; that is for legacy IAM SMTP only).
+2. Admin → **Settings → Email & SMTP**: host, port **587**, username, password, From `ApplyXAI <no-reply@applyxai.com>`.
+3. Or copy `ses-smtp.env.example` → `ses-smtp.env` locally and run `.\scripts\apply_smtp_ec2.ps1`.
+4. Restart backend after `.env` changes: `sudo systemctl restart applyxai-backend`.
+
+**Accepted by mail server** in Admin means SMTP auth worked; check Gmail spam and SES **production access** if the message never arrives.
+
 ## Do this once (about 15 minutes)
 
 ### 1. Run the setup script on your PC

@@ -6,13 +6,21 @@ authoritative. Prices are never referenced outside this catalogue and that table
 
 FREE_PLAN = "free"
 
+# Not listed on /api/plans and not available via self-service checkout (admin grants only).
+INTERNAL_PLAN_CODES: frozenset[str] = frozenset({"unlimited"})
+
+
+def is_public_checkout_plan(code: str) -> bool:
+    return code not in INTERNAL_PLAN_CODES
+
+
 PLAN_LIMITS: dict[str, dict] = {
     "free":    {"name": "Free",    "kind": "personal", "applications_per_month": 10,   "resumes": 1,  "price_cents": 0},
     "starter": {"name": "Starter", "kind": "personal", "applications_per_month": 100,  "resumes": 3,  "price_cents": 49900},
     "pro":     {"name": "Pro",     "kind": "personal", "applications_per_month": 500,  "resumes": 10, "price_cents": 99900},
     "premium": {"name": "Premium", "kind": "personal", "applications_per_month": 1500, "resumes": 20, "price_cents": 199900},
     # Internal / admin-grant only — not sold via checkout; complimentary grants use this code.
-    "unlimited": {"name": "Unlimited", "kind": "personal", "applications_per_month": 999_999, "resumes": 999, "price_cents": 199900},
+    "unlimited": {"name": "Unlimited", "kind": "personal", "applications_per_month": 999_999, "resumes": 999, "price_cents": 0},
     "campus":     {"name": "Campus",     "kind": "institute", "applications_per_month": 100,  "resumes": 3,  "seats": 10, "price_cents": 49900},
     "campus_pro": {"name": "Campus Pro", "kind": "institute", "applications_per_month": 500,  "resumes": 10, "seats": 50, "price_cents": 199900},
 }

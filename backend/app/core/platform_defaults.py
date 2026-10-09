@@ -5,7 +5,7 @@ PLATFORM_SETTINGS_KEY = "default"
 DEFAULT_CMS: dict = {
     "branding": {
         "app_name": "ApplyXAI",
-        "contact_email": "support@applyxai.example",
+        "contact_email": "support@applyxai.com",
         "footer_line": "",
         "social_links": {"twitter": "", "linkedin": "", "github": ""},
     },

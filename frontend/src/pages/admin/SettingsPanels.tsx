@@ -303,7 +303,7 @@ function SmtpTab({ smtp, auth, unverified }: { smtp: AdminPlatformSettings["smtp
         {test.data && (
           !test.data.delivered ? <Alert kind="error">Refused: {test.data.error}</Alert>
             : test.data.mode === "console" ? <Alert kind="info">Printed in the API console.</Alert>
-            : <Alert kind="success">Accepted by the mail server.</Alert>
+            : <Alert kind="success">Accepted by the mail server. If nothing arrives in a few minutes, check spam and SES production access.</Alert>
         )}
       </Card>
       <Card title="Quick reference">

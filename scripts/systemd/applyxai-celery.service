@@ -1,0 +1,16 @@
+[Unit]
+Description=ApplyXAI Celery worker and beat (housekeeping, daily reports)
+After=network.target redis.service postgresql.service applyxai-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/applyxai
+Environment="PATH=/home/ubuntu/applyxai/venv/bin"
+EnvironmentFile=/home/ubuntu/applyxai/.env
+ExecStart=/home/ubuntu/applyxai/venv/bin/celery -A backend.app.worker worker --beat --loglevel=info
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
