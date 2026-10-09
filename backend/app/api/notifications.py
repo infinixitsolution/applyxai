@@ -8,8 +8,8 @@ from backend.app.core.database import get_db
 from backend.app.core.errors import ok
 from backend.app.core.pagination import PageParams, page_params, page_response, paginate
 from backend.app.models import User
-from backend.app.schemas.activity import NotificationOut
-from backend.app.services import notification_service
+from backend.app.schemas.activity import NotificationOut, NotificationPreferencesIn
+from backend.app.services import notification_service, preferences_service
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 

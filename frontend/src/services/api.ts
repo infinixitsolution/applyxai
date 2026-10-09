@@ -81,7 +81,25 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     body = JSON.stringify(options.body);
   }
   if (!SAFE_METHODS.has(method)) headers[CSRF_HEADER] = readCookie(CSRF_COOKIE);
-  return fetch(buildUrl(path, options.query), { method, headers, body, credentials: "same-origin" });
+  const timeoutMs = 25_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(buildUrl(path, options.query), {
+      method, headers, body, credentials: "same-origin", signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(
+        "TIMEOUT",
+        "The server took too long to respond. Make sure the API is running (see docs/DEVELOPMENT.md).",
+        0,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function parse<T>(response: Response): Promise<T> {

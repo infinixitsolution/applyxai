@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 import uuid
 
+from backend.app.core.errors import AppError
+from backend.app.core.platform_defaults import DEFAULT_NOTIFICATIONS
 from backend.app.models import ApplicationPreferences, SearchConfig, User, UserProfile
+from backend.app.schemas.activity import NotificationPreferencesIn
+from backend.app.services import platform_settings_service as ps
 from backend.app.schemas.application_preferences import (
     DEFAULT_DENY,
     MAX_HUMAN_QUESTIONS,
@@ -278,3 +282,37 @@ def update_application(db: Session, user: User, changes: dict) -> dict:
 
     db.commit()
     return application_document(db, user)
+
+
+def _ensure_profile(db: Session, user: User) -> UserProfile:
+    if user.profile is None:
+        user.profile = UserProfile(user_id=user.id)
+        db.add(user.profile)
+        db.flush()
+    return user.profile
+
+
+def get_notification_preferences(db: Session, user: User) -> dict:
+    profile = _ensure_profile(db, user)
+    stored = profile.notification_email or {}
+    platform = ps.get_notification_prefs(db)
+    types: dict = {}
+    for key, meta in platform.items():
+        types[key] = {
+            "email": bool(stored.get(key, True)),
+            "label": meta.get("label", key),
+            "description": meta.get("description", ""),
+        }
+    return {"types": types}
+
+
+def update_notification_preferences(db: Session, user: User, payload: NotificationPreferencesIn) -> dict:
+    profile = _ensure_profile(db, user)
+    stored = dict(profile.notification_email or {})
+    for key, value in payload.types.items():
+        if key not in DEFAULT_NOTIFICATIONS:
+            raise AppError("VALIDATION_ERROR", f"Unknown notification type: {key}", 422)
+        stored[key] = value.email
+    profile.notification_email = stored
+    db.commit()
+    return get_notification_preferences(db, user)

@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from automation import events as ev
-from backend.app.models import ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus
+from backend.app.models import Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus
 from backend.app.services import application_service, notification_service, preferences_service
 
 _STATUS_FOR_OUTCOME = {
@@ -82,10 +82,30 @@ def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
         resume_id = application_service.resolve_applied_resume_id(
             db, user_id, job, event_resume_id=None, external_job_id=job_id,
         )
+    existing = db.scalar(
+        select(Application).where(Application.user_id == user_id, Application.job_id == job.id)
+    )
+    was_applied = existing is not None and existing.status == ApplicationStatus.APPLIED
     application_service.record_application(
         db, user_id, job, status, automation_job_id=run.id if run else None,
         resume_id=resume_id, failure_reason=reason, applied_at=applied_at, count_usage=count_usage,
     )
+    if status == ApplicationStatus.APPLIED and not was_applied:
+        title = _text(details.get("title"), 200) or job.title
+        company = _text(details.get("company"), 200) or job.company
+        location = _text(details.get("work_location"), 200) or job.location
+        notification_service.notify_event(
+            db,
+            user_id,
+            "job_applied",
+            link="/app/applications",
+            variables={
+                "job_title": title,
+                "company": company or "—",
+                "location": location or "—",
+                "message": f"You applied to {_job_label(details)}.",
+            },
+        )
 
 
 def _stopped_message(stop_reason: str) -> str:
@@ -155,7 +175,10 @@ def _finish(db: Session, run: AutomationJob, event: dict, at: datetime) -> None:
             body += f" {len(need)} LinkedIn question(s) need your answer — open Automation to fill them in."
     title = {AutomationStatus.FAILED: "Automation run stopped with an error",
              AutomationStatus.CANCELLED: "Automation run stopped"}.get(run.status, "Automation run finished")
-    notification_service.notify(db, run.user_id, "run_finished", title, body, "/app/automation?pending=1")
+    notification_service.notify_event(
+        db, run.user_id, "run_finished", link="/app/automation?pending=1",
+        variables={"title": title, "message": body},
+    )
 
 
 def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,

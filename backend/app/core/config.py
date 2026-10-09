@@ -72,6 +72,24 @@ class Settings(BaseSettings):
     def _blank_database_url_means_default(cls, value):
         return value if value not in (None, "") else _DEFAULT_DATABASE_URL
 
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def _resolve_sqlite_relative_to_project(cls, value: str) -> str:
+        """Anchor `sqlite:///storage/...` to the repo root, not the process cwd (avoids backend/ vs root split)."""
+        prefix = "sqlite:///"
+        if not value.startswith(prefix):
+            return value
+        rest = value[len(prefix) :].replace("\\", "/")
+        if rest.startswith("/") or (len(rest) > 1 and rest[1] == ":"):
+            return value
+        # Strip leading `./` or `../` so `sqlite:///../storage/applyxai.db` still lands in project storage.
+        while rest.startswith("../"):
+            rest = rest[3:]
+        while rest.startswith("./"):
+            rest = rest[2:]
+        resolved = (PROJECT_ROOT / rest).resolve().as_posix()
+        return f"{prefix}{resolved}"
+
     @field_validator("COOKIE_SECURE", mode="before")
     @classmethod
     def _blank_means_auto(cls, value):

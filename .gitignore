@@ -23,6 +23,7 @@ apikeys.py
 .env
 .env.*
 !.env.example
+ses-smtp.env
 runs/
 storage/
 *.db

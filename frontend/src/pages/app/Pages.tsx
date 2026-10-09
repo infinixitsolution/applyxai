@@ -57,6 +57,45 @@ export function ProfilePage() {
   );
 }
 
+function NotificationEmailPrefs() {
+  const qc = useQueryClient();
+  const { data, isLoading, error } = useQuery({ queryKey: ["notifications", "preferences"], queryFn: notifications.preferences });
+  const [local, setLocal] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (data) setLocal(Object.fromEntries(Object.entries(data.types).map(([k, v]) => [k, v.email])));
+  }, [data]);
+  const save = useMutation({
+    mutationFn: () => notifications.updatePreferences({
+      types: Object.fromEntries(Object.entries(local).map(([k, email]) => [k, { email }])),
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications", "preferences"] }),
+  });
+  if (isLoading) return <Spinner />;
+  if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
+  return (
+    <Card title="Email notifications">
+      <p className="mb-4 text-sm text-slate-600">In-app notifications always appear in the bell. Choose which events may also email you (when the platform has email enabled).</p>
+      <ul className="divide-y divide-slate-100">
+        {Object.entries(data.types).map(([key, row]) => (
+          <li key={key} className="flex items-start gap-3 py-3">
+            <input type="checkbox" className="mt-1" checked={local[key] ?? row.email} aria-label={`Email for ${row.label}`}
+                   onChange={(e) => setLocal((n) => ({ ...n, [key]: e.target.checked }))} />
+            <span>
+              <span className="block font-medium text-slate-900">{row.label}</span>
+              <span className="block text-sm text-slate-500">{row.description}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4">
+        <Button loading={save.isPending} onClick={() => save.mutate()}>Save preferences</Button>
+        {save.isSuccess && <span className="ml-3 text-sm text-green-700">Saved.</span>}
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const { data: user } = useSession();
   const setSession = useSetSession();
@@ -94,6 +133,7 @@ export function SettingsPage() {
           <p className="mb-4 text-sm text-slate-600">Signed in somewhere you don't recognise? Sign out everywhere, including this browser.</p>
           <Button variant="danger" onClick={() => setConfirmAll(true)}>Log out of all devices</Button>
         </Card>
+        <NotificationEmailPrefs />
       </div>
       <ConfirmDialog open={confirmAll} onClose={() => setConfirmAll(false)} title="Log out everywhere?" danger
                      confirmLabel="Log out everywhere" loading={logoutAll.isPending} onConfirm={() => logoutAll.mutate()}

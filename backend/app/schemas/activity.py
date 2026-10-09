@@ -86,3 +86,11 @@ class NotificationOut(BaseModel):
     link: str
     read_at: datetime | None
     created_at: datetime
+
+
+class NotificationPrefTypeIn(BaseModel):
+    email: bool
+
+
+class NotificationPreferencesIn(BaseModel):
+    types: dict[str, NotificationPrefTypeIn]

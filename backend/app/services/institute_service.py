@@ -496,7 +496,52 @@ def accept_invite(db: Session, user: User, raw_token: str) -> InstituteAssignmen
     from backend.app.services import partner_service
 
     partner_service.maybe_accrue_candidate_commission(db, assignment)
+    notify_invite_accepted(db, assignment)
     return assignment
+
+
+def notify_candidate_invited(db: Session, institute: Institute, candidate_email: str, raw_token: str) -> None:
+    from backend.app.models import User
+    from backend.app.services import notification_service
+
+    user = db.scalar(select(User).where(User.email == candidate_email.lower().strip()))
+    if user is None:
+        return
+    link = f"/invite/{raw_token}"
+    notification_service.notify_event(
+        db,
+        user.id,
+        "institute_invite",
+        link=link,
+        variables={
+            "institute_name": institute.name,
+            "message": f"{institute.name} reserved a seat for you. Open the invitation to accept.",
+        },
+    )
+
+
+def notify_invite_accepted(db: Session, assignment: InstituteAssignment) -> None:
+    from backend.app.models.enums import InstituteMemberRole
+    from backend.app.services import notification_service
+
+    institute = db.get(Institute, assignment.institute_id)
+    if institute is None:
+        return
+    admins = db.scalars(
+        select(InstituteMember).where(
+            InstituteMember.institute_id == institute.id,
+            InstituteMember.role == InstituteMemberRole.ADMIN,
+        )
+    ).all()
+    message = f"{assignment.candidate_email} joined {institute.name}."
+    for member in admins:
+        notification_service.notify_event(
+            db,
+            member.user_id,
+            "institute_invite_accepted",
+            link="/institute/students",
+            variables={"candidate_email": assignment.candidate_email, "institute_name": institute.name, "message": message},
+        )
 
 
 def release_assignment(db: Session, institute: Institute, assignment_id: uuid.UUID) -> InstituteAssignment:

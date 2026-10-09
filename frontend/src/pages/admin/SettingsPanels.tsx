@@ -1,16 +1,17 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../auth/session";
-import { ChipSelect, TextInput, Toggle } from "../../components/form";
+import { ChipSelect, TextArea, TextInput, Toggle } from "../../components/form";
+import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, cx } from "../../components/ui";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { agentServerUrl } from "../../lib/config";
-import { errorMessage } from "../../services/api";
+import { ApiError, errorMessage } from "../../services/api";
 import { admin } from "../../services/endpoints";
-import type { AdminPlatformSettings, LogLevel, PlatformCms } from "../../types";
+import type { AdminPlatformSettings, AuthEmailTemplate, EmailTemplates, EventNotificationTemplate, LogLevel, PlatformCms } from "../../types";
 import { FilterBar, PAGE_SIZE, Table, Td, UserLink } from "./shared";
 
 const SETTINGS_KEY = ["admin", "settings"] as const;
@@ -19,6 +20,7 @@ const TABS = [
   { id: "smtp", label: "Email & SMTP" },
   { id: "auth", label: "Auth & verification" },
   { id: "notifications", label: "Notifications" },
+  { id: "templates", label: "Templates" },
   { id: "ai", label: "AI" },
   { id: "payments", label: "Payments" },
   { id: "integrations", label: "Integrations" },
@@ -48,14 +50,27 @@ export function AdminSettingsPage() {
           </button>
         ))}
       </nav>
-      {query.isLoading ? <Spinner /> : query.error || !query.data ? (
-        <Alert kind="error">{errorMessage(query.error)}</Alert>
+      {query.isPending ? <Spinner /> : query.error ? (
+        <Alert kind="error">
+          {errorMessage(query.error)}
+          {query.error instanceof ApiError && query.error.status > 0 && (
+            <span className="mt-1 block text-xs text-slate-500">HTTP {query.error.status} · {query.error.code}</span>
+          )}
+        </Alert>
+      ) : !query.data ? (
+        <Alert kind="error">Settings data was empty. Restart the API after pulling the latest code.</Alert>
       ) : (
         <>
           {tab === "cms" && <CmsTab data={query.data.cms} />}
           {tab === "smtp" && <SmtpTab smtp={query.data.smtp} auth={query.data.auth_email} unverified={query.data.unverified_users} />}
           {tab === "auth" && <AuthTab auth={query.data.auth_email} unverified={query.data.unverified_users} />}
           {tab === "notifications" && <NotificationsTab notifications={query.data.notifications} />}
+          {tab === "templates" && (
+            <TemplatesTab
+              templates={query.data.email_templates ?? { auth: {}, events: {} }}
+              notifications={query.data.notifications}
+            />
+          )}
           {tab === "ai" && <AiTab ai={query.data.ai} />}
           {tab === "payments" && <PaymentsTab payments={query.data.payments} />}
           {tab === "integrations" && <IntegrationsTab infra={query.data.infrastructure} smtp={query.data.smtp} ai={query.data.ai} payments={query.data.payments} />}
@@ -275,7 +290,10 @@ function NotificationsTab({ notifications }: { notifications: AdminPlatformSetti
   });
   return (
     <Card title="Email notifications">
-      <p className="mb-4 text-sm text-slate-600">In-app notifications are always on. Enable email per event when SMTP is configured and the user is verified.</p>
+      <p className="mb-4 text-sm text-slate-600">
+        In-app notifications are always on. Enable email per event when SMTP is configured and the user is verified.
+        Edit subject and body copy on the Templates tab.
+      </p>
       <Table head={["Event", "Description", "Email"]}>
         {Object.entries(local).map(([key, row]) => (
           <tr key={key}>
@@ -290,6 +308,436 @@ function NotificationsTab({ notifications }: { notifications: AdminPlatformSetti
       </Table>
       <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
       {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+    </Card>
+  );
+}
+
+const TEMPLATE_PLACEHOLDER_HINT =
+  "Auth placeholders: {app_name}, {link}, {verification_hours}, {password_reset_minutes}, {institute_name}.";
+
+const AUTH_TEMPLATE_LABELS: Record<string, string> = {
+  verify_email: "Verify email",
+  password_reset: "Password reset",
+  account_exists: "Account already exists",
+  institute_invite: "Institute invitation",
+};
+
+/** Per-event placeholders shown in the Templates editor (merged with global {app_name}, {link_url}). */
+const EVENT_TEMPLATE_PLACEHOLDERS: Record<string, string> = {
+  run_finished: "{title}, {message}",
+  limit_reached: "{message}",
+  plan_active: "{plan_name}, {message}",
+  payment_failed: "{plan_name}, {message}",
+  plan_ended: "{plan_name}, {message}",
+  plan_cancelled: "{plan_name}, {message}",
+  plan_granted: "{plan_name}, {message}",
+  admin_broadcast: "{title}, {body}",
+  institute_invite: "{institute_name}, {message}",
+  institute_invite_accepted: "{candidate_email}, {message}",
+  partner_commission: "{message}",
+  job_applied: "{job_title}, {company}, {location}, {message}",
+  daily_report: "{report_date}, {message}, {summary}, {applied_count}, {failed_count}, {skipped_count}, {external_count}",
+};
+
+function mergeEmailTemplatesFromServer(
+  templates: EmailTemplates,
+  notifications: AdminPlatformSettings["notifications"],
+): EmailTemplates {
+  const events = { ...templates.events };
+  for (const key of Object.keys(notifications)) {
+    if (!events[key]) {
+      events[key] = {
+        in_app_title: "",
+        in_app_body: "",
+        email_subject: "",
+        email_body: "",
+        email_html: "",
+      };
+    }
+  }
+  return { auth: { ...templates.auth }, events };
+}
+
+type TemplateModalMode = "view" | "edit" | "add";
+
+function templatePreview(subject: string, max = 72) {
+  const t = subject.trim();
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+}
+
+function TemplateActionButtons({
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Button variant="secondary" className="!px-2 !py-1 text-xs" onClick={onView}>View</Button>
+      <Button variant="secondary" className="!px-2 !py-1 text-xs" onClick={onEdit}>Edit</Button>
+      <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={onDelete}>Delete</Button>
+    </div>
+  );
+}
+
+function TemplatesTab({
+  templates,
+  notifications,
+}: {
+  templates: EmailTemplates;
+  notifications: AdminPlatformSettings["notifications"];
+}) {
+  const qc = useQueryClient();
+  const { data: session } = useSession();
+  const [local, setLocal] = useState(templates);
+  const [saved, setSaved] = useState(false);
+  const serverDefaults = useRef(templates);
+  useEffect(() => {
+    const merged = mergeEmailTemplatesFromServer(templates, notifications);
+    serverDefaults.current = merged;
+    setLocal(merged);
+  }, [templates, notifications]);
+
+  const [authModal, setAuthModal] = useState<{ open: boolean; mode: TemplateModalMode; key: string; draft: AuthEmailTemplate }>({
+    open: false, mode: "view", key: "", draft: { subject: "", body: "", html: "" },
+  });
+  const [eventModal, setEventModal] = useState<{
+    open: boolean; mode: TemplateModalMode; key: string; draft: EventNotificationTemplate;
+  }>({ open: false, mode: "view", key: "", draft: { in_app_title: "", in_app_body: "", email_subject: "", email_body: "", email_html: "" } });
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: "auth" | "event"; key: string } | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => admin.updateEmailTemplates(local),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: SETTINGS_KEY }); setSaved(true); },
+  });
+  const testAuth = useMutation({
+    mutationFn: (kind: string) => admin.testEmailTemplate({ kind, to: session?.user.email }),
+  });
+
+  const openAuth = (mode: TemplateModalMode, key: string) => {
+    const draft = { ...local.auth[key] };
+    setAuthModal({ open: true, mode, key, draft });
+  };
+
+  const openAuthAdd = () => {
+    const firstKey = Object.keys(local.auth)[0] ?? "verify_email";
+    setAuthModal({
+      open: true,
+      mode: "add",
+      key: firstKey,
+      draft: { subject: "", body: "", html: "" },
+    });
+  };
+
+  const saveAuthModal = () => {
+    const { key, draft } = authModal;
+    setLocal((t) => ({ ...t, auth: { ...t.auth, [key]: { ...draft } } }));
+    setAuthModal((m) => ({ ...m, open: false }));
+  };
+
+  const eventTemplateFor = (key: string): EventNotificationTemplate =>
+    local.events[key] ?? serverDefaults.current.events[key] ?? {
+      in_app_title: "", in_app_body: "", email_subject: "", email_body: "", email_html: "",
+    };
+
+  const openEvent = (mode: TemplateModalMode, key: string) => {
+    setEventModal({ open: true, mode, key, draft: { ...eventTemplateFor(key) } });
+  };
+
+  const openEventAdd = () => {
+    const firstKey = Object.keys(notifications)[0] ?? "";
+    const src = local.events[firstKey] ?? {
+      in_app_title: "", in_app_body: "", email_subject: "", email_body: "", email_html: "",
+    };
+    setEventModal({ open: true, mode: "add", key: firstKey, draft: { ...src, in_app_title: "", in_app_body: "", email_subject: "", email_body: "", email_html: "" } });
+  };
+
+  const saveEventModal = () => {
+    const { key, draft } = eventModal;
+    setLocal((t) => ({ ...t, events: { ...t.events, [key]: { ...draft } } }));
+    setEventModal((m) => ({ ...m, open: false }));
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const defaults = serverDefaults.current;
+    if (deleteTarget.kind === "auth") {
+      const key = deleteTarget.key;
+      setLocal((t) => ({
+        ...t,
+        auth: { ...t.auth, [key]: { ...(defaults.auth[key] ?? { subject: "", body: "", html: "" }) } },
+      }));
+    } else {
+      const key = deleteTarget.key;
+      setLocal((t) => ({
+        ...t,
+        events: { ...t.events, [key]: { ...(defaults.events[key] ?? t.events[key]) } },
+      }));
+    }
+    setDeleteTarget(null);
+  };
+
+  const authReadOnly = authModal.mode === "view";
+
+  return (
+    <div className="space-y-6">
+      <Card
+        title="Auth email templates"
+        actions={<Button onClick={openAuthAdd}>Add</Button>}
+      >
+        <p className="mb-4 text-sm text-slate-600">{TEMPLATE_PLACEHOLDER_HINT}</p>
+        <Table head={["Template", "Subject", "Actions"]}>
+          {Object.entries(local.auth).map(([key, row]) => (
+            <tr key={key}>
+              <Td>
+                <p className="font-medium text-slate-900">{AUTH_TEMPLATE_LABELS[key] ?? key.replace(/_/g, " ")}</p>
+                <p className="text-xs text-slate-500">{key}</p>
+              </Td>
+              <Td className="max-w-md text-slate-600">{templatePreview(row.subject) || "—"}</Td>
+              <Td>
+                <TemplateActionButtons
+                  onView={() => openAuth("view", key)}
+                  onEdit={() => openAuth("edit", key)}
+                  onDelete={() => setDeleteTarget({ kind: "auth", key })}
+                />
+              </Td>
+            </tr>
+          ))}
+        </Table>
+        {testAuth.data && (
+          <div className="mt-4">
+            <Alert kind={testAuth.data.delivered ? "success" : "error"}>
+              {testAuth.data.delivered ? "Test email sent." : testAuth.data.error || "Delivery failed."}
+            </Alert>
+          </div>
+        )}
+        {testAuth.error && <div className="mt-4"><Alert kind="error">{errorMessage(testAuth.error)}</Alert></div>}
+      </Card>
+
+      <Card
+        title="Notification event copy"
+        actions={<Button onClick={openEventAdd}>Add</Button>}
+      >
+        <p className="mb-4 text-sm text-slate-600">
+          In-app and email text per event. Global: {"{app_name}"}, {"{link_url}"}. Each event has its own fields — open View/Edit to see placeholders for that row.
+        </p>
+        <Table head={["Event", "In-app title", "Actions"]}>
+          {Object.entries(notifications).map(([key, meta]) => (
+            <tr key={key}>
+              <Td>
+                <p className="font-medium text-slate-900">{meta.label}</p>
+                <p className="text-xs text-slate-500">{key}</p>
+              </Td>
+              <Td className="max-w-md text-slate-600">{templatePreview(local.events[key]?.in_app_title ?? "") || "—"}</Td>
+              <Td>
+                <TemplateActionButtons
+                  onView={() => openEvent("view", key)}
+                  onEdit={() => openEvent("edit", key)}
+                  onDelete={() => setDeleteTarget({ kind: "event", key })}
+                />
+              </Td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+
+      <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
+      {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+
+      <Modal
+        open={authModal.open}
+        wide
+        onClose={() => setAuthModal((m) => ({ ...m, open: false }))}
+        title={
+          authModal.mode === "view" ? "View auth template"
+            : authModal.mode === "add" ? "Add auth template"
+              : "Edit auth template"
+        }
+        footer={
+          authReadOnly ? (
+            <Button variant="secondary" onClick={() => setAuthModal((m) => ({ ...m, open: false }))}>Close</Button>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setAuthModal((m) => ({ ...m, open: false }))}>Cancel</Button>
+              <Button onClick={saveAuthModal}>{authModal.mode === "add" ? "Add" : "Save"}</Button>
+            </>
+          )
+        }
+      >
+        {authModal.mode === "add" ? (
+          <label className="mb-3 block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Template</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={authModal.key}
+              onChange={(e) => {
+                const key = e.target.value;
+                setAuthModal((m) => ({ ...m, key, draft: { subject: "", body: "", html: "" } }));
+              }}
+            >
+              {Object.keys(local.auth).map((k) => (
+                <option key={k} value={k}>{AUTH_TEMPLATE_LABELS[k] ?? k}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="mb-3 text-sm text-slate-600">
+            <span className="font-medium text-slate-800">{AUTH_TEMPLATE_LABELS[authModal.key] ?? authModal.key}</span>
+            <span className="text-slate-400"> · {authModal.key}</span>
+          </p>
+        )}
+        <div className="grid gap-3">
+          <TextInput label="Subject" value={authModal.draft.subject} readOnly={authReadOnly}
+                     onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, subject: v } }))} maxLength={500} />
+          <TextArea label="Plain body" value={authModal.draft.body} readOnly={authReadOnly} rows={8}
+                    onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, body: v } }))} />
+          <TextArea label="HTML (optional)" value={authModal.draft.html} readOnly={authReadOnly} rows={4}
+                    onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, html: v } }))} />
+          {!authReadOnly && (
+            <Button variant="secondary" loading={testAuth.isPending} onClick={() => testAuth.mutate(authModal.key)}>
+              Send test email
+            </Button>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={eventModal.open}
+        wide
+        onClose={() => setEventModal((m) => ({ ...m, open: false }))}
+        title={
+          eventModal.mode === "view" ? "View event template"
+            : eventModal.mode === "add" ? "Add event template"
+              : "Edit event template"
+        }
+        footer={
+          eventModal.mode === "view" ? (
+            <Button variant="secondary" onClick={() => setEventModal((m) => ({ ...m, open: false }))}>Close</Button>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setEventModal((m) => ({ ...m, open: false }))}>Cancel</Button>
+              <Button onClick={saveEventModal}>{eventModal.mode === "add" ? "Add" : "Save"}</Button>
+            </>
+          )
+        }
+      >
+        {eventModal.mode === "add" ? (
+          <label className="mb-3 block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Event</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={eventModal.key}
+              onChange={(e) => {
+                const key = e.target.value;
+                setEventModal((m) => ({ ...m, key, draft: { ...eventTemplateFor(key) } }));
+              }}
+            >
+              {Object.entries(notifications).map(([k, meta]) => (
+                <option key={k} value={k}>{meta.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="mb-3 text-sm text-slate-600">
+            <span className="font-medium text-slate-800">{notifications[eventModal.key]?.label ?? eventModal.key}</span>
+            {notifications[eventModal.key]?.description && (
+              <span className="mt-1 block text-xs text-slate-500">{notifications[eventModal.key].description}</span>
+            )}
+            {EVENT_TEMPLATE_PLACEHOLDERS[eventModal.key] && (
+              <span className="mt-2 block text-xs text-slate-500">
+                Placeholders: {EVENT_TEMPLATE_PLACEHOLDERS[eventModal.key]}, {"{app_name}"}, {"{link_url}"}
+              </span>
+            )}
+          </p>
+        )}
+        <div className="grid gap-3">
+          <TextInput label="In-app title" value={eventModal.draft.in_app_title} readOnly={eventModal.mode === "view"}
+                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, in_app_title: v } }))} maxLength={500} />
+          <TextArea label="In-app body" value={eventModal.draft.in_app_body} readOnly={eventModal.mode === "view"} rows={3}
+                    onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, in_app_body: v } }))} />
+          <TextInput label="Email subject" value={eventModal.draft.email_subject} readOnly={eventModal.mode === "view"}
+                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_subject: v } }))} maxLength={500} />
+          <TextArea label="Email body" value={eventModal.draft.email_body} readOnly={eventModal.mode === "view"} rows={4}
+                    onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_body: v } }))} />
+          <TextArea label="Email HTML (optional)" value={eventModal.draft.email_html} readOnly={eventModal.mode === "view"} rows={3}
+                    onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_html: v } }))} />
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Reset template?"
+        danger
+        confirmLabel="Reset"
+        onConfirm={confirmDelete}
+        message="This restores the template text to what was last loaded from the server. Click Save changes on this page to persist."
+      />
+    </div>
+  );
+}
+
+function BroadcastNotificationsCard() {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [link, setLink] = useState("/app/notifications");
+  const [userQuery, setUserQuery] = useState("");
+  const [selected, setSelected] = useState<{ id: string; email: string }[]>([]);
+  const [confirm, setConfirm] = useState(false);
+  const search = useDebounced(userQuery.trim());
+  const { data: usersPage } = useQuery({
+    queryKey: ["admin", "users", "broadcast", search],
+    queryFn: () => admin.users({ q: search || undefined, page: 1, page_size: 8 }),
+    enabled: search.length >= 2,
+  });
+  const send = useMutation({
+    mutationFn: () => admin.broadcastNotifications({
+      title: title.trim(),
+      body: body.trim(),
+      link: link.trim(),
+      user_ids: selected.map((u) => u.id),
+    }),
+    onSuccess: () => { setConfirm(false); setTitle(""); setBody(""); setSelected([]); },
+  });
+
+  const addUser = (u: { id: string; email: string }) => {
+    if (selected.some((s) => s.id === u.id)) return;
+    setSelected((s) => [...s, u]);
+  };
+
+  return (
+    <Card title="Broadcast notification">
+      <p className="mb-4 text-sm text-slate-600">Send an in-app announcement (and email if enabled) to selected users.</p>
+      <div className="grid max-w-xl gap-3">
+        <TextInput label="Title" value={title} onChange={setTitle} maxLength={255} />
+        <TextArea label="Message" value={body} onChange={setBody} rows={4} maxLength={5000} />
+        <TextInput label="In-app link" value={link} onChange={setLink} maxLength={512} hint="Must start with / e.g. /app/billing" />
+        <TextInput label="Find users by email" value={userQuery} onChange={setUserQuery} maxLength={200} />
+        {usersPage?.items.length ? (
+          <ul className="rounded-lg border border-slate-200 text-sm">
+            {usersPage.items.map((u) => (
+              <li key={u.id}>
+                <button type="button" className="block w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => addUser({ id: u.id, email: u.email })}>
+                  {u.email}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {selected.length > 0 && (
+          <p className="text-sm text-slate-600">Recipients: {selected.map((u) => u.email).join(", ")}</p>
+        )}
+        <Button disabled={!title.trim() || selected.length === 0} onClick={() => setConfirm(true)}>Send broadcast</Button>
+      </div>
+      {send.data && <Alert kind="success">Sent to {send.data.sent} user(s).</Alert>}
+      {send.error && <Alert kind="error">{errorMessage(send.error)}</Alert>}
+      <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="Send broadcast?"
+                     confirmLabel="Send" loading={send.isPending}
+                     onConfirm={() => send.mutate()}
+                     message={`This will notify ${selected.length} user(s) in-app.`} />
     </Card>
   );
 }
@@ -546,9 +994,7 @@ function IntegrationsTab({ infra, smtp, ai, payments }: {
 function OperationsTab() {
   return (
     <div className="space-y-6">
-      <Workers />
-      <Logs />
-      <AuditLog />
+      <BroadcastNotificationsCard />
     </div>
   );
 }
@@ -657,6 +1103,9 @@ const ACTION_LABELS: Record<string, string> = {
   "user.verify": "Marked email verified", "user.resend_verification": "Resent verification email",
   "settings.cms": "Updated CMS", "settings.smtp": "Updated SMTP", "settings.auth_email": "Updated auth email",
   "settings.notifications": "Updated notification toggles",
+  "settings.email_templates": "Updated email templates",
+  "notifications.broadcast": "Broadcast notification",
+  "email.test_template": "Sent template test email",
 };
 
 function describe(details: Record<string, unknown>): string {

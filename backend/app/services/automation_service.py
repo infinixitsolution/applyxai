@@ -72,7 +72,10 @@ def _end(db: Session, run: AutomationJob, status: AutomationStatus, message: str
     _log(db, run, "error" if status == AutomationStatus.FAILED else "info", ev.RUN_FINISHED, message)
     if notify:
         title = "Automation run stopped with an error" if status == AutomationStatus.FAILED else "Automation run stopped"
-        notification_service.notify(db, run.user_id, "run_finished", title, message, "/automation")
+        notification_service.notify_event(
+            db, run.user_id, "run_finished", link="/automation",
+            variables={"title": title, "message": message},
+        )
 
 
 # --------------------------------------------------------------------------- user side
@@ -349,9 +352,15 @@ def ingest_batch(db: Session, device: AgentDevice, run_id: uuid.UUID, first_seq:
             _log(db, run, "warning", ev.LIMIT_REACHED,
                  "You've reached this month's application limit. Stopping after the current job."
                  if is_active(run) else "You've reached this month's application limit.")
-        notification_service.notify(db, run.user_id, "limit_reached", "Monthly application limit reached",
-                                    "Your automation run stopped. Upgrade your plan to keep applying this month.",
-                                    "/billing")
+        notification_service.notify_event(
+            db,
+            run.user_id,
+            "limit_reached",
+            link="/billing",
+            variables={
+                "message": "Your automation run stopped. Upgrade your plan to keep applying this month.",
+            },
+        )
     db.flush()
     return {"next_seq": run.event_seq + 1, "control": run.control if is_active(run) else CONTROL_STOP,
             "status": run.status.value, "remaining_applications": remaining}

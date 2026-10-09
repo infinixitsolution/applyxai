@@ -7,6 +7,7 @@ UPDATES = {
     "FRONTEND_URL": "https://applyxai.com",
     "CORS_ORIGINS": "https://applyxai.com,https://www.applyxai.com",
     "COOKIE_SECURE": "true",
+    "SMTP_FROM": "ApplyXAI <no-reply@applyxai.com>",
 }
 
 

@@ -1,8 +1,8 @@
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { Spinner } from "../components/ui";
-import { ApiError } from "../services/api";
+import { Alert, Spinner } from "../components/ui";
+import { ApiError, errorMessage } from "../services/api";
 import { auth, preferences } from "../services/endpoints";
 import type { User } from "../types";
 
@@ -82,10 +82,27 @@ export function homeFor(user: User): string {
   return "/app";
 }
 
+function SessionGate({ children, pending }: { children: ReactNode; pending: boolean }) {
+  const { isError, error } = useSession();
+  if (pending) return <Spinner />;
+  if (isError) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16">
+        <Alert kind="error">{errorMessage(error)}</Alert>
+        <p className="mt-3 text-sm text-slate-600">
+          Start the API from the project root:{" "}
+          <code className="rounded bg-slate-100 px-1">python -m uvicorn backend.app.main:app --reload --port 8000</code>
+        </p>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { data: user, isLoading } = useSession();
+  const { data: user, isPending, isError } = useSession();
   const location = useLocation();
-  if (isLoading) return <Spinner />;
+  if (isPending || isError) return <SessionGate pending={isPending}>{null}</SessionGate>;
   if (!user) {
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
@@ -102,8 +119,8 @@ export function GuestOnly({ children }: { children: ReactNode }) {
 
 /** Admin pages. The API enforces this too; the guard only keeps non-admins out of a broken UI. */
 export function RequireAdmin({ children }: { children: ReactNode }) {
-  const { data: user, isLoading } = useSession();
-  if (isLoading) return <Spinner />;
+  const { data: user, isPending, isError } = useSession();
+  if (isPending || isError) return <SessionGate pending={isPending}>{null}</SessionGate>;
   if (!user?.is_admin) return <Navigate to={user ? homeFor(user) : "/login"} replace />;
   return <>{children}</>;
 }

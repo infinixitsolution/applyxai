@@ -54,6 +54,20 @@ const adminSettings: AdminPlatformSettings = {
   },
   auth_email: { require_verification: true, verification_hours: 24, password_reset_minutes: 60, frontend_url: "http://localhost:5173" },
   notifications: { run_finished: { email: false, label: "Run finished", description: "When a run completes" } },
+  email_templates: {
+    auth: {
+      verify_email: { subject: "Verify", body: "Link {link}", html: "" },
+      password_reset: { subject: "Reset", body: "Link {link}", html: "" },
+      account_exists: { subject: "Exists", body: "Link {link}", html: "" },
+      institute_invite: { subject: "Invite", body: "Link {link}", html: "" },
+    },
+    events: {
+      run_finished: {
+        in_app_title: "{title}", in_app_body: "{message}", email_subject: "{title}",
+        email_body: "{message}", email_html: "",
+      },
+    },
+  },
   ai: {
     enabled: false, provider: "openai", base_url: "https://api.openai.com/v1", api_key_configured: false,
     models: { fast: "gpt-4o-mini", strong: "gpt-4o", embedding: "text-embedding-3-small" },

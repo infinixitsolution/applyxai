@@ -497,6 +497,29 @@ export interface PlatformCms {
   legal: { privacy_md: string; terms_md: string; refund_md: string };
 }
 
+export interface AuthEmailTemplate {
+  subject: string;
+  body: string;
+  html: string;
+}
+
+export interface EventNotificationTemplate {
+  in_app_title: string;
+  in_app_body: string;
+  email_subject: string;
+  email_body: string;
+  email_html: string;
+}
+
+export interface EmailTemplates {
+  auth: Record<string, AuthEmailTemplate>;
+  events: Record<string, EventNotificationTemplate>;
+}
+
+export interface NotificationPreferences {
+  types: Record<string, { email: boolean; label: string; description: string }>;
+}
+
 export interface AdminPlatformSettings {
   cms: PlatformCms;
   smtp: {
@@ -517,6 +540,7 @@ export interface AdminPlatformSettings {
     frontend_url: string;
   };
   notifications: Record<string, { email: boolean; label: string; description: string }>;
+  email_templates: EmailTemplates;
   infrastructure: {
     app_env: string;
     app_version: string;

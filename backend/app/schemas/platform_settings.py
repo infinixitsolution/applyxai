@@ -98,6 +98,25 @@ class NotificationsIn(BaseModel):
     types: dict[str, NotificationTypeIn]
 
 
+class AuthEmailTemplateIn(BaseModel):
+    subject: str = Field(max_length=500)
+    body: str = Field(max_length=50_000)
+    html: str = Field(default="", max_length=100_000)
+
+
+class EventTemplateIn(BaseModel):
+    in_app_title: str = Field(max_length=500)
+    in_app_body: str = Field(max_length=10_000)
+    email_subject: str = Field(max_length=500)
+    email_body: str = Field(max_length=50_000)
+    email_html: str = Field(default="", max_length=100_000)
+
+
+class EmailTemplatesIn(BaseModel):
+    auth: dict[str, AuthEmailTemplateIn]
+    events: dict[str, EventTemplateIn]
+
+
 class AiFeaturesIn(BaseModel):
     applications: bool = True
     resume: bool = True

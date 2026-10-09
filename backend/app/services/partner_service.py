@@ -506,7 +506,28 @@ def maybe_accrue_commission(db: Session, payment: Payment, sub: Subscription | N
     )
     db.add(row)
     db.flush()
+    _notify_commission(db, partner, row)
     return row
+
+
+def _notify_commission(db: Session, partner: Partner, row: PartnerCommission) -> None:
+    from backend.app.services import notification_service
+
+    if partner.user_id is None:
+        return
+    amount = row.amount_cents / 100
+    currency = row.currency or "INR"
+    notification_service.notify_event(
+        db,
+        partner.user_id,
+        "partner_commission",
+        link="/partner/commissions",
+        variables={
+            "amount": f"{amount:.2f}",
+            "currency": currency,
+            "message": f"You earned {currency} {amount:.2f} in commission. {row.note or ''}".strip(),
+        },
+    )
 
 
 def maybe_accrue_candidate_commission(db: Session, assignment: InstituteAssignment) -> PartnerCommission | None:

@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Amazon SES domain identity for applyxai.com and SMTP IAM user (ap-southeast-2).
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: applyxai.com
+  MailFromAddress:
+    Type: String
+    Default: no-reply@applyxai.com
+    Description: Shown in app SMTP_FROM; requires verified domain.
+
+Resources:
+  SesDomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DomainName
+      DkimSigningAttributes:
+        NextSigningKeyLength: RSA_2048_BIT
+      DkimAttributes:
+        SigningEnabled: true
+
+  SesSmtpUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "applyxai-ses-smtp-${AWS::StackName}"
+      Policies:
+        - PolicyName: SesSendFromDomain
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendRawEmail
+                  - ses:SendEmail
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    ses:FromAddress:
+                      - !Ref MailFromAddress
+                      - !Sub "*@${DomainName}"
+
+  SesSmtpAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref SesSmtpUser
+
+Outputs:
+  Region:
+    Value: !Ref AWS::Region
+  SmtpHost:
+    Value: !Sub "email-smtp.${AWS::Region}.amazonaws.com"
+  SmtpPort:
+    Value: "587"
+  SmtpUsername:
+    Value: !Ref SesSmtpAccessKey
+  SmtpSecretAccessKey:
+    Value: !GetAtt SesSmtpAccessKey.SecretAccessKey
+  SmtpFromSuggested:
+    Value: !Sub "ApplyXAI <${MailFromAddress}>"
+  DnsInstructions:
+    Description: Add these in your DNS host for applyxai.com, then wait for VerificationStatus SUCCESS in SES console.
+    Value: !Sub |
+      Open SES → Verified identities → ${DomainName} and copy DKIM CNAMEs and verification records.
+      Also add SPF: TXT @ "v=spf1 include:amazonses.com ~all" (merge with existing SPF if any).
+      DMARC (recommended): TXT _dmarc "v=DMARC1; p=none; rua=mailto:postmaster@${DomainName}"

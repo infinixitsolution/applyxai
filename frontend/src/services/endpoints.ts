@@ -121,6 +121,9 @@ export const notifications = {
     request<Page<Notification> & { unread_count: number }>("/notifications", { query }),
   read: (id: string) => request<Notification>(`/notifications/${id}/read`, { method: "POST" }),
   readAll: () => request<{ marked: number }>("/notifications/read-all", { method: "POST" }),
+  preferences: () => request<import("../types").NotificationPreferences>("/notifications/preferences"),
+  updatePreferences: (body: { types: Record<string, { email: boolean }> }) =>
+    request<import("../types").NotificationPreferences>("/notifications/preferences", { method: "PATCH", body }),
 };
 
 export const automation = {

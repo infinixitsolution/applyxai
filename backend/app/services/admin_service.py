@@ -322,8 +322,11 @@ def grant_plan(db: Session, admin: User, user_id: uuid.UUID, plan_code: str, mon
     end = now + timedelta(days=30 * months)
     db.add(Subscription(user_id=user.id, plan_id=plan.id, status=SubscriptionStatus.ACTIVE, provider=ADMIN_PROVIDER,
                         current_period_start=now, current_period_end=end, cancel_at_period_end=True))
-    notification_service.notify(db, user.id, "plan_granted", f"You've been given the {plan.name} plan",
-                                f"It's on us until {end.strftime('%d %b %Y')}. No payment is needed.", "/billing")
+    until = end.strftime("%d %b %Y")
+    notification_service.notify_event(
+        db, user.id, "plan_granted", link="/billing",
+        variables={"plan_name": plan.name, "message": f"It's on us until {until}. No payment is needed."},
+    )
     _audit(db, admin, "plan.grant", user, plan=plan.code, months=months, until=end.isoformat(), note=note[:500])
     db.flush()
     return user_detail(db, user.id)
@@ -471,6 +474,57 @@ def audit_settings(db: Session, admin: User, action: str, details: dict) -> None
 def email_overview(db: Session) -> dict:
     unverified = db.scalar(select(func.count()).select_from(User).where(User.is_verified.is_(False)))
     return {**email_service.email_settings(db), "unverified_users": unverified}
+
+
+def send_test_template(db: Session, admin: User, sender: email_service.EmailSender, kind: str, to: str) -> dict:
+    from backend.app.core.platform_defaults import DEFAULT_EMAIL_TEMPLATES
+
+    settings_now = email_service.email_settings(db)
+    if kind not in (DEFAULT_EMAIL_TEMPLATES.get("auth") or {}):
+        raise AppError("VALIDATION_ERROR", f"Unknown auth template: {kind}", 422)
+    email = email_service.auth_template_test_email(db, kind, to)
+    try:
+        getattr(sender, "deliver", sender.send)(email)
+    except Exception as exc:
+        logger.warning("Test template %s to %s failed: %s", kind, to, type(exc).__name__)
+        _audit(db, admin, "email.test_template", target_label=to, kind=kind, delivered=False)
+        message = str(exc).strip() or "No details from the mail server."
+        return {"delivered": False, "mode": settings_now["mode"], "error": f"{type(exc).__name__}: {message}"[:300]}
+    _audit(db, admin, "email.test_template", target_label=to, kind=kind, delivered=True)
+    return {"delivered": True, "mode": settings_now["mode"], "error": ""}
+
+
+def broadcast_notifications(
+    db: Session,
+    admin: User,
+    *,
+    title: str,
+    body: str,
+    link: str,
+    user_ids: list[uuid.UUID],
+) -> dict:
+    if link and (not link.startswith("/") or link.startswith("//") or "\\" in link):
+        raise AppError("VALIDATION_ERROR", "Link must be an in-app path like /billing.", 422)
+    if len(user_ids) > 500:
+        raise AppError("VALIDATION_ERROR", "At most 500 users per broadcast.", 422)
+    sent = 0
+    for uid in user_ids:
+        user = db.get(User, uid)
+        if user is None or not user.is_active:
+            continue
+        notification_service.notify_event(
+            db,
+            uid,
+            "admin_broadcast",
+            link=link,
+            title=title,
+            body=body,
+            variables={"title": title, "body": body},
+        )
+        sent += 1
+    _audit(db, admin, "notifications.broadcast", target_label="users", count=sent, title=title[:120])
+    db.flush()
+    return {"sent": sent}
 
 
 def send_test_email(db: Session, admin: User, sender: email_service.EmailSender, to: str) -> dict:

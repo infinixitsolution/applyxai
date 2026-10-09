@@ -14,11 +14,20 @@ from backend.app.core.pagination import PageParams, page_params
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import ApplicationStatus, SubscriptionStatus, User
 from backend.app.schemas.admin import (
-    GrantPlanIn, InstituteCreateIn, InstituteUpdateIn, PartnerCreateIn, PartnerUpdateIn, PlanUpdateIn, TestEmailIn,
-    UserCreateIn, UserUpdateIn,
+    BroadcastNotificationsIn,
+    GrantPlanIn,
+    InstituteCreateIn,
+    InstituteUpdateIn,
+    PartnerCreateIn,
+    PartnerUpdateIn,
+    PlanUpdateIn,
+    TestEmailIn,
+    TestTemplateIn,
+    UserCreateIn,
+    UserUpdateIn,
 )
 from backend.app.schemas.institute import PasswordIn
-from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, NotificationsIn, PaymentsIn, SmtpIn
+from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, EmailTemplatesIn, NotificationsIn, PaymentsIn, SmtpIn
 from backend.app.services import ai_service
 from backend.app.services.ai_service import AiTask
 from backend.app.services import admin_service, auth_service, platform_settings_service as ps
@@ -179,6 +188,40 @@ def put_settings_notifications(body: NotificationsIn, admin: User = Depends(requ
     admin_service.audit_settings(db, admin, "settings.notifications", {"types": list(body.types.keys())})
     db.commit()
     return ok({"notifications": notifications})
+
+
+@router.put("/settings/email-templates", summary="Auth and notification email/in-app templates")
+def put_settings_email_templates(body: EmailTemplatesIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+                                 limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("30/hour", "admin-settings", str(admin.id))
+    templates = ps.update_email_templates(db, body)
+    admin_service.audit_settings(db, admin, "settings.email_templates", {"auth": list(body.auth.keys())})
+    db.commit()
+    return ok({"email_templates": templates})
+
+
+@router.post("/email/test-template", summary="Send a sample auth template email")
+def email_test_template(body: TestTemplateIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+                        limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
+    limiter.hit("10/hour", "admin-test-email", str(admin.id))
+    result = admin_service.send_test_template(db, admin, mailer, body.kind, str(body.to or admin.email))
+    db.commit()
+    return ok(result)
+
+
+@router.post("/notifications/broadcast", summary="Send an in-app notification to selected users")
+def notifications_broadcast(body: BroadcastNotificationsIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+                            limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("10/hour", "admin-broadcast", str(admin.id))
+    try:
+        ids = [uuid.UUID(x) for x in body.user_ids]
+    except ValueError as exc:
+        raise AppError("VALIDATION_ERROR", "Invalid user id in list.", 422) from exc
+    result = admin_service.broadcast_notifications(
+        db, admin, title=body.title.strip(), body=body.body.strip(), link=body.link.strip(), user_ids=ids,
+    )
+    db.commit()
+    return ok(result)
 
 
 @router.put("/settings/payments", summary="Razorpay keys and payment mode")

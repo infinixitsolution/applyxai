@@ -206,16 +206,30 @@ def apply_remote(db: Session, provider: PaymentProvider, sub: Subscription, remo
         if sub.institute_id:
             from backend.app.services import institute_service
             institute_service.ensure_seats_for_subscription(db, sub)
-        notification_service.notify(db, sub.user_id, "plan_active", f"Your {name} plan is active",
-                                    f"You can now send up to {usage_service.plan_limits(db, sub.user_id)['applications_per_month']:,}"
-                                    " applications a month.", "/billing")
+        limit = usage_service.plan_limits(db, sub.user_id)["applications_per_month"]
+        notification_service.notify_event(
+            db, sub.user_id, "plan_active", link="/billing",
+            variables={
+                "plan_name": name,
+                "message": f"You can now send up to {limit:,} applications a month.",
+            },
+        )
     elif sub.status == SubscriptionStatus.PAST_DUE and before in ENTITLED:
-        notification_service.notify(db, sub.user_id, "payment_failed", "Your payment didn't go through",
-                                    f"We couldn't renew your {name} plan. Check your payment method with your bank "
-                                    "or card provider; you're on the Free plan until a payment succeeds.", "/billing")
+        notification_service.notify_event(
+            db, sub.user_id, "payment_failed", link="/billing",
+            variables={
+                "plan_name": name,
+                "message": (
+                    f"We couldn't renew your {name} plan. Check your payment method with your bank "
+                    "or card provider; you're on the Free plan until a payment succeeds."
+                ),
+            },
+        )
     elif sub.status in ENDED and before in ENTITLED + (SubscriptionStatus.PAST_DUE,):
-        notification_service.notify(db, sub.user_id, "plan_ended", f"Your {name} plan has ended",
-                                    "You're on the Free plan now. You can subscribe again at any time.", "/billing")
+        notification_service.notify_event(
+            db, sub.user_id, "plan_ended", link="/billing",
+            variables={"plan_name": name, "message": "You're on the Free plan now. You can subscribe again at any time."},
+        )
 
 
 def record_payment(db: Session, provider: PaymentProvider, user_id: uuid.UUID, sub: Subscription | None,
@@ -320,10 +334,17 @@ def cancel(db: Session, user: User, provider: PaymentProvider) -> dict:
         sub.cancel_at_period_end = True
         apply_remote(db, provider, sub, remote)
         until = sub.current_period_end
-        notification_service.notify(
-            db, user.id, "plan_cancelled", f"Your {sub.plan.name} plan is cancelled",
-            "It stays active until " + (_aware(until).strftime("%d %b %Y") if until else "the end of this billing period")
-            + ". You won't be charged again.", "/billing")
+        period = _aware(until).strftime("%d %b %Y") if until else "the end of this billing period"
+        notification_service.notify_event(
+            db,
+            user.id,
+            "plan_cancelled",
+            link="/billing",
+            variables={
+                "plan_name": sub.plan.name,
+                "message": f"It stays active until {period}. You won't be charged again.",
+            },
+        )
     return {"subscription": sub_out(sub)}
 
 

@@ -42,6 +42,7 @@ def invite(body: InviteIn, background: BackgroundTasks, ctx=Depends(require_inst
            db: Session = Depends(get_db), mailer: EmailSender = Depends(get_mailer)):
     user, institute, _member = ctx
     assignment, token = institute_service.invite_candidate(db, institute, body.email, user, body.note)
+    institute_service.notify_candidate_invited(db, institute, body.email, token)
     db.commit()
     background.add_task(mailer.send, institute_invite_email(body.email, institute.name, token, db))
     return ok({"assignment": institute_service.assignment_out(assignment)})

@@ -326,5 +326,9 @@ def test_the_reaper_fails_silent_runs_and_cancels_unclaimed_ones(db, alice, alic
 def test_celery_schedules_the_housekeeping_tasks():
     from backend.app.worker import celery_app
     scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
-    assert scheduled == {"applyxai.reap_stale_runs", "applyxai.delete_expired_pairings"}
+    assert scheduled == {
+        "applyxai.reap_stale_runs",
+        "applyxai.delete_expired_pairings",
+        "applyxai.send_candidate_daily_reports",
+    }
     assert scheduled <= set(celery_app.tasks)

@@ -46,5 +46,7 @@ class UserProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     preferred_resume_template: Mapped[str] = mapped_column(String(32), default="modern", server_default="modern")
     education: Mapped[list] = mapped_column(JSONType, default=list)
     work_history: Mapped[list] = mapped_column(JSONType, default=list)
+    # Per-event email opt-out; empty dict = receive all types the platform allows.
+    notification_email: Mapped[dict] = mapped_column(JSONType, default=dict)
 
     user: Mapped[User] = relationship(back_populates="profile")

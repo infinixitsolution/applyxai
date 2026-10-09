@@ -14,7 +14,14 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.errors import AppError
-from backend.app.core.platform_defaults import DEFAULT_AI, DEFAULT_CMS, DEFAULT_NOTIFICATIONS, DEFAULT_PAYMENTS, PLATFORM_SETTINGS_KEY
+from backend.app.core.platform_defaults import (
+    DEFAULT_AI,
+    DEFAULT_CMS,
+    DEFAULT_EMAIL_TEMPLATES,
+    DEFAULT_NOTIFICATIONS,
+    DEFAULT_PAYMENTS,
+    PLATFORM_SETTINGS_KEY,
+)
 from backend.app.models import PlatformSettings
 from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, NotificationsIn, PaymentsIn, SmtpIn
 
@@ -78,7 +85,7 @@ class EffectiveSmtp:
 
     @property
     def configured(self) -> bool:
-        return bool(self.host)
+        return bool(self.host and self.password)
 
 
 @dataclass(frozen=True)
@@ -274,6 +281,7 @@ def build_admin_view(db: Session) -> dict:
             "frontend_url": auth_eff.frontend_url,
         },
         "notifications": get_notification_prefs(db),
+        "email_templates": get_email_templates(db),
         "ai": _admin_ai_view(db),
         "payments": _admin_payments_view(db),
         "infrastructure": {
@@ -420,6 +428,92 @@ def update_ai(db: Session, payload: AiIn) -> dict:
     row.ai = stored
     invalidate_caches()
     return _admin_ai_view(db)
+
+
+def _stored_email_templates(db: Session, row: PlatformSettings) -> dict:
+    """Read templates from the ORM row, falling back to SQL if the mapper is behind the DB schema."""
+    stored = getattr(row, "email_templates", None)
+    if isinstance(stored, dict):
+        return stored
+    from sqlalchemy import text
+
+    try:
+        raw = db.execute(
+            text("SELECT email_templates FROM platform_settings WHERE key = :k"),
+            {"k": PLATFORM_SETTINGS_KEY},
+        ).scalar_one_or_none()
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    return {}
+
+
+def sync_platform_defaults(db: Session) -> bool:
+    """
+    Add new notification types and email template keys from code defaults into the DB row.
+    Existing admin edits are kept; only missing keys and fields are filled in.
+    """
+    row = _row(db)
+    changed = False
+
+    stored_notif = row.notifications or {}
+    merged_notif = _deep_merge(dict(DEFAULT_NOTIFICATIONS), stored_notif)
+    ordered_notif = {k: merged_notif[k] for k in DEFAULT_NOTIFICATIONS}
+    if ordered_notif != stored_notif:
+        row.notifications = ordered_notif
+        changed = True
+
+    stored_tpl = _stored_email_templates(db, row)
+    merged_tpl = _deep_merge(dict(DEFAULT_EMAIL_TEMPLATES), stored_tpl)
+    if merged_tpl != stored_tpl:
+        if hasattr(type(row), "email_templates"):
+            row.email_templates = merged_tpl
+        else:
+            from sqlalchemy import text
+            import json
+
+            db.execute(
+                text("UPDATE platform_settings SET email_templates = :payload WHERE key = :k"),
+                {"k": PLATFORM_SETTINGS_KEY, "payload": json.dumps(merged_tpl)},
+            )
+        changed = True
+
+    if changed:
+        invalidate_caches()
+    return changed
+
+
+def get_email_templates(db: Session) -> dict:
+    row = _row(db)
+    return _deep_merge(dict(DEFAULT_EMAIL_TEMPLATES), _stored_email_templates(db, row))
+
+
+def update_email_templates(db: Session, payload: EmailTemplatesIn) -> dict:
+    auth_keys = set((DEFAULT_EMAIL_TEMPLATES.get("auth") or {}).keys())
+    event_keys = set((DEFAULT_EMAIL_TEMPLATES.get("events") or {}).keys())
+    if set(payload.auth.keys()) != auth_keys:
+        raise AppError("VALIDATION_ERROR", "Auth templates must include every known template key.", 422)
+    if set(payload.events.keys()) != event_keys:
+        raise AppError("VALIDATION_ERROR", "Event templates must include every known notification type.", 422)
+    row = _row(db)
+    payload_dict = {
+        "auth": {k: v.model_dump() for k, v in payload.auth.items()},
+        "events": {k: v.model_dump() for k, v in payload.events.items()},
+    }
+    if hasattr(type(row), "email_templates"):
+        row.email_templates = payload_dict
+    else:
+        from sqlalchemy import text
+
+        import json
+
+        db.execute(
+            text("UPDATE platform_settings SET email_templates = :payload WHERE key = :k"),
+            {"k": PLATFORM_SETTINGS_KEY, "payload": json.dumps(payload_dict)},
+        )
+    invalidate_caches()
+    return get_email_templates(db)
 
 
 def update_notifications(db: Session, payload: NotificationsIn) -> dict:

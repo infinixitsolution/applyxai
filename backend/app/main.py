@@ -6,8 +6,13 @@ ApplyXAI API. Run from the project root:
 OpenAPI docs: http://127.0.0.1:8000/api/docs
 """
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+logger = logging.getLogger("applyxai")
 
 from backend.app.api import (
     admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, notifications,
@@ -18,6 +23,21 @@ from backend.app.core.csrf import CSRFMiddleware
 from backend.app.core.errors import register_error_handlers
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    from backend.app.core.database import SessionLocal
+    from backend.app.services import platform_settings_service as ps
+
+    try:
+        with SessionLocal() as db:
+            if ps.sync_platform_defaults(db):
+                db.commit()
+                logger.info("Synced platform notification and email template defaults")
+    except Exception:
+        logger.exception("Platform template default sync failed")
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=f"{settings.APP_NAME} API",
@@ -25,6 +45,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
+        lifespan=_lifespan,
     )
     app.add_middleware(CSRFMiddleware)
     # Added last so it runs first: CORS preflights are answered before CSRF checks.

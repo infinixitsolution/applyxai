@@ -40,6 +40,18 @@ class GrantPlanIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class TestTemplateIn(BaseModel):
+    kind: str = Field(min_length=1, max_length=64)
+    to: EmailStr | None = None
+
+
+class BroadcastNotificationsIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(default="", max_length=5000)
+    link: str = Field(default="", max_length=512)
+    user_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class TestEmailIn(BaseModel):
     to: EmailStr | None = None            # defaults to the admin's own address
 

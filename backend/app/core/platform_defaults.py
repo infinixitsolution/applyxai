@@ -146,6 +146,184 @@ DEFAULT_NOTIFICATIONS: dict = {
         "label": "Complimentary plan granted",
         "description": "When an admin grants a complimentary plan.",
     },
+    "admin_broadcast": {
+        "email": False,
+        "label": "Admin announcement",
+        "description": "One-off messages sent from the admin console.",
+    },
+    "institute_invite": {
+        "email": False,
+        "label": "Institute invitation",
+        "description": "When a training institute invites you to join with a reserved seat.",
+    },
+    "institute_invite_accepted": {
+        "email": False,
+        "label": "Invite accepted",
+        "description": "When a candidate accepts an institute invitation (institute admins).",
+    },
+    "partner_commission": {
+        "email": False,
+        "label": "Partner commission",
+        "description": "When commission is accrued on your partner account.",
+    },
+    "job_applied": {
+        "email": False,
+        "label": "Job application submitted",
+        "description": "When ApplyXAI successfully submits an Easy Apply application for you.",
+    },
+    "daily_report": {
+        "email": False,
+        "label": "Daily application summary",
+        "description": "A once-per-day email with how many jobs you applied to and other outcomes.",
+    },
+}
+
+# Editable copy for auth emails and notification events (merged with DB overrides).
+DEFAULT_EMAIL_TEMPLATES: dict = {
+    "auth": {
+        "verify_email": {
+            "subject": "Verify your {app_name} email",
+            "body": (
+                "Welcome to {app_name}!\n\nConfirm your email address:\n{link}\n\n"
+                "This link expires in {verification_hours} hours. "
+                "If you didn't create an account, ignore this email."
+            ),
+            "html": "",
+        },
+        "password_reset": {
+            "subject": "Reset your {app_name} password",
+            "body": (
+                "Someone asked to reset the password for this {app_name} account.\n\n"
+                "Choose a new password:\n{link}\n\n"
+                "This link expires in {password_reset_minutes} minutes. "
+                "If it wasn't you, ignore this email; your password is unchanged."
+            ),
+            "html": "",
+        },
+        "account_exists": {
+            "subject": "Your {app_name} account",
+            "body": (
+                "Someone tried to register a new {app_name} account with this email, "
+                "but you already have one.\n\nForgot your password? Reset it here:\n{link}\n\n"
+                "If this wasn't you, you can ignore this email."
+            ),
+            "html": "",
+        },
+        "institute_invite": {
+            "subject": "{institute_name} invited you to {app_name}",
+            "body": (
+                "{institute_name} reserved a seat for you on {app_name}.\n\n"
+                "Accept the invitation:\n{link}\n\n"
+                "Create an account with this email if you don't have one yet, then open the link."
+            ),
+            "html": "",
+        },
+    },
+    "events": {
+        "run_finished": {
+            "in_app_title": "{title}",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: {title}",
+            "email_body": "{title}\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "limit_reached": {
+            "in_app_title": "Monthly application limit reached",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Monthly application limit reached",
+            "email_body": "Monthly application limit reached\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "plan_active": {
+            "in_app_title": "Your {plan_name} plan is active",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Your {plan_name} plan is active",
+            "email_body": "Your {plan_name} plan is active\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "payment_failed": {
+            "in_app_title": "Your payment didn't go through",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Payment failed",
+            "email_body": "Your payment didn't go through\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "plan_ended": {
+            "in_app_title": "Your {plan_name} plan has ended",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Your {plan_name} plan has ended",
+            "email_body": "Your {plan_name} plan has ended\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "plan_cancelled": {
+            "in_app_title": "Your {plan_name} plan is cancelled",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Plan cancellation scheduled",
+            "email_body": "Your {plan_name} plan is cancelled\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "plan_granted": {
+            "in_app_title": "You've been given the {plan_name} plan",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Complimentary {plan_name} plan",
+            "email_body": "You've been given the {plan_name} plan\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "admin_broadcast": {
+            "in_app_title": "{title}",
+            "in_app_body": "{body}",
+            "email_subject": "{app_name}: {title}",
+            "email_body": "{title}\n\n{body}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "institute_invite": {
+            "in_app_title": "{institute_name} invited you",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: {institute_name} invitation",
+            "email_body": "{institute_name} invited you\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "institute_invite_accepted": {
+            "in_app_title": "{candidate_email} accepted your invitation",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Invitation accepted",
+            "email_body": "{candidate_email} accepted your invitation\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "partner_commission": {
+            "in_app_title": "Commission earned",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Commission earned",
+            "email_body": "Commission earned\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
+            "email_html": "",
+        },
+        "job_applied": {
+            "in_app_title": "Applied to {job_title}",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Applied to {job_title} at {company}",
+            "email_body": (
+                "Application submitted\n\n"
+                "{message}\n\n"
+                "Role: {job_title}\n"
+                "Company: {company}\n"
+                "Location: {location}\n\n"
+                "View your applications:\n{link_url}"
+            ),
+            "email_html": "",
+        },
+        "daily_report": {
+            "in_app_title": "Daily summary for {report_date}",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: Daily summary for {report_date}",
+            "email_body": (
+                "Your application activity for {report_date}\n\n"
+                "{message}\n\n"
+                "{summary}\n\n"
+                "Open your dashboard:\n{link_url}"
+            ),
+            "email_html": "",
+        },
+    },
 }
 
 DEFAULT_PAYMENTS: dict = {

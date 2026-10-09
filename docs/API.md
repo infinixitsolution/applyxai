@@ -168,8 +168,12 @@ Usage resets on the first of each month (UTC). Only the first successful submiss
 | GET | `/notifications` | Newest first; `unread_only=true` to filter. The response also has `unread_count` |
 | POST | `/notifications/{id}/read` | Mark one as read |
 | POST | `/notifications/read-all` | Returns `{marked}` |
+| GET | `/notifications/preferences` | Per known event type: `{types: {key: {email, label, description}}}`. Missing keys mean email is allowed |
+| PATCH | `/notifications/preferences` | `{types: {event_type: {email: bool}}}`. In-app notifications are always on; this only controls email when the platform enables it |
 
 Notification object: `{id, type, title, body, link, read_at, created_at}`. `link` is always an in-app path (for example `/automation`).
+
+Known `type` values include `run_finished`, `limit_reached`, `job_applied`, `daily_report`, billing events (`plan_active`, `payment_failed`, `plan_ended`, `plan_cancelled`, `plan_granted`), `admin_broadcast`, `institute_invite`, `institute_invite_accepted`, and `partner_commission`. Copy for in-app and email channels is editable in admin **Templates** settings. The `daily_report` event is emitted once per UTC day by the Celery beat task when Redis/worker are running.
 
 ## Automation
 
@@ -249,11 +253,14 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | GET | `/admin/logs` | Automation log lines from all runs. `level` can repeat (`?level=error&level=warning`, the default); `q` searches messages |
 | GET | `/admin/audit-log` | `{id, created_at, admin_email, action, target, target_user_id, details}`, newest first. Actions include `user.update`, `user.verify`, `user.resend_verification`, `plan.grant`, `plan.revoke`, `plan.update`, `run.stop`, `email.test`, `settings.cms`, `settings.smtp`, `settings.auth_email`, `settings.notifications` |
 | GET | `/admin/workers` | `{celery: {broker: ok or unreachable, workers}, devices}`. Never fails when Redis is down |
-| GET | `/admin/settings` | `{cms, smtp, auth_email, notifications, infrastructure, unverified_users}`. SMTP never includes the password; `smtp.password_configured` is boolean |
+| GET | `/admin/settings` | `{cms, smtp, auth_email, notifications, email_templates, infrastructure, unverified_users}`. SMTP never includes the password; `smtp.password_configured` is boolean |
 | PUT | `/admin/settings/cms` | Full CMS document (branding, banner, landing, legal markdown). 30/hour per admin |
 | PUT | `/admin/settings/smtp` | `{enabled, host, port, username, password?, from_address}`. Empty `password` keeps the stored password; empty `host` clears DB SMTP and falls back to `.env` |
 | PUT | `/admin/settings/auth-email` | `{require_verification, verification_hours, password_reset_minutes, frontend_url}` |
 | PUT | `/admin/settings/notifications` | `{types: {event_type: {email: bool}}}` for known event types only |
+| PUT | `/admin/settings/email-templates` | Full `{auth, events}` template document (all known keys required). Placeholders such as `{app_name}`, `{link}`, `{title}`, `{body}`, `{plan_name}` |
+| POST | `/admin/email/test-template` | Body `{kind, to?}` where `kind` is an auth template key (`verify_email`, `password_reset`, …). 10/hour per admin |
+| POST | `/admin/notifications/broadcast` | Body `{title, body, link, user_ids[]}` (max 500 users). Type `admin_broadcast`; 10/hour per admin |
 | PUT | `/admin/settings/payments` | `{provider: null\|razorpay, key_id, key_secret?, webhook_secret?}`. Secrets encrypted; never returned. Overrides `.env` when `key_id` is saved here |
 | POST | `/admin/settings/payments/test` | Validates Razorpay Key ID + secret against the API |
 | POST | `/admin/settings/payments/sync-plans` | Creates paid plans at Razorpay (same as `python -m backend.app.cli sync-plans`) |

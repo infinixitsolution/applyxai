@@ -22,6 +22,7 @@ class Email:
     to: str
     subject: str
     body: str
+    html: str = ""
 
 
 class EmailSender(Protocol):
@@ -30,7 +31,8 @@ class EmailSender(Protocol):
 
 class ConsoleEmailSender:
     def send(self, email: Email) -> None:
-        logger.warning("DEV EMAIL to %s | %s\n%s", email.to, email.subject, email.body)
+        extra = f"\n[HTML]\n{email.html}" if email.html else ""
+        logger.warning("DEV EMAIL to %s | %s\n%s%s", email.to, email.subject, email.body, extra)
 
 
 class SmtpEmailSender:
@@ -43,6 +45,8 @@ class SmtpEmailSender:
         message["To"] = email.to
         message["Subject"] = email.subject
         message.set_content(email.body)
+        if email.html.strip():
+            message.add_alternative(email.html, subtype="html")
         context = ssl.create_default_context()
         if self._smtp.port == SMTPS_PORT:
             client = smtplib.SMTP_SSL(self._smtp.host, self._smtp.port, timeout=15, context=context)
@@ -99,58 +103,60 @@ def sample_email(to: str, db: Session | None = None) -> Email:
 
 
 def verification_email(to: str, token: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
     auth = ps.get_effective_auth(db)
     link = f"{auth.frontend_url}/verify-email?token={token}"
-    return Email(
-        to,
-        f"Verify your {auth.app_name} email",
-        f"Welcome to {auth.app_name}!\n\nConfirm your email address:\n{link}\n\n"
-        f"This link expires in {auth.verification_hours} hours. "
-        "If you didn't create an account, ignore this email.",
-    )
+    email = ts.auth_email(db, "verify_email", to, link=link, verification_hours=str(auth.verification_hours))
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
 
 
 def password_reset_email(to: str, token: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
     auth = ps.get_effective_auth(db)
     link = f"{auth.frontend_url}/reset-password?token={token}"
-    return Email(
-        to,
-        f"Reset your {auth.app_name} password",
-        f"Someone asked to reset the password for this {auth.app_name} account.\n\n"
-        f"Choose a new password:\n{link}\n\n"
-        f"This link expires in {auth.password_reset_minutes} minutes. "
-        "If it wasn't you, ignore this email; your password is unchanged.",
-    )
+    email = ts.auth_email(db, "password_reset", to, link=link, password_reset_minutes=str(auth.password_reset_minutes))
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
 
 
 def account_exists_email(to: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
     auth = ps.get_effective_auth(db)
     link = f"{auth.frontend_url}/forgot-password"
-    return Email(
-        to,
-        f"Your {auth.app_name} account",
-        f"Someone tried to register a new {auth.app_name} account with this email, "
-        f"but you already have one.\n\nForgot your password? Reset it here:\n{link}\n\n"
-        "If this wasn't you, you can ignore this email.",
-    )
+    email = ts.auth_email(db, "account_exists", to, link=link)
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
 
 
 def institute_invite_email(to: str, institute_name: str, token: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
     auth = ps.get_effective_auth(db)
     link = f"{auth.frontend_url}/invite/{token}?token={token}"
-    return Email(
-        to,
-        f"{institute_name} invited you to {auth.app_name}",
-        f"{institute_name} reserved a seat for you on {auth.app_name}.\n\n"
-        f"Accept the invitation:\n{link}\n\n"
-        "Create an account with this email if you don't have one yet, then open the link.",
-    )
+    email = ts.auth_email(db, "institute_invite", to, link=link, institute_name=institute_name)
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
 
 
-def notification_email(to: str, title: str, body: str, link: str, db: Session | None = None) -> Email:
+def notification_email(
+    to: str, subject: str, body: str, link: str, db: Session | None = None, *, html: str = ""
+) -> Email:
+    if html.strip():
+        return Email(to, subject, body, html=html)
     auth = ps.get_effective_auth(db)
     url = f"{auth.frontend_url}{link}" if link.startswith("/") else link
-    text = f"{title}\n\n{body}".strip()
-    if link:
-        text += f"\n\nOpen in ApplyXAI:\n{url}"
-    return Email(to, f"{auth.app_name}: {title}", text)
+    text = body.strip()
+    if link and "Open in" not in text:
+        text += f"\n\nOpen in {auth.app_name}:\n{url}"
+    return Email(to, subject, text)
+
+
+def auth_template_test_email(db: Session, kind: str, to: str) -> Email:
+    """Send a sample auth template with placeholder links for admin testing."""
+    from backend.app.services import template_service as ts
+
+    auth = ps.get_effective_auth(db)
+    sample_link = f"{auth.frontend_url}/example"
+    vars_common = {"to": to, "link": sample_link, "institute_name": "Example Institute"}
+    email = ts.auth_email(db, kind, to, **vars_common)
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
