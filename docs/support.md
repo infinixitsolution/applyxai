@@ -19,7 +19,6 @@ The fastest way to get help setting the tool up, or to talk about it in general,
 
 ## Socials
 
-- **LinkedIn**: https://www.linkedin.com/in/saivigneshgolla/
 - **Email**: saivigneshgolla@outlook.com
 - **X/Twitter**: https://x.com/saivigneshgolla
 - **Discord**: godsscion

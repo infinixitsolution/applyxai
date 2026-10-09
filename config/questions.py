@@ -1,6 +1,5 @@
 '''
 Author:     Sai Vignesh Golla
-LinkedIn:   https://www.linkedin.com/in/saivigneshgolla/
 
 Copyright (c) 2024-2026 Sai Vignesh Golla
 
@@ -33,7 +32,7 @@ require_visa = "No"               # "Yes" or "No"
 website = "https://github.com/GodsScion"                        # "www.example.bio" or "" and so on....
 
 # Please provide the link to your LinkedIn profile.
-linkedIn = "https://www.linkedin.com/in/saivigneshgolla/"       # "https://www.linkedin.com/in/example" or "" and so on...
+linkedIn = ""       # "https://www.linkedin.com/in/example" or "" and so on...
 
 # Do you ALREADY have permission to work in the country you are applying to? (Eg: citizen, permanent resident, or a valid work visa such as H-1B or OPT)
 # This is NOT `require_visa`, which asks whether you need sponsorship. Someone on a valid work visa answers "Yes" to both.

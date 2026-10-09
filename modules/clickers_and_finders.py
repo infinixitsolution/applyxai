@@ -1,6 +1,5 @@
 '''
 Author:     Sai Vignesh Golla
-LinkedIn:   https://www.linkedin.com/in/saivigneshgolla/
 
 Copyright (c) 2024-2026 Sai Vignesh Golla
 
