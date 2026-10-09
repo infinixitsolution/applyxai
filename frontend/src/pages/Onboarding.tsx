@@ -55,10 +55,10 @@ export function OnboardingPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-16 max-w-3xl items-center px-4"><Logo to="/onboarding" /></div>
+        <div className="mx-auto flex h-16 max-w-3xl items-center px-3 sm:px-4"><Logo to="/onboarding" /></div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-10">
-        <ol className="mb-8 grid grid-cols-4 gap-2" aria-label="Setup progress">
+      <main className="mx-auto max-w-3xl px-3 py-8 sm:px-4 sm:py-10">
+        <ol className="mb-8 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Setup progress">
           {STEPS.map((s, i) => (
             <li key={s.id} aria-current={i === step ? "step" : undefined}>
               <button

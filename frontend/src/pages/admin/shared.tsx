@@ -18,7 +18,7 @@ export function Stat({ icon, label, value, sub, to }: { icon?: ReactNode; label:
       {sub && <p className="mt-1 text-xs leading-relaxed text-slate-500">{sub}</p>}
     </>
   );
-  const className = "group rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200 transition-[box-shadow,ring-color] hover:shadow-md";
+  const className = "group rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200 transition-[box-shadow,ring-color] hover:shadow-md sm:p-5";
   if (to) {
     return <Link to={to} className={cx(className, "block hover:ring-brand-200")}>{body}</Link>;
   }
@@ -28,7 +28,7 @@ export function Stat({ icon, label, value, sub, to }: { icon?: ReactNode; label:
 /** A table that scrolls sideways on small screens instead of squashing columns. */
 export function Table({ head, children, dim }: { head: string[]; children: ReactNode; dim?: boolean }) {
   return (
-    <div className={cx("-mx-5 overflow-x-auto", dim && "opacity-70 transition-opacity")}>
+    <div className={cx("table-scroll -mx-4 sm:-mx-5", dim && "opacity-70 transition-opacity")}>
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">

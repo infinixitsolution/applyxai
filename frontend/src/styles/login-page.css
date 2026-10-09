@@ -1,0 +1,594 @@
+/* Login page — sits between marketing nav and footer */
+.marketing-surface > .flex-1 > .ax-login {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.ax-login {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: min(640px, calc(100dvh - 240px));
+  overflow: hidden;
+  color: #0f172a;
+  font-family: "Plus Jakarta Sans", Segoe UI, sans-serif;
+}
+
+.ax-login__backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 420px at 100% 0%, rgba(59, 130, 246, 0.12), transparent 55%),
+    radial-gradient(700px 360px at 0% 100%, rgba(16, 185, 129, 0.08), transparent 50%),
+    linear-gradient(165deg, #f8faff 0%, #eef3ff 45%, #f1f5f9 100%);
+}
+
+.ax-login__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(72px);
+  opacity: 0.45;
+}
+
+.ax-login__orb-a {
+  width: 280px;
+  height: 280px;
+  left: -80px;
+  top: 20%;
+  background: #93c5fd;
+}
+
+.ax-login__orb-b {
+  width: 240px;
+  height: 240px;
+  right: 10%;
+  bottom: 8%;
+  background: #6ee7b7;
+}
+
+.ax-login__main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: 32px;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 36px) clamp(16px, 4vw, 32px) clamp(28px, 5vw, 40px);
+  box-sizing: border-box;
+}
+
+@media (min-width: 960px) {
+  .ax-login__main {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: clamp(24px, 4vw, 56px);
+    padding-top: 16px;
+  }
+}
+
+.ax-login__story {
+  min-width: 0;
+}
+
+@media (max-width: 959px) {
+  .ax-login__story {
+    text-align: center;
+    max-width: 32rem;
+    margin-inline: auto;
+  }
+}
+
+.ax-login__story-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ax-login__story-title {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw + 0.2rem, 2.5rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+  color: #0b1220;
+  text-wrap: balance;
+}
+
+.ax-login__story-lead {
+  margin: 14px 0 0;
+  font-size: clamp(0.95rem, 1.5vw + 0.1rem, 1.05rem);
+  line-height: 1.55;
+  color: #475569;
+  max-width: 38ch;
+}
+
+@media (max-width: 959px) {
+  .ax-login__story-lead {
+    margin-inline: auto;
+  }
+}
+
+.ax-login__highlights {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 959px) {
+  .ax-login__highlights {
+    display: none;
+  }
+}
+
+.ax-login__highlights li {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 8px 24px rgba(15, 39, 68, 0.04);
+}
+
+.ax-login__highlights strong {
+  font-size: 14px;
+  color: #0f2744;
+}
+
+.ax-login__highlights span {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.ax-login__trust {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+@media (min-width: 960px) {
+  .ax-login__trust {
+    display: flex;
+  }
+}
+
+.ax-login__trust img {
+  border-radius: 10px;
+  background: #fff;
+  padding: 4px;
+  box-shadow: 0 6px 16px rgba(15, 39, 68, 0.08);
+}
+
+.ax-login__trust strong {
+  display: block;
+  color: #0f2744;
+}
+
+.ax-login__trust span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ax-login__panel {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+@media (min-width: 960px) {
+  .ax-login__panel {
+    justify-content: flex-end;
+  }
+}
+
+.ax-login__card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 24px;
+  border: 1px solid #e2e8f0;
+  box-shadow:
+    0 24px 64px rgba(15, 39, 68, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+  padding: clamp(24px, 4vw, 32px);
+}
+
+.ax-login__card-head h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2vw + 0.5rem, 1.65rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0f2744;
+}
+
+.ax-login__card-head p,
+.ax-login__card-sub {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.ax-login__card--wide {
+  max-width: min(520px, 100%);
+}
+
+.ax-login__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 5px;
+  background: #f1f5f9;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+}
+
+.ax-login__tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  text-decoration: none;
+  text-align: center;
+  color: #64748b;
+  transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+}
+
+.ax-login__tab strong {
+  font-size: 11px;
+  font-weight: 750;
+  color: inherit;
+}
+
+.ax-login__tab span {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.ax-login__tab:hover {
+  background: rgba(255, 255, 255, 0.75);
+  color: #334155;
+}
+
+.ax-login__tab.is-active {
+  background: #fff;
+  color: #0f2744;
+  box-shadow: 0 4px 12px rgba(15, 39, 68, 0.08);
+  border: 1px solid #e2e8f0;
+}
+
+.ax-login__tab.is-active strong {
+  color: #2563eb;
+}
+
+.ax-login--institute .ax-login__story-kicker {
+  border-color: #ddd6fe;
+  color: #6d28d9;
+}
+
+.ax-login--institute .ax-login__orb-b {
+  background: #c4b5fd;
+}
+
+.ax-login--institute .ax-login__tab.is-active strong {
+  color: #6d28d9;
+}
+
+.ax-login--partner .ax-login__story-kicker {
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.ax-login--partner .ax-login__orb-b {
+  background: #6ee7b7;
+}
+
+.ax-login--partner .ax-login__tab.is-active strong {
+  color: #047857;
+}
+
+.ax-login__trust-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #eff6ff, #dbeafe);
+  box-shadow: 0 6px 16px rgba(15, 39, 68, 0.08);
+}
+
+.ax-login--institute .ax-login__trust-mark {
+  background: linear-gradient(145deg, #f5f3ff, #ede9fe);
+}
+
+.ax-login--partner .ax-login__trust-mark {
+  background: linear-gradient(145deg, #ecfdf5, #d1fae5);
+}
+
+.ax-login__form--register {
+  gap: 14px;
+}
+
+.ax-login__section {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.ax-login__section legend {
+  padding: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+.ax-login__section + .ax-login__section {
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ax-login__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ax-login__row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ax-login__form--register label {
+  font-weight: 650;
+  color: #334155;
+}
+
+.ax-login__form--register input:not([type="checkbox"]) {
+  border-radius: 14px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+  padding: 11px 14px !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+
+.ax-login__form--register input:not([type="checkbox"]):hover {
+  border-color: #cbd5e1 !important;
+  background: #fff !important;
+}
+
+.ax-login__form--register input:not([type="checkbox"]):focus {
+  border-color: #2563eb !important;
+  background: #fff !important;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12) !important;
+}
+
+.ax-login__form--register input.ring-red-400 {
+  border-color: #f87171 !important;
+}
+
+.ax-login__alt-note {
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #f1f5f9;
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.ax-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.ax-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ax-login__label {
+  font-size: 13px;
+  font-weight: 650;
+  color: #334155;
+}
+
+.ax-login__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ax-login__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ax-login__input-icon {
+  position: absolute;
+  left: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.ax-login__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px 14px 12px 42px;
+  font-size: 15px;
+  color: #0f172a;
+  background: #f8fafc;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.ax-login__input-password {
+  padding-right: 44px;
+}
+
+.ax-login__input::placeholder {
+  color: #94a3b8;
+}
+
+.ax-login__input:hover {
+  border-color: #cbd5e1;
+  background: #fff;
+}
+
+.ax-login__input:focus {
+  outline: none;
+  border-color: #2563eb;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.ax-login__reveal {
+  position: absolute;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.ax-login__reveal:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.ax-login__submit {
+  margin-top: 4px;
+  border-radius: 14px !important;
+  padding: 13px 16px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.3) !important;
+}
+
+.ax-login__submit:hover:not(:disabled) {
+  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.36) !important;
+}
+
+.ax-login__legal {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.ax-login__link {
+  color: #2563eb;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.ax-login__link:hover {
+  text-decoration: underline;
+  color: #1d4ed8;
+}
+
+.ax-login__link-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ax-login__forgot {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ax-login__alt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.ax-login__alt a {
+  font-weight: 650;
+  color: #475569;
+  text-decoration: none;
+}
+
+.ax-login__alt a:hover {
+  color: #2563eb;
+}
+
+@media (max-width: 639px) {
+  .ax-login {
+    min-height: 0;
+  }
+
+  .ax-login__card {
+    border-radius: 20px;
+    box-shadow: 0 16px 40px rgba(15, 39, 68, 0.08);
+  }
+
+  .ax-login__row-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .ax-login__tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .ax-login__tab {
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+    padding: 10px 12px;
+  }
+}

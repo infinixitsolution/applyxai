@@ -1,11 +1,14 @@
 import { useMutation } from "@tanstack/react-query";
-import { MailCheck } from "lucide-react";
+import { MailCheck, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { consumeNext, homeFor, rememberNext, safeNext, storedNext, useSetSession, withNext } from "../auth/session";
 import { TextInput } from "../components/form";
 import { Alert, Button, ButtonLink, Spinner } from "../components/ui";
-import { AuthCard } from "../layouts/PublicLayout";
+import { AuthShell, CheckEmailAside, PasswordAside } from "../features/auth";
+import { AuthLegalLinks, AuthPageLayout } from "../features/auth/AuthPageLayout";
+import { LoginScreen } from "../features/auth/LoginScreen";
+import { REGISTER_STORY } from "../features/auth/registerStories";
 import { ApiError, errorMessage, fieldErrors } from "../services/api";
 import { auth } from "../services/endpoints";
 
@@ -39,33 +42,32 @@ export function LoginPage() {
   const resend = useMutation({ mutationFn: () => auth.resendVerification(email), onSuccess: () => setResent(true) });
   const notVerified = login.error instanceof ApiError && login.error.code === "EMAIL_NOT_VERIFIED";
 
-  const submit = (e: FormEvent) => { e.preventDefault(); setResent(false); login.mutate(); };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setResent(false);
+    login.mutate();
+  };
+
+  const registerTo = withNext("/register", params.get("next"));
 
   return (
-    <AuthCard title="Welcome back" subtitle={<>New here? <Link to={withNext("/register", params.get("next"))} className="font-medium text-brand-600 hover:underline">Create an account</Link></>}>
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        {params.get("reset") === "1" && <Alert kind="success">Password updated. Log in with your new password.</Alert>}
-        {params.get("verified") === "1" && <Alert kind="success">Email verified. You can log in now.</Alert>}
-        {params.get("registered") === "1" && <Alert kind="success">Your account is ready. Log in to get started.</Alert>}
-        {login.error && !notVerified && <Alert kind="error">{errorMessage(login.error)}</Alert>}
-        {notVerified && (
-          <Alert kind="info">
-            Please verify your email first. Check your inbox for the link.{" "}
-            {resent ? <strong>We've sent a new link.</strong> : (
-              <button type="button" className="font-medium underline" onClick={() => resend.mutate()} disabled={resend.isPending}>
-                Send a new link
-              </button>
-            )}
-          </Alert>
-        )}
-        <TextInput label="Email" type="email" autoComplete="email" required value={email} onChange={setEmail} />
-        <TextInput label="Password" type="password" autoComplete="current-password" required value={password} onChange={setPassword} />
-        <div className="flex justify-end text-sm">
-          <Link to="/forgot-password" className="font-medium text-brand-600 hover:underline">Forgot password?</Link>
-        </div>
-        <Button type="submit" className="w-full" loading={login.isPending} disabled={!email || !password}>Log in</Button>
-      </form>
-    </AuthCard>
+    <LoginScreen
+      email={email}
+      onEmailChange={setEmail}
+      password={password}
+      onPasswordChange={setPassword}
+      onSubmit={submit}
+      loading={login.isPending}
+      registerTo={registerTo}
+      showResetSuccess={params.get("reset") === "1"}
+      showVerifiedSuccess={params.get("verified") === "1"}
+      showRegisteredSuccess={params.get("registered") === "1"}
+      errorMessage={login.error && !notVerified ? errorMessage(login.error) : null}
+      notVerified={notVerified}
+      resent={resent}
+      onResendVerification={() => resend.mutate()}
+      resendPending={resend.isPending}
+    />
   );
 }
 
@@ -78,12 +80,20 @@ export function RegisterPage() {
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
 
   const register = useMutation({
-    mutationFn: () => auth.register({ email: form.email, password: form.password, first_name: form.first_name, last_name: form.last_name }),
+    mutationFn: () =>
+      auth.register({
+        email: form.email,
+        password: form.password,
+        first_name: form.first_name,
+        last_name: form.last_name,
+      }),
     onSuccess: (result) => {
       rememberNext(next);
-      navigate(result.verification_required === false
-        ? withNext("/login?registered=1", next)
-        : withNext(`/check-email?email=${encodeURIComponent(form.email)}`, next));
+      navigate(
+        result.verification_required === false
+          ? withNext("/login?registered=1", next)
+          : withNext(`/check-email?email=${encodeURIComponent(form.email)}`, next),
+      );
     },
     onError: (error) => setErrors(fieldErrors(error)),
   });
@@ -96,32 +106,72 @@ export function RegisterPage() {
     if (Object.keys(problems).length === 0) register.mutate();
   };
 
+  const story = REGISTER_STORY.candidate;
+
   return (
-    <AuthCard title="Create your account" subtitle={<>Already have one? <Link to={withNext("/login", next)} className="font-medium text-brand-600 hover:underline">Log in</Link></>}>
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        {register.error && !Object.keys(fieldErrors(register.error)).length && <Alert kind="error">{errorMessage(register.error)}</Alert>}
-        <div className="grid grid-cols-2 gap-3">
-          <TextInput label="First name" autoComplete="given-name" value={form.first_name} onChange={set("first_name")} maxLength={100} />
-          <TextInput label="Last name" autoComplete="family-name" value={form.last_name} onChange={set("last_name")} maxLength={100} />
-        </div>
-        <TextInput label="Email" type="email" autoComplete="email" required value={form.email} onChange={set("email")} error={errors.email} />
-        <TextInput label="Password" type="password" autoComplete="new-password" required value={form.password}
-                   onChange={set("password")} error={errors.password} hint={`At least ${MIN_PASSWORD} characters. A short phrase works well.`} />
-        <TextInput label="Confirm password" type="password" autoComplete="new-password" required value={form.confirm}
-                   onChange={set("confirm")} error={errors.confirm} />
-        <Button type="submit" className="w-full" loading={register.isPending}>Create account</Button>
-        <p className="text-center text-xs text-slate-500">
-          By creating an account you agree to our <Link to="/terms" className="underline">Terms</Link> and{" "}
-          <Link to="/privacy" className="underline">Privacy Policy</Link>.
-        </p>
-        <p className="text-center text-xs text-slate-500">
-          Registering a campus or partner network?{" "}
-          <Link to="/register/institute" className="font-medium text-brand-600 hover:underline">Institute</Link>
-          {" · "}
-          <Link to="/register/partner" className="font-medium text-brand-600 hover:underline">Partner</Link>
-        </p>
+    <AuthPageLayout
+      storyAriaLabel="Candidate signup"
+      kicker={story.kicker}
+      storyTitle={story.title}
+      storyLead={story.lead}
+      highlights={story.highlights}
+      trustSub={story.trustSub}
+      registerTabs="candidate"
+      cardHeadingId="ax-register-candidate"
+      cardTitle="Apply smarter on LinkedIn"
+      cardSubtitle={
+        <>
+          Already registered?{" "}
+          <Link to={withNext("/login", next)} className="ax-login__link">
+            Log in
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={submit} className="ax-login__form ax-login__form--register" noValidate>
+        {register.error && !Object.keys(fieldErrors(register.error)).length && (
+          <Alert kind="error">{errorMessage(register.error)}</Alert>
+        )}
+        <fieldset className="ax-login__section">
+          <legend>About you</legend>
+          <div className="ax-login__fields">
+            <div className="ax-login__row-2">
+              <TextInput label="First name" autoComplete="given-name" value={form.first_name} onChange={set("first_name")} maxLength={100} />
+              <TextInput label="Last name" autoComplete="family-name" value={form.last_name} onChange={set("last_name")} maxLength={100} />
+            </div>
+            <TextInput label="Email" type="email" autoComplete="email" required value={form.email} onChange={set("email")} error={errors.email} />
+          </div>
+        </fieldset>
+        <fieldset className="ax-login__section">
+          <legend>Password</legend>
+          <div className="ax-login__fields">
+            <TextInput
+              label="Password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={form.password}
+              onChange={set("password")}
+              error={errors.password}
+              hint={`At least ${MIN_PASSWORD} characters. A short phrase works well.`}
+            />
+            <TextInput
+              label="Confirm password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={form.confirm}
+              onChange={set("confirm")}
+              error={errors.confirm}
+            />
+          </div>
+        </fieldset>
+        <Button type="submit" className="ax-login__submit w-full" loading={register.isPending}>
+          Create account
+        </Button>
+        <AuthLegalLinks />
       </form>
-    </AuthCard>
+    </AuthPageLayout>
   );
 }
 
@@ -130,26 +180,46 @@ export function CheckEmailPage() {
   const email = params.get("email") ?? "";
   const resend = useMutation({ mutationFn: () => auth.resendVerification(email) });
   return (
-    <AuthCard title="Check your email">
-      <div className="space-y-4 text-center text-sm text-slate-600">
-        <MailCheck className="mx-auto h-12 w-12 text-brand-600" aria-hidden />
-        <p>If <strong className="text-slate-900">{email || "your address"}</strong> can receive email, a verification link is on its way. It expires in 24 hours.</p>
+    <AuthShell
+      brandTagline="Verify your email"
+      kicker="Check your inbox"
+      title="We sent you a link"
+      aside={<CheckEmailAside />}
+    >
+      <div className="auth-flow">
+        <div className="auth-status-icon auth-status-icon-mail" aria-hidden>
+          <MailCheck strokeWidth={1.75} />
+        </div>
+        <p className="auth-flow-lead">
+          If <strong>{email || "your address"}</strong> can receive mail, tap the verification link we sent. It expires in{" "}
+          <strong>24 hours</strong>.
+        </p>
         {resend.isSuccess && <Alert kind="success">We've sent another link.</Alert>}
         {email && (
-          <Button variant="secondary" onClick={() => resend.mutate()} loading={resend.isPending} disabled={resend.isSuccess}>
-            Resend the link
+          <Button
+            variant="secondary"
+            className="auth-secondary w-full"
+            onClick={() => resend.mutate()}
+            loading={resend.isPending}
+            disabled={resend.isSuccess}
+          >
+            Resend verification email
           </Button>
         )}
-        <p><Link to={withNext("/login", params.get("next") ?? storedNext())} className="font-medium text-brand-600 hover:underline">Back to log in</Link></p>
+        <p className="auth-flow-foot">
+          <Link to={withNext("/login", params.get("next") ?? storedNext())} className="auth-text-link">
+            Back to log in
+          </Link>
+        </p>
       </div>
-    </AuthCard>
+    </AuthShell>
   );
 }
 
 export function VerifyEmailPage() {
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
-  const started = useRef(false);                 // tokens are single-use; StrictMode runs effects twice
+  const started = useRef(false);
   const verify = useMutation({ mutationFn: () => auth.verifyEmail(token) });
 
   useEffect(() => {
@@ -160,22 +230,33 @@ export function VerifyEmailPage() {
   }, [token, verify]);
 
   return (
-    <AuthCard title="Verify your email">
-      {!token ? <Alert kind="error">This link is incomplete. Open the link from your email again.</Alert>
-        : verify.isPending || verify.isIdle ? <Spinner label="Verifying…" />
-        : verify.isSuccess ? (
-          <div className="space-y-4 text-center">
-            <Alert kind="success">Your email is verified.</Alert>
-            <ButtonLink to={withNext("/login?verified=1", storedNext())} className="w-full">Log in</ButtonLink>
+    <AuthShell brandTagline="Email verification" kicker="One quick step" title="Verify your email" aside={<CheckEmailAside />}>
+      {!token ? (
+        <Alert kind="error">This link is incomplete. Open the link from your email again.</Alert>
+      ) : verify.isPending || verify.isIdle ? (
+        <div className="auth-flow">
+          <Spinner label="Verifying your email…" />
+        </div>
+      ) : verify.isSuccess ? (
+        <div className="auth-flow">
+          <div className="auth-status-icon auth-status-icon-ok" aria-hidden>
+            <ShieldCheck strokeWidth={1.75} />
           </div>
-        ) : (
-          <div className="space-y-4">
-            <Alert kind="error">{errorMessage(verify.error)}</Alert>
-            <p className="text-sm text-slate-600">Links expire after 24 hours and work once. Log in to request a new one.</p>
-            <ButtonLink to="/login" variant="secondary" className="w-full">Go to log in</ButtonLink>
-          </div>
-        )}
-    </AuthCard>
+          <Alert kind="success">Your email is verified. You're ready to log in.</Alert>
+          <ButtonLink to={withNext("/login?verified=1", storedNext())} className="auth-primary w-full">
+            Continue to log in
+          </ButtonLink>
+        </div>
+      ) : (
+        <div className="auth-flow">
+          <Alert kind="error">{errorMessage(verify.error)}</Alert>
+          <p className="auth-flow-lead">Links expire after 24 hours and work once. Log in to request a new one.</p>
+          <ButtonLink to="/login" variant="secondary" className="auth-secondary w-full">
+            Go to log in
+          </ButtonLink>
+        </div>
+      )}
+    </AuthShell>
   );
 }
 
@@ -183,21 +264,44 @@ export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const forgot = useMutation({ mutationFn: () => auth.forgotPassword(email) });
   return (
-    <AuthCard title="Reset your password" subtitle="We'll email you a link to choose a new password.">
+    <AuthShell
+      brandTagline="Password recovery"
+      kicker="Forgot password"
+      title="We'll email you a reset link"
+      subtitle="Enter the address on your account. If we find a match, you'll get instructions within a minute."
+      aside={<PasswordAside />}
+    >
       {forgot.isSuccess ? (
-        <div className="space-y-4">
-          <Alert kind="success">If an account exists for {email}, a reset link is on its way. It expires in 60 minutes.</Alert>
-          <ButtonLink to="/login" variant="secondary" className="w-full">Back to log in</ButtonLink>
+        <div className="auth-flow">
+          <Alert kind="success">
+            If an account exists for <strong>{email}</strong>, a reset link is on its way. It expires in 60 minutes.
+          </Alert>
+          <ButtonLink to="/login" variant="secondary" className="auth-secondary w-full">
+            Back to log in
+          </ButtonLink>
         </div>
       ) : (
-        <form onSubmit={(e) => { e.preventDefault(); forgot.mutate(); }} className="space-y-4" noValidate>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            forgot.mutate();
+          }}
+          className="auth-form"
+          noValidate
+        >
           {forgot.error && <Alert kind="error">{errorMessage(forgot.error)}</Alert>}
           <TextInput label="Email" type="email" autoComplete="email" required value={email} onChange={setEmail} />
-          <Button type="submit" className="w-full" loading={forgot.isPending} disabled={!email.includes("@")}>Send reset link</Button>
-          <p className="text-center text-sm"><Link to="/login" className="font-medium text-brand-600 hover:underline">Back to log in</Link></p>
+          <Button type="submit" className="auth-primary w-full" loading={forgot.isPending} disabled={!email.includes("@")}>
+            Send reset link
+          </Button>
+          <p className="auth-flow-foot">
+            <Link to="/login" className="auth-text-link">
+              Back to log in
+            </Link>
+          </p>
         </form>
       )}
-    </AuthCard>
+    </AuthShell>
   );
 }
 
@@ -211,7 +315,10 @@ export function ResetPasswordPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const reset = useMutation({
     mutationFn: () => auth.resetPassword(token, password),
-    onSuccess: () => { setSession(null); navigate("/login?reset=1", { replace: true }); },
+    onSuccess: () => {
+      setSession(null);
+      navigate("/login?reset=1", { replace: true });
+    },
     onError: (error) => setErrors({ ...fieldErrors(error), password: fieldErrors(error).new_password ?? "" }),
   });
 
@@ -223,19 +330,58 @@ export function ResetPasswordPage() {
   };
 
   if (!token) {
-    return <AuthCard title="Reset your password"><Alert kind="error">This link is incomplete. <Link to="/forgot-password" className="underline">Request a new one</Link>.</Alert></AuthCard>;
+    return (
+      <AuthShell brandTagline="Password reset" title="Reset your password" aside={<PasswordAside />}>
+        <Alert kind="error">
+          This link is incomplete.{" "}
+          <Link to="/forgot-password" className="auth-text-link">
+            Request a new one
+          </Link>
+          .
+        </Alert>
+      </AuthShell>
+    );
   }
   return (
-    <AuthCard title="Choose a new password" subtitle="This signs you out on every device.">
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        {reset.error && <Alert kind="error">{errorMessage(reset.error)}{" "}
-          {reset.error instanceof ApiError && reset.error.code === "INVALID_TOKEN" && <Link to="/forgot-password" className="underline">Request a new link</Link>}
-        </Alert>}
-        <TextInput label="New password" type="password" autoComplete="new-password" value={password} onChange={setPassword}
-                   error={errors.password || undefined} hint={`At least ${MIN_PASSWORD} characters.`} />
-        <TextInput label="Confirm new password" type="password" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
-        <Button type="submit" className="w-full" loading={reset.isPending}>Update password</Button>
+    <AuthShell
+      brandTagline="New password"
+      kicker="Almost done"
+      title="Choose a new password"
+      subtitle="You'll be signed out on every device after this change."
+      aside={<PasswordAside />}
+    >
+      <form onSubmit={submit} className="auth-form" noValidate>
+        {reset.error && (
+          <Alert kind="error">
+            {errorMessage(reset.error)}{" "}
+            {reset.error instanceof ApiError && reset.error.code === "INVALID_TOKEN" && (
+              <Link to="/forgot-password" className="auth-text-link">
+                Request a new link
+              </Link>
+            )}
+          </Alert>
+        )}
+        <TextInput
+          label="New password"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={setPassword}
+          error={errors.password || undefined}
+          hint={`At least ${MIN_PASSWORD} characters.`}
+        />
+        <TextInput
+          label="Confirm new password"
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={setConfirm}
+          error={errors.confirm}
+        />
+        <Button type="submit" className="auth-primary w-full" loading={reset.isPending}>
+          Update password
+        </Button>
       </form>
-    </AuthCard>
+    </AuthShell>
   );
 }

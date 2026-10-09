@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { homeFor, useSession } from "../auth/session";
 import { cx } from "../components/ui";
@@ -143,7 +143,7 @@ export function PublicLayout() {
         </header>
       </div>
 
-      <div className="flex-1"><Outlet /></div>
+      <div className="flex-1 min-w-0 w-full"><Outlet /></div>
 
       <footer className="home-foot">
         <div className="home-wrap">
@@ -195,25 +195,4 @@ export function PublicLayout() {
   );
 }
 
-export function AuthCard({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
-  return (
-    <main className="home-main fx-home flex-1">
-      <div className="home-wrap mx-auto w-full max-w-md px-4 py-12">
-        <div className="flex flex-col items-center text-center">
-          <img
-            src="/mascot.png"
-            alt=""
-            className="h-20 w-20 rounded-2xl object-cover shadow-md ring-1 ring-slate-200/80"
-            width={80}
-            height={80}
-          />
-          <h1 className="mt-5 font-serif text-2xl font-bold tracking-tight text-slate-900" style={{ fontFamily: "Fraunces, Georgia, serif" }}>
-            {title}
-          </h1>
-          {subtitle && <div className="mt-2 text-sm text-slate-600">{subtitle}</div>}
-        </div>
-        <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">{children}</div>
-      </div>
-    </main>
-  );
-}
+export { AuthCard, AuthShell } from "../features/auth";

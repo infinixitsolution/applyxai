@@ -258,7 +258,7 @@ function PaymentHistory({ payments }: { payments: PaymentRecord[] }) {
           Payments for paid plans appear here.
         </EmptyState>
       ) : (
-        <div className="-mx-2 overflow-x-auto">
+        <div className="table-scroll -mx-2 sm:-mx-2">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-500">
               <tr>

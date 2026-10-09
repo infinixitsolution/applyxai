@@ -91,9 +91,11 @@ export function AutomationPage() {
   return (
     <>
       <PageHeader title="Automation" description="Start, pause, and watch your job applications as they happen."
-                  actions={<Button variant="secondary" onClick={() => setConnectOpen(true)}>
-                    <Laptop className="h-4 w-4" aria-hidden /> Connect a computer
-                  </Button>} />
+                  actions={
+                    <Button variant="secondary" className="w-full sm:w-auto" onClick={() => setConnectOpen(true)}>
+                      <Laptop className="h-4 w-4" aria-hidden /> Connect a computer
+                    </Button>
+                  } />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {data.active

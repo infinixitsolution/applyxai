@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { LandingHero } from "../features/marketing/LandingHero";
 import { useMarketingReveal } from "../hooks/useMarketingReveal";
 import { Spinner } from "../components/ui";
 import { CONTACT_EMAIL } from "../lib/config";
@@ -157,12 +158,9 @@ const LIVE_STATS = [
 
 export function LandingPage() {
   const { data: site } = usePublicSite();
-  const landing = FALLBACK_LANDING;
+  const landing = site?.landing?.hero_title ? site.landing : FALLBACK_LANDING;
   const contact = site?.branding.contact_email ?? CONTACT_EMAIL;
   useMarketingReveal([]);
-
-  const heroSupport =
-    "Search LinkedIn with your filters, optionally tailor a resume to each job description, and submit Easy Apply forms from the Chrome session where you are already signed in.";
 
   return (
     <main className="home-main fx-home">
@@ -172,79 +170,13 @@ export function LandingPage() {
         <span className="fx-orb fx-orb-c" />
       </div>
 
-      <section className="home-block home-hero" data-reveal id="hero">
-        <div className="hero-bg" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="home-wrap">
-          <div className="hero-layout">
-            <div className="hero-copy">
-              <p className="home-kicker">
-                <i /> {landing.hero_badge}
-              </p>
-              <h2>{landing.hero_title}</h2>
-              <p className="home-lead">{landing.hero_subtitle}</p>
-              <p className="hero-support">{heroSupport}</p>
-              <div className="hero-actions">
-                <Link className="home-cta" to="/register">{landing.hero_cta_primary}</Link>
-                <a className="home-cta ghost" href="#how">{landing.hero_cta_secondary}</a>
-              </div>
-              <div className="hero-meta">
-                <span><strong>LinkedIn</strong> Easy Apply</span>
-                <span><strong>Local</strong> Chrome session</span>
-                <span>Password stays on LinkedIn</span>
-              </div>
-              <div className="hero-paths">
-                <Link to="/register"><strong>Candidates</strong><small>Run your LinkedIn search</small></Link>
-                <Link to="/register/institute"><strong>Institutes</strong><small>Campus seat plans</small></Link>
-                <Link to="/register/partner"><strong>Partners</strong><small>Refer institutes</small></Link>
-              </div>
-              <p className="hero-support" style={{ marginTop: 12, fontSize: 12 }}>{landing.hero_footnote}</p>
-            </div>
-            <div className="home-mock" data-reveal>
-              <div className="mock-chrome" aria-hidden="true">
-                <i /><i /><i />
-                <span>LinkedIn workspace</span>
-                <b>Live</b>
-              </div>
-              <article className="hero-job">
-                <p className="mock-label">LinkedIn · Easy Apply</p>
-                <strong>Senior product analyst</strong>
-                <span>Bengaluru · Hybrid · 86% match</span>
-                <div className="hero-meter" aria-hidden="true">
-                  <i style={{ width: "86%" }} />
-                </div>
-              </article>
-              <ol className="hero-steps">
-                <li className="is-active">
-                  <em>01</em>
-                  <div><strong>Search</strong><small>Your titles &amp; locations</small></div>
-                </li>
-                <li className="is-next">
-                  <em>02</em>
-                  <div><strong>Read JD</strong><small>Skills &amp; keywords</small></div>
-                </li>
-                <li className="is-next">
-                  <em>03</em>
-                  <div><strong>Tailor resume</strong><small>From master file</small></div>
-                </li>
-                <li className="is-next">
-                  <em>04</em>
-                  <div><strong>Easy Apply</strong><small>Submit &amp; track</small></div>
-                </li>
-              </ol>
-            </div>
-          </div>
-        </div>
-      </section>
+      <LandingHero landing={landing} />
 
       <section className="home-block home-trust" data-reveal id="sources">
         <div className="home-wrap">
           <h2>One job source, done well</h2>
           <p className="home-lead">ApplyXAI focuses on LinkedIn Easy Apply so discovery, tailoring, and submit stay reliable.</p>
-          <div className="source-table" style={{ gridTemplateColumns: "minmax(0, 1fr)", maxWidth: 420, margin: "22px auto 0" }}>
+          <div className="source-table source-table-single">
             <article className="is-ready">
               <div className="source-head">
                 <img className="source-logo lg" src="/sources/linkedin.svg" alt="LinkedIn" width={52} height={52} />

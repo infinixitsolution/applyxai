@@ -48,11 +48,11 @@ export function ButtonLink({ to, variant = "primary", size = "md", className, ch
 export function Card({ title, actions, children, className }:
   { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200", className)}>
+    <section className={cx("rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5", className)}>
       {(title || actions) && (
-        <header className="mb-4 flex items-center justify-between gap-3">
+        <header className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           {title && <h2 className="text-base font-semibold text-slate-900">{title}</h2>}
-          {actions}
+          {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
         </header>
       )}
       {children}

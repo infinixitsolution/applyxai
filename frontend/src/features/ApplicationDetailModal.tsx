@@ -21,7 +21,7 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
             <Badge tone={STATUS_TONES[data.status]}>{STATUS_LABELS[data.status]}</Badge>
             <span className="text-slate-600">{[data.job.company, data.job.location, data.job.work_setting].filter(Boolean).join(" · ")}</span>
           </div>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
+          <dl className="grid grid-cols-1 gap-3 text-sm xs:grid-cols-2 sm:grid-cols-2">
             <div><dt className="text-slate-500">Discovered</dt><dd>{formatDateTime(data.created_at)}</dd></div>
             <div><dt className="text-slate-500">Applied</dt><dd>{formatDateTime(data.applied_at)}</dd></div>
             {data.job.experience_level && <div><dt className="text-slate-500">Experience</dt><dd>{data.job.experience_level}</dd></div>}

@@ -80,7 +80,7 @@ export function ApplicationsPage() {
           </EmptyState></Card>
         ) : (
           <Card className={isFetching ? "opacity-70 transition-opacity" : ""}>
-            <div className="-mx-5 overflow-x-auto">
+            <div className="table-scroll -mx-4 sm:-mx-5">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">

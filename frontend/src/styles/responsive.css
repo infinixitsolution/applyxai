@@ -1,0 +1,67 @@
+/* Global mobile safety — prevent horizontal page scroll */
+html {
+  -webkit-text-size-adjust: 100%;
+  overflow-x: clip;
+}
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+#root {
+  overflow-x: clip;
+  max-width: 100%;
+  min-height: 100%;
+}
+
+/* Marketing outlet grows for min-h-screen; page content must not stretch to fill it */
+.marketing-surface > .flex-1 {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.marketing-surface > .flex-1 > .home-main {
+  flex: 0 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Scrollable data tables (admin + app) */
+.table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.table-scroll table {
+  min-width: 640px;
+}
+
+/* Modals on small viewports */
+@media (max-width: 639px) {
+  dialog[open] {
+    width: calc(100% - 1rem) !important;
+    max-width: none !important;
+    max-height: min(90dvh, 100vh);
+    margin: auto;
+  }
+  dialog[open] .max-h-\[70vh\] {
+    max-height: min(65dvh, 70vh);
+  }
+}
+
+/* App shell / dashboard density */
+@media (max-width: 639px) {
+  .app-stat-value {
+    font-size: 1.75rem;
+  }
+}
+
+/* Legal / CMS pages inside marketing shell */
+@media (max-width: 639px) {
+  .marketing-surface .page-sheet {
+    padding-top: 8px;
+  }
+  .marketing-surface .page-prose {
+    font-size: 15px;
+  }
+}

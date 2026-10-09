@@ -18,10 +18,10 @@ export function Modal({ open, onClose, title, children, footer, wide }:
   return (
     <dialog ref={ref} aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); onClose(); }}
             onClick={(e) => { if (e.target === ref.current) onClose(); }}
-            className={cx("m-auto w-[calc(100%-2rem)] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40",
+            className={cx("m-auto w-[calc(100%-1rem)] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40 sm:w-[calc(100%-2rem)]",
               wide ? "max-w-2xl" : "max-w-md")}>
-      <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
-        <h2 id={titleId} className="text-base font-semibold text-slate-900">{title}</h2>
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
+        <h2 id={titleId} className="pr-2 text-base font-semibold leading-snug text-slate-900">{title}</h2>
         <button type="button" aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600">
           <X className="h-5 w-5" />
         </button>
