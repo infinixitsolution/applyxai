@@ -202,12 +202,23 @@ def get_effective_auth(db: Session | None) -> EffectiveAuthEmail:
 _LEGACY_FOOTER = "Built on the open-source Auto Job Applier (MIT)."
 
 
+def _normalize_cms_seo(cms: dict) -> None:
+    seo = cms.setdefault("seo", {})
+    defaults = DEFAULT_CMS.get("seo") or {}
+    merged = _deep_merge(dict(defaults), seo if isinstance(seo, dict) else {})
+    default_pages = (defaults.get("pages") or {})
+    pages = merged.get("pages") if isinstance(merged.get("pages"), dict) else {}
+    merged["pages"] = _deep_merge(dict(default_pages), pages)
+    cms["seo"] = merged
+
+
 def get_effective_cms(db: Session) -> dict:
     row = _row(db)
     cms = _deep_merge(DEFAULT_CMS, row.cms or {})
     branding = cms.setdefault("branding", {})
     if (branding.get("footer_line") or "").strip() == _LEGACY_FOOTER:
         branding["footer_line"] = ""
+    _normalize_cms_seo(cms)
     return cms
 
 
@@ -219,6 +230,7 @@ def get_public_site(db: Session) -> dict:
         "banner": cms.get("banner", DEFAULT_CMS["banner"]),
         "landing": cms.get("landing", DEFAULT_CMS["landing"]),
         "legal": cms.get("legal", DEFAULT_CMS["legal"]),
+        "seo": cms.get("seo", DEFAULT_CMS["seo"]),
     }
 
 

@@ -114,6 +114,16 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
 
   useEffect(() => setDrawer(false), [location.pathname]);
 
+  useEffect(() => {
+    let el = document.head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    if (!el) {
+      el = document.createElement("meta");
+      el.name = "robots";
+      document.head.appendChild(el);
+    }
+    el.content = "noindex, nofollow";
+  }, []);
+
   const name = user ? [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email : "";
   const switchLink = "hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 sm:inline-flex";
 

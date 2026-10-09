@@ -231,7 +231,9 @@ Switching to another paid plan starts a new subscription; when it activates, the
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | Liveness + database check; 503 `DATABASE_UNAVAILABLE` if the DB is down |
-| GET | `/site/public` | Public. `{branding, banner, landing, legal}` for the marketing site (no auth) |
+| GET | `/site/public` | Public. `{branding, banner, landing, legal, seo}` for the marketing site (no auth) |
+| GET | `/site/robots.txt` | Public `robots.txt` from CMS SEO settings |
+| GET | `/site/sitemap.xml` | Public sitemap for marketing routes |
 | GET | `/plans` | Public. Active plans for the pricing page: `[{code, name, price_cents, currency, interval, limits: {applications_per_month, resumes}}]`. Falls back to `backend/app/core/plans.py` when the `plans` table is empty |
 
 ## Admin

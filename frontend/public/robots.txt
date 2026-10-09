@@ -1,0 +1,6 @@
+# Fallback for local dev. Production serves /robots.txt from the API (see scripts/nginx/applyxai.conf).
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /admin/
+Sitemap: https://applyxai.com/sitemap.xml

@@ -62,11 +62,55 @@ class LegalIn(BaseModel):
     refund_md: str = Field(max_length=100_000)
 
 
+class SeoPageIn(BaseModel):
+    title: str = Field(max_length=200)
+    description: str = Field(max_length=500)
+    noindex: bool = False
+
+
+class SeoIn(BaseModel):
+    site_url: str = Field(min_length=8, max_length=512)
+    default_title: str = Field(min_length=1, max_length=200)
+    title_suffix: str = Field(max_length=80)
+    default_description: str = Field(min_length=1, max_length=500)
+    default_keywords: str = Field(max_length=500)
+    og_image_url: str = Field(max_length=512)
+    twitter_card: Literal["summary", "summary_large_image"] = "summary_large_image"
+    robots_index: bool = True
+    robots_disallow: list[str] = Field(default_factory=lambda: ["/app/", "/admin/", "/onboarding"], max_length=20)
+    google_site_verification: str = Field(max_length=200)
+    bing_site_verification: str = Field(max_length=200)
+    pages: dict[str, SeoPageIn]
+
+    @field_validator("site_url")
+    @classmethod
+    def _strip_site_url(cls, value: str) -> str:
+        v = value.strip()
+        return v.rstrip("/") if v.startswith("http") else v
+
+    @field_validator("og_image_url")
+    @classmethod
+    def _strip_og_url(cls, value: str) -> str:
+        return value.strip()
+
+
+SEO_PAGE_KEYS = ("home", "login", "register", "privacy", "terms", "refund")
+
+
 class CmsIn(BaseModel):
     branding: BrandingIn
     banner: BannerIn
     landing: LandingIn
     legal: LegalIn
+    seo: SeoIn
+
+    @field_validator("seo")
+    @classmethod
+    def _seo_pages_complete(cls, seo: SeoIn) -> SeoIn:
+        missing = [k for k in SEO_PAGE_KEYS if k not in seo.pages]
+        if missing:
+            raise ValueError(f"SEO pages missing keys: {', '.join(missing)}")
+        return seo
 
 
 class SmtpIn(BaseModel):

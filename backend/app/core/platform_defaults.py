@@ -45,6 +45,54 @@ DEFAULT_CMS: dict = {
         ],
         "faq_contact_line": "Still have questions? Email us at {contact_email}.",
     },
+    "seo": {
+        "site_url": "https://applyxai.com",
+        "default_title": "ApplyXAI — LinkedIn Easy Apply automation",
+        "title_suffix": "",
+        "default_description": (
+            "ApplyXAI automates LinkedIn Easy Apply — AI resume tailoring, screening answers, "
+            "and application tracking from your own browser."
+        ),
+        "default_keywords": "LinkedIn Easy Apply, job search automation, AI resume, application tracking, ApplyXAI",
+        "og_image_url": "https://applyxai.com/mascot.png",
+        "twitter_card": "summary_large_image",
+        "robots_index": True,
+        "robots_disallow": ["/app/", "/admin/", "/onboarding"],
+        "google_site_verification": "",
+        "bing_site_verification": "",
+        "pages": {
+            "home": {
+                "title": "",
+                "description": "",
+                "noindex": False,
+            },
+            "login": {
+                "title": "Sign in",
+                "description": "Sign in to your ApplyXAI account to manage LinkedIn Easy Apply automation.",
+                "noindex": True,
+            },
+            "register": {
+                "title": "Create account",
+                "description": "Create a free ApplyXAI account and start automating LinkedIn Easy Apply.",
+                "noindex": False,
+            },
+            "privacy": {
+                "title": "Privacy Policy",
+                "description": "How ApplyXAI collects, uses, and protects your data.",
+                "noindex": False,
+            },
+            "terms": {
+                "title": "Terms of Service",
+                "description": "Terms for using the ApplyXAI job application automation platform.",
+                "noindex": False,
+            },
+            "refund": {
+                "title": "Refund Policy",
+                "description": "ApplyXAI subscription refund policy.",
+                "noindex": False,
+            },
+        },
+    },
     "legal": {
         "privacy_md": """This policy explains what ApplyXAI collects, why, and the choices you have.
 

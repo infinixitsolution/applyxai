@@ -16,7 +16,18 @@ def test_public_site_no_auth(api):
     data = resp.json()["data"]
     assert data["branding"]["app_name"] == DEFAULT_CMS["branding"]["app_name"]
     assert "landing" in data
+    assert "seo" in data
+    assert data["seo"]["site_url"]
     assert "smtp" not in data
+
+
+def test_robots_and_sitemap(api):
+    robots = api.get("/api/site/robots.txt")
+    assert robots.status_code == 200
+    assert "Sitemap:" in robots.text
+    sitemap = api.get("/api/site/sitemap.xml")
+    assert sitemap.status_code == 200
+    assert "<urlset" in sitemap.text
 
 
 def test_admin_settings_requires_admin(api, make_user):

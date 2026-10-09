@@ -108,6 +108,22 @@ function CmsTab({ data }: { data: PlatformCms }) {
     setCms((c) => ({ ...c, landing: { ...c.landing, ...patch } }));
   const setLegal = (patch: Partial<PlatformCms["legal"]>) =>
     setCms((c) => ({ ...c, legal: { ...c.legal, ...patch } }));
+  const setSeo = (patch: Partial<PlatformCms["seo"]>) =>
+    setCms((c) => ({ ...c, seo: { ...c.seo, ...patch } }));
+  const setSeoPage = (key: keyof PlatformCms["seo"]["pages"], patch: Partial<PlatformCms["seo"]["pages"][typeof key]>) =>
+    setCms((c) => ({
+      ...c,
+      seo: { ...c.seo, pages: { ...c.seo.pages, [key]: { ...c.seo.pages[key], ...patch } } },
+    }));
+
+  const SEO_PAGE_LABELS: Record<keyof PlatformCms["seo"]["pages"], string> = {
+    home: "Home / landing",
+    login: "Sign in",
+    register: "Register",
+    privacy: "Privacy policy",
+    terms: "Terms of service",
+    refund: "Refund policy",
+  };
 
   return (
     <div className="space-y-6">
@@ -116,6 +132,57 @@ function CmsTab({ data }: { data: PlatformCms }) {
           <TextInput label="App name" value={cms.branding.app_name} onChange={(v) => setBranding({ app_name: v })} maxLength={120} />
           <TextInput label="Contact email" type="email" value={cms.branding.contact_email} onChange={(v) => setBranding({ contact_email: v })} maxLength={320} />
           <TextInput label="Footer line" className="sm:col-span-2" value={cms.branding.footer_line} onChange={(v) => setBranding({ footer_line: v })} maxLength={500} />
+          <TextInput label="Twitter @handle" value={cms.branding.social_links.twitter} onChange={(v) => setBranding({ social_links: { ...cms.branding.social_links, twitter: v } })} maxLength={80} placeholder="@applyxai" />
+          <TextInput label="LinkedIn URL" value={cms.branding.social_links.linkedin} onChange={(v) => setBranding({ social_links: { ...cms.branding.social_links, linkedin: v } })} maxLength={512} />
+          <TextInput label="GitHub URL" className="sm:col-span-2" value={cms.branding.social_links.github} onChange={(v) => setBranding({ social_links: { ...cms.branding.social_links, github: v } })} maxLength={512} />
+        </div>
+      </Card>
+      <Card title="SEO & search / social">
+        <p className="mb-4 text-sm text-slate-600">
+          Controls page titles, meta descriptions, Open Graph, Twitter cards, and crawler rules. Public URLs:{" "}
+          <a className="text-brand-600 underline" href="/robots.txt" target="_blank" rel="noreferrer">/robots.txt</a>
+          {" · "}
+          <a className="text-brand-600 underline" href="/sitemap.xml" target="_blank" rel="noreferrer">/sitemap.xml</a>
+          {" "}(proxied from API in production).
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextInput label="Canonical site URL" value={cms.seo.site_url} onChange={(v) => setSeo({ site_url: v })} maxLength={512} />
+          <TextInput label="Default meta title" value={cms.seo.default_title} onChange={(v) => setSeo({ default_title: v })} maxLength={200} />
+          <TextInput label="Title suffix (optional)" value={cms.seo.title_suffix} onChange={(v) => setSeo({ title_suffix: v })} maxLength={80} placeholder=" | ApplyXAI" />
+          <TextInput label="Open Graph image URL" value={cms.seo.og_image_url} onChange={(v) => setSeo({ og_image_url: v })} maxLength={512} />
+          <TextArea label="Default meta description" className="sm:col-span-2" value={cms.seo.default_description} onChange={(v) => setSeo({ default_description: v })} rows={3} maxLength={500} />
+          <TextInput label="Meta keywords" className="sm:col-span-2" value={cms.seo.default_keywords} onChange={(v) => setSeo({ default_keywords: v })} maxLength={500} />
+          <TextInput label="Google Search Console verification" value={cms.seo.google_site_verification} onChange={(v) => setSeo({ google_site_verification: v })} maxLength={200} />
+          <TextInput label="Bing Webmaster verification" value={cms.seo.bing_site_verification} onChange={(v) => setSeo({ bing_site_verification: v })} maxLength={200} />
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input type="checkbox" checked={cms.seo.robots_index} onChange={(e) => setSeo({ robots_index: e.target.checked })} />
+            Allow search engines to index public marketing pages
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="mb-1 block font-medium text-slate-700">Twitter card size</span>
+            <select className="w-full rounded-lg border border-slate-300 px-3 py-2" value={cms.seo.twitter_card}
+                    onChange={(e) => setSeo({ twitter_card: e.target.value as PlatformCms["seo"]["twitter_card"] })}>
+              <option value="summary_large_image">Large image</option>
+              <option value="summary">Summary</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-6 space-y-4 border-t border-slate-100 pt-4">
+          <p className="text-sm font-medium text-slate-800">Per-page SEO</p>
+          {(Object.keys(SEO_PAGE_LABELS) as (keyof PlatformCms["seo"]["pages"])[]).map((key) => (
+            <div key={key} className="rounded-lg border border-slate-100 p-3">
+              <p className="mb-2 text-sm font-medium text-slate-700">{SEO_PAGE_LABELS[key]}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <TextInput label="Title override" value={cms.seo.pages[key].title} onChange={(v) => setSeoPage(key, { title: v })} maxLength={200} placeholder="Uses default / hero if empty" />
+                <label className="flex items-end gap-2 pb-2 text-sm">
+                  <input type="checkbox" checked={cms.seo.pages[key].noindex} onChange={(e) => setSeoPage(key, { noindex: e.target.checked })} />
+                  Hide from search (noindex)
+                </label>
+                <TextInput label="Description override" className="sm:col-span-2" value={cms.seo.pages[key].description}
+                           onChange={(v) => setSeoPage(key, { description: v })} maxLength={500} />
+              </div>
+            </div>
+          ))}
         </div>
       </Card>
       <Card title="Announcement banner">

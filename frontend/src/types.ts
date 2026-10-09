@@ -469,6 +469,29 @@ export interface TestEmailResult {
   error: string;
 }
 
+export type SeoPageKey = "home" | "login" | "register" | "privacy" | "terms" | "refund";
+
+export interface SeoPageMeta {
+  title: string;
+  description: string;
+  noindex: boolean;
+}
+
+export interface SiteSeoSettings {
+  site_url: string;
+  default_title: string;
+  title_suffix: string;
+  default_description: string;
+  default_keywords: string;
+  og_image_url: string;
+  twitter_card: "summary" | "summary_large_image";
+  robots_index: boolean;
+  robots_disallow: string[];
+  google_site_verification: string;
+  bing_site_verification: string;
+  pages: Record<SeoPageKey, SeoPageMeta>;
+}
+
 export interface PlatformCms {
   branding: {
     app_name: string;
@@ -495,6 +518,7 @@ export interface PlatformCms {
     faq_contact_line: string;
   };
   legal: { privacy_md: string; terms_md: string; refund_md: string };
+  seo: SiteSeoSettings;
 }
 
 export interface AuthEmailTemplate {
@@ -609,7 +633,7 @@ export interface ApplicationPreferencesOut {
   ai_available: boolean;
 }
 
-export type PublicSite = Pick<PlatformCms, "branding" | "banner" | "landing" | "legal">;
+export type PublicSite = Pick<PlatformCms, "branding" | "banner" | "landing" | "legal" | "seo">;
 
 export interface AdminPlan extends Plan {
   is_active: boolean;

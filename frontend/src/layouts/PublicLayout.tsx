@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { homeFor, useSession } from "../auth/session";
 import { cx } from "../components/ui";
+import { SiteSeo, seoPageForPath } from "../components/SiteSeo";
 import { APP_NAME, CONTACT_EMAIL } from "../lib/config";
 import { usePublicSite } from "../lib/usePublicSite";
 
@@ -50,6 +51,7 @@ export function PublicLayout() {
 
   return (
     <div className="marketing-surface flex min-h-screen flex-col">
+      <SiteSeo page={seoPageForPath(location.pathname)} />
       {banner?.enabled && banner.message && (
         <div className={cx("border-b px-4 py-2 text-center text-sm", BANNER_TONE[banner.tone] ?? BANNER_TONE.info)}>
           {banner.message}
