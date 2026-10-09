@@ -6,6 +6,7 @@ import { App } from "./App";
 import { forgetUser, ME_KEY } from "./auth/session";
 import { ToastProvider } from "./components/Toast";
 import "./index.css";
+import "./styles/home.css";
 import { ApiError, onSessionExpired } from "./services/api";
 
 const queryClient = new QueryClient({

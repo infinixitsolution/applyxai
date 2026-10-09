@@ -32,6 +32,12 @@ def build(tmp_path, values=VALUES, **kwargs):
     return build_run_config(values, history_dir=tmp_path / "history", run_dir=tmp_path / "runs" / "r1", **kwargs)
 
 
+def test_resume_mode_from_values_goes_to_applyxai_section(tmp_path):
+    config = build(tmp_path, {**VALUES, "resume_mode": "tailor_if_gate"})
+    assert config["applyxai"]["resume_mode"] == "tailor_if_gate"
+    assert "resume_mode" not in config["search"]
+
+
 def test_values_are_routed_to_their_engine_sections(tmp_path):
     config = build(tmp_path)
     assert config["personals"]["first_name"] == "Priya" and config["personals"]["current_city"] == "Bengaluru"

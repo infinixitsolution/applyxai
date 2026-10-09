@@ -76,7 +76,11 @@ class RazorpayProvider:
     def __init__(self, key_id: str, key_secret: str, webhook_secret: str, client: httpx.Client | None = None):
         if not key_id or not key_secret:
             raise PaymentError("PAYMENTS_NOT_CONFIGURED", "Online payments aren't set up yet.", 503)
+        from backend.app.services.payments.razorpay_util import razorpay_mode_from_key_id, validate_key_id
+
+        validate_key_id(key_id)
         self.key_id, self._secret, self._webhook_secret = key_id, key_secret, webhook_secret
+        self.mode = razorpay_mode_from_key_id(key_id)
         self._client = client or httpx.Client(base_url=API_BASE, timeout=20)
 
     def __repr__(self) -> str:
@@ -104,9 +108,10 @@ class RazorpayProvider:
         return data
 
     def create_plan(self, plan: Plan) -> str:
+        from backend.app.services.billing_service import charge_cents
         data = self._call("POST", "/plans", {
             "period": "monthly", "interval": 1,
-            "item": {"name": f"ApplyXAI {plan.name}", "amount": plan.price_cents, "currency": plan.currency},
+            "item": {"name": f"ApplyXAI {plan.name}", "amount": charge_cents(plan), "currency": plan.currency},
             "notes": {"applyxai_plan": plan.code},
         })
         return str(data["id"])
@@ -130,11 +135,42 @@ class RazorpayProvider:
         return _payment(self._call("GET", f"/payments/{payment_id}"))
 
     def checkout_options(self, subscription_id: str, plan: Plan, user: User) -> dict:
+        from backend.app.services.payments.razorpay_util import TEST_CHECKOUT_HINT
+
         name = " ".join(p for p in (user.first_name, user.last_name) if p)
-        return {
-            "key": self.key_id, "subscription_id": subscription_id, "name": settings.APP_NAME,
-            "description": f"{plan.name} plan, billed monthly", "prefill": {"email": user.email, "name": name},
+        opts: dict = {
+            "key": self.key_id,
+            "subscription_id": subscription_id,
+            "name": settings.APP_NAME,
+            "description": f"{plan.name} plan, billed monthly",
+            "currency": plan.currency,
+            "prefill": {"email": user.email, "name": name or user.email.split("@")[0]},
+            "theme": {"color": "#4f46e5"},
+            "modal": {"confirm_close": True, "escape": True},
+            "razorpay_mode": self.mode,
         }
+        if self.mode == "test":
+            opts["notes"] = {"applyxai_checkout": "test"}
+            opts["test_hint"] = TEST_CHECKOUT_HINT
+        return opts
+
+    def verify_credentials(self) -> dict:
+        """Validate Key ID + secret against Razorpay (same API for test and live keys)."""
+        from backend.app.services.payments.razorpay_util import TEST_CHECKOUT_HINT
+
+        try:
+            resp = self._client.get("/payments", params={"count": 1}, auth=(self.key_id, self._secret), timeout=20)
+        except httpx.HTTPError as exc:
+            logger.warning("Razorpay credential check failed: %s", type(exc).__name__)
+            raise _UNAVAILABLE from None
+        if resp.status_code >= 400:
+            raise PaymentError("PAYMENTS_NOT_CONFIGURED", "Razorpay rejected these API keys. Check Key ID and secret.", 400)
+        out = {"ok": True, "mode": self.mode, "key_id_prefix": self.key_id[:12] + "…"}
+        if self.mode == "test":
+            out["test_checkout_hint"] = TEST_CHECKOUT_HINT
+        else:
+            out["message"] = "Live keys verified. Checkout will charge real payment methods."
+        return out
 
     def verify_checkout(self, payment_id: str, subscription_id: str, signature: str) -> CheckoutConfirmation:
         expected = _sign(self._secret, f"{payment_id}|{subscription_id}".encode())

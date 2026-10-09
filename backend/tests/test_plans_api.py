@@ -6,7 +6,7 @@ def test_plans_are_public_and_default_to_the_catalogue(api):
     resp = api.get("/api/plans")
     assert resp.status_code == 200
     plans = resp.json()["data"]["plans"]
-    assert [p["code"] for p in plans] == list(PLAN_LIMITS)
+    assert [p["code"] for p in plans] == [c for c, p in PLAN_LIMITS.items() if p.get("kind", "personal") == "personal"]
     free = plans[0]
     assert free["price_cents"] == 0 and free["limits"] == {"applications_per_month": 10, "resumes": 1}
 

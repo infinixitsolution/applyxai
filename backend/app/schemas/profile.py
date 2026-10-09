@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from automation.options import DATE_POSTED, EXPERIENCE_LEVELS, JOB_TYPES, SORT_BY, WORK_SETTINGS
 from backend.app.services.engine_fields import SEARCH_EXTRA_FIELDS, FieldErrors, clean_str_list, validate_mapping
+from backend.app.services.resume_templates import DEFAULT_TEMPLATE_ID, normalize_template_id
 
 _PHONE = re.compile(r"^[0-9+()\-.\s]{4,32}$")
 
@@ -24,6 +25,27 @@ def _one_of(value: str, allowed: list[str], label: str) -> str:
     return value
 
 
+class EducationEntryIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    school: str = Field(default="", max_length=255)
+    degree: str = Field(default="", max_length=255)
+    field: str = Field(default="", max_length=255)
+    start_year: str = Field(default="", max_length=16)
+    end_year: str = Field(default="", max_length=16)
+
+
+class WorkEntryIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    title: str = Field(default="", max_length=255)
+    company: str = Field(default="", max_length=255)
+    location: str = Field(default="", max_length=255)
+    start: str = Field(default="", max_length=32)
+    end: str = Field(default="", max_length=32)
+    summary: str = Field(default="", max_length=2000)
+
+
 class ProfileIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -38,6 +60,21 @@ class ProfileIn(BaseModel):
     skills: list[str] = Field(default_factory=list)
     preferred_roles: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
+    preferred_resume_template: str = Field(default=DEFAULT_TEMPLATE_ID, max_length=32)
+    education: list[EducationEntryIn] = Field(default_factory=list, max_length=25)
+    work_history: list[WorkEntryIn] = Field(default_factory=list, max_length=40)
+
+    @field_validator("education", "work_history")
+    @classmethod
+    def _structured_lists(cls, v):
+        if len(v) > 40:
+            raise ValueError("Too many entries")
+        return v
+
+    @field_validator("preferred_resume_template")
+    @classmethod
+    def _resume_template(cls, v: str) -> str:
+        return normalize_template_id(v)
 
     @field_validator("phone")
     @classmethod
@@ -156,6 +193,9 @@ class ResumeOut(BaseModel):
     file_size: int
     is_default: bool
     created_at: datetime
+    master_skills: list[str] | None = None
+    subskills_by_master: dict | None = None
+    ai_metadata: dict | None = None
 
 
 class ResumeRenameIn(BaseModel):

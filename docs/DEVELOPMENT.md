@@ -131,6 +131,22 @@ No test needs a real browser, network access, or a running database server. Opti
 - `OPENAI_API_KEY` enables the live AI smoke test.
 - `TEST_POSTGRES_URL` also runs the migration test against PostgreSQL (see `docs/DATABASE.md`).
 
+## Razorpay payments
+
+Billing uses **Razorpay Subscriptions** (Checkout in the browser, server-side signature verification, webhooks for renewals).
+
+1. **Admin:** `/admin/system` → **Payments** — set mode to Razorpay, paste **test** Key ID (`rzp_test_…`) and secret for sandbox checkout (same UI as live; use test card `4111 1111 1111 1111` or UPI `success@razorpay`). For production, replace with **`rzp_live_…`** keys and webhook secret, then **Test API keys** and **Sync plans to Razorpay** again (live plans are separate from test).
+2. **Or `.env`:** `PAYMENT_PROVIDER=razorpay`, `PAYMENT_KEY_ID`, `PAYMENT_SECRET`, `PAYMENT_WEBHOOK_SECRET`, then `venv\Scripts\python -m backend.app.cli sync-plans`.
+3. **Webhook:** `https://<your-api-host>/api/billing/webhook/razorpay` with subscription events enabled in the Razorpay Dashboard.
+
+Users pay on `/app/billing`; the app never stores card or UPI details.
+
+## Platform AI (SaaS)
+
+Application and resume AI use **admin-configured** keys in `/admin/system` → **AI**, not `config/secrets.py` on supervised runs. Before enabling user toggles on Preferences or resume tailor in production, set provider, models, and an API key there (encrypted at rest). User-facing copy should remind people to verify AI-generated answers and resumes.
+
+Per-run JD tailoring: set **Job preferences → Advanced → Resume for each job** to `tailor_if_gate` (requires platform **Resume AI**, default resume with **master skills**, and match ≥60% on the JD). The agent calls `POST /api/agent/runs/{id}/jobs/{job_id}/tailor`, saves a version linked to the application, and uploads it to LinkedIn. Manual tailoring remains on **Resumes → Tailor**.
+
 ## Rules while the migration is in progress
 
 - Keep `python app.py` working after every change, and keep the full test suite green.

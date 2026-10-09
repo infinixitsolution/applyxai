@@ -13,7 +13,8 @@ from backend.app.core.errors import AppError, ok
 from backend.app.core.pagination import PageParams, page_params, page_response, paginate
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import ApplicationStatus, User
-from backend.app.schemas.activity import ApplicationDetail, ApplicationOut
+from backend.app.models import Resume
+from backend.app.schemas.activity import ApplicationDetail, ApplicationOut, ResumeVersionOut
 from backend.app.services import application_service
 from backend.app.services.application_service import DEFAULT_SORT
 
@@ -41,8 +42,57 @@ class _Filters:
                            automation_job_id=automation_job_id, sort=sort)
 
 
-def _out(app) -> dict:
-    return ApplicationOut.model_validate(app).model_dump(mode="json")
+def _resume_version(resume: Resume | None) -> dict | None:
+    if resume is None:
+        return None
+    meta = resume.ai_metadata or {}
+    payload = ResumeVersionOut.model_validate(resume).model_dump(mode="json")
+    payload["generated_by"] = meta.get("generated_by")
+    return payload
+
+
+def _display_resume(primary: Resume | None, versions: list[Resume]) -> Resume | None:
+    """Prefer the per-job AI copy over the default master file when both exist."""
+    for resume in versions:
+        if (resume.ai_metadata or {}).get("generated_by") == "ai":
+            return resume
+    if primary is not None and not primary.is_default:
+        return primary
+    if primary is not None:
+        return primary
+    return versions[0] if versions else None
+
+
+def _out(db: Session, user_id: uuid.UUID, app) -> dict:
+    data = ApplicationOut.model_validate(app).model_dump(mode="json")
+    versions = application_service.generated_resumes_for_applications(db, user_id, [app.id]).get(app.id, [])
+    data["generated_resumes"] = [_resume_version(r) for r in versions]
+    primary = None
+    if app.resume_id:
+        primary = db.get(Resume, app.resume_id)
+        if primary is not None and primary.user_id != user_id:
+            primary = None
+    shown = _display_resume(primary, versions)
+    data["resume"] = _resume_version(shown)
+    return data
+
+
+def _out_many(db: Session, user_id: uuid.UUID, apps: list) -> list[dict]:
+    if not apps:
+        return []
+    app_ids = [a.id for a in apps]
+    grouped = application_service.generated_resumes_for_applications(db, user_id, app_ids)
+    resume_ids = [a.resume_id for a in apps if a.resume_id]
+    primaries = application_service.primary_resumes(db, user_id, resume_ids)
+    rows: list[dict] = []
+    for app in apps:
+        data = ApplicationOut.model_validate(app).model_dump(mode="json")
+        versions = grouped.get(app.id, [])
+        data["generated_resumes"] = [_resume_version(r) for r in versions]
+        primary = primaries.get(app.resume_id) if app.resume_id else None
+        data["resume"] = _resume_version(_display_resume(primary, versions))
+        rows.append(data)
+    return rows
 
 
 def _csv_cell(value) -> str:
@@ -55,7 +105,7 @@ def _csv_cell(value) -> str:
 def list_applications(filters: _Filters = Depends(), page: PageParams = Depends(page_params),
                       user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     items, total = paginate(db, application_service.applications_query(user.id, **filters.kwargs), page)
-    return ok(page_response([_out(a) for a in items], total, page))
+    return ok(page_response(_out_many(db, user.id, items), total, page))
 
 
 @router.get("/export", summary="Download your applications as CSV (same filters as the list)")
@@ -84,4 +134,4 @@ def export_applications(filters: _Filters = Depends(), user: User = Depends(get_
 @router.get("/{application_id}", summary="One of your applications, with the full job")
 def get_application(application_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     app = application_service.get_application(db, user.id, application_id)
-    return ok(ApplicationDetail.model_validate(app).model_dump(mode="json"))
+    return ok(_out(db, user.id, app))

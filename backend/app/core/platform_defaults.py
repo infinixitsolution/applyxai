@@ -6,21 +6,18 @@ DEFAULT_CMS: dict = {
     "branding": {
         "app_name": "ApplyXAI",
         "contact_email": "support@applyxai.example",
-        "footer_line": "Built on the open-source Auto Job Applier (MIT).",
+        "footer_line": "",
         "social_links": {"twitter": "", "linkedin": "", "github": ""},
     },
     "banner": {"enabled": False, "message": "", "tone": "info"},
     "landing": {
-        "hero_badge": "Job search automation, under your control",
-        "hero_title": "AI-Powered Job Search & Application Management",
-        "hero_subtitle": (
-            "Set your preferences once. ApplyXAI finds matching roles, fills in Easy Apply forms with your answers, "
-            "and keeps a clear record of every application."
-        ),
-        "hero_cta_primary": "Get started free",
+        "hero_badge": "LinkedIn Easy Apply automation",
+        "hero_title": "Apply on LinkedIn with AI — safely, from your browser.",
+        "hero_subtitle": "Set preferences once. Tailor when you want. Track every application.",
+        "hero_cta_primary": "Start applying free",
         "hero_cta_secondary": "See how it works",
-        "hero_footnote": "No credit card needed for the free plan.",
-        "features_heading": "Everything you need for a focused search",
+        "hero_footnote": "LinkedIn only today. You sign in locally — we never see your password.",
+        "features_heading": "Everything for a focused LinkedIn search",
         "features": [
             {"icon": "sliders", "title": "Precise job preferences", "text": "Pick titles, locations, experience levels, job types, and work settings with the same filters LinkedIn uses."},
             {"icon": "bot", "title": "Automated Easy Apply", "text": "The automation fills in application forms with your saved answers and your chosen resume, and records every outcome."},
@@ -37,13 +34,13 @@ DEFAULT_CMS: dict = {
             {"title": "Track the results", "text": "Review applications, failures, and monthly usage on your dashboard."},
         ],
         "pricing_heading": "Simple, transparent pricing",
-        "pricing_subtitle": "Start free. Upgrade when you need more applications.",
+        "pricing_subtitle": "All plans include LinkedIn Easy Apply automation and application history.",
         "faq_heading": "Frequently asked questions",
         "faq": [
             {"question": "Does ApplyXAI guarantee interviews or a job?", "answer": "No. ApplyXAI saves you time on repetitive applications. Whether you hear back depends on employers, your profile, and the roles you choose."},
-            {"question": "Which job sites are supported?", "answer": "LinkedIn Easy Apply today. Jobs that use an external application site are recorded so you can finish them yourself."},
-            {"question": "Do you store my LinkedIn password?", "answer": "No. The automation runs in a browser on your own computer, and you sign in there. ApplyXAI never receives your job-site password."},
-            {"question": "Is automated applying allowed?", "answer": "Job sites set their own rules, and some limit automation. You're responsible for using ApplyXAI in line with the terms of the sites you use. Review applications and keep the volume reasonable."},
+            {"question": "Which job sites are supported?", "answer": "LinkedIn Easy Apply only. Jobs that redirect to an external site are saved in your history so you can finish them manually."},
+            {"question": "Do you store my LinkedIn password?", "answer": "No. Automation runs in Chrome on your computer. You sign in to LinkedIn there; ApplyXAI never receives your password or OTP codes."},
+            {"question": "Is automated applying allowed on LinkedIn?", "answer": "LinkedIn's terms restrict some automated activity. You are responsible for compliant use — review submissions and keep volume reasonable."},
             {"question": "Can I cancel at any time?", "answer": "Yes. Paid plans can be cancelled at any time and stay active until the end of the billing period. See our refund policy for details."},
         ],
         "faq_contact_line": "Still have questions? Email us at {contact_email}.",
@@ -149,4 +146,21 @@ DEFAULT_NOTIFICATIONS: dict = {
         "label": "Complimentary plan granted",
         "description": "When an admin grants a complimentary plan.",
     },
+}
+
+DEFAULT_PAYMENTS: dict = {
+    "provider": "null",
+    "key_id": "",
+}
+
+DEFAULT_AI: dict = {
+    "enabled": False,
+    "provider": "openai",
+    "base_url": "https://api.openai.com/v1",
+    "models": {
+        "fast": "gpt-4o-mini",
+        "strong": "gpt-4o",
+        "embedding": "text-embedding-3-small",
+    },
+    "features": {"applications": True, "resume": True},
 }

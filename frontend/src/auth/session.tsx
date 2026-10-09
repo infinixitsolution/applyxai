@@ -40,14 +40,46 @@ export function useSetSession() {
   };
 }
 
+const NEXT_STORAGE = "applyxai.next";
+
+function isSafeNext(next: string | null): next is string {
+  return Boolean(next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\"));
+}
+
 /** Only allow same-site relative paths as post-login destinations (no open redirects). */
 export function safeNext(next: string | null, fallback = "/app"): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : fallback;
+  return isSafeNext(next) ? next : fallback;
+}
+
+/** Keep `next` across register → verify email → login (query strings get dropped on the email link). */
+export function rememberNext(next: string | null): void {
+  if (typeof sessionStorage === "undefined") return;
+  if (isSafeNext(next)) sessionStorage.setItem(NEXT_STORAGE, next);
+}
+
+export function storedNext(): string | null {
+  if (typeof sessionStorage === "undefined") return null;
+  return sessionStorage.getItem(NEXT_STORAGE);
+}
+
+export function consumeNext(): string | null {
+  const value = storedNext();
+  if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(NEXT_STORAGE);
+  return value;
+}
+
+/** Append a safe `next` query to a path that may already have search params. */
+export function withNext(path: string, next: string | null): string {
+  if (!isSafeNext(next)) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}`;
 }
 
 /** Where a signed-in user lands by default. */
 export function homeFor(user: User): string {
-  return user.is_admin ? "/admin" : "/app";
+  if (user.is_admin) return "/admin";
+  if (user.workspace === "institute") return "/institute";
+  if (user.workspace === "partner") return "/partner";
+  return "/app";
 }
 
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -72,13 +104,29 @@ export function GuestOnly({ children }: { children: ReactNode }) {
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const { data: user, isLoading } = useSession();
   if (isLoading) return <Spinner />;
-  if (!user?.is_admin) return <Navigate to="/app" replace />;
+  if (!user?.is_admin) return <Navigate to={user ? homeFor(user) : "/login"} replace />;
+  return <>{children}</>;
+}
+
+export function RequireInstitute({ children }: { children: ReactNode }) {
+  const { data: user, isLoading } = useSession();
+  if (isLoading) return <Spinner />;
+  if (user?.workspace !== "institute") return <Navigate to={user ? homeFor(user) : "/login"} replace />;
+  return <>{children}</>;
+}
+
+export function RequirePartner({ children }: { children: ReactNode }) {
+  const { data: user, isLoading } = useSession();
+  if (isLoading) return <Spinner />;
+  if (user?.workspace !== "partner") return <Navigate to={user ? homeFor(user) : "/login"} replace />;
   return <>{children}</>;
 }
 
 /** Until job preferences are saved, the app routes to the onboarding wizard. */
 export function RequireOnboarded({ children }: { children: ReactNode }) {
+  const { data: user } = useSession();
   const { data, isLoading } = useQuery({ queryKey: ["preferences", "search"], queryFn: preferences.search });
+  if (user && user.workspace && user.workspace !== "app") return <Navigate to={homeFor(user)} replace />;
   if (isLoading) return <Spinner />;
   if (data && !data.configured) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;

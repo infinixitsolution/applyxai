@@ -52,7 +52,12 @@ export function BillingPage() {
   const buy = useMutation({
     mutationFn: async (plan: Plan): Promise<Outcome> => {
       const started = await billing.checkout(plan.code);
-      if (!started.checkout) return { plan, status: started.subscription.status };
+      if (!started.checkout?.key || !started.checkout?.subscription_id) {
+        throw new CheckoutError(
+          "Razorpay Checkout did not start. Enable Razorpay under Admin → Settings → Payments "
+          + "(save rzp_test_ or rzp_live_ keys, Test API keys, Sync plans), then try again.",
+        );
+      }
       const paid = await openRazorpayCheckout(started.checkout);
       if (!paid) return { plan, status: "dismissed" };
       const confirmed = await billing.confirm({
@@ -94,11 +99,21 @@ export function BillingPage() {
     <>
       <PageHeader title="Billing" description="Your plan, this month's usage, and your payments." />
       <div className="space-y-4">
-        {data.provider === "null" && (
-          <Alert kind="info">
-            Test mode: online payments are switched off on this server, so choosing a plan activates it straight away
-            without charging anything.
+        {!data.checkout_available && (
+          <Alert kind="error">
+            Paid upgrades need Razorpay. An admin must open <strong>Settings → Payments</strong>, set mode to Razorpay,
+            save API keys, click <strong>Test API keys</strong>, then <strong>Sync plans to Razorpay</strong>.
+            Until then, Switch/Upgrade will not open the payment window.
           </Alert>
+        )}
+        {data.provider === "razorpay" && data.razorpay_mode === "test" && (
+          <Alert kind="info">
+            Razorpay <strong>test</strong> checkout — same flow as production, but no real money.
+            In Checkout use card <strong>4111 1111 1111 1111</strong> (any future expiry/CVV) or UPI <strong>success@razorpay</strong>.
+          </Alert>
+        )}
+        {data.provider === "razorpay" && data.checkout_live && (
+          <Alert kind="info">Payments are processed by Razorpay with live keys. You will be charged in INR.</Alert>
         )}
         {awaiting && <Alert kind="info">Payment received. Confirming it with Razorpay{"\u2026"} This usually takes a few seconds.</Alert>}
         {!awaiting && data.pending && !sub && (
@@ -115,6 +130,7 @@ export function BillingPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {plans.data.map((p) => (
               <PlanCard key={p.code} plan={p} sub={sub} busy={buy.isPending} loading={buy.isPending && buy.variables?.code === p.code}
+                        checkoutAvailable={!!data.checkout_available}
                         onChoose={() => (sub ? setSwitchTo(p) : buy.mutate(p))} />
             ))}
           </div>
@@ -188,8 +204,8 @@ function planLine(sub: Subscription | null): string {
   return `Renews on ${end} for ${formatMoney(sub.plan.price_cents, sub.plan.currency)}.`;
 }
 
-function PlanCard({ plan: p, sub, busy, loading, onChoose }: {
-  plan: Plan; sub: Subscription | null; busy: boolean; loading: boolean; onChoose: () => void;
+function PlanCard({ plan: p, sub, busy, loading, checkoutAvailable, onChoose }: {
+  plan: Plan; sub: Subscription | null; busy: boolean; loading: boolean; checkoutAvailable: boolean; onChoose: () => void;
 }) {
   const current = (sub ? sub.plan.code : "free") === p.code;
   return (
@@ -206,7 +222,14 @@ function PlanCard({ plan: p, sub, busy, loading, onChoose }: {
         {p.limits.applications_per_month.toLocaleString()} applications / month &middot; {p.limits.resumes} resume{p.limits.resumes === 1 ? "" : "s"}
       </p>
       {!current && p.price_cents > 0 && (
-        <Button className="mt-4 w-full" variant={sub ? "secondary" : "primary"} loading={loading} disabled={busy} onClick={onChoose}>
+        <Button
+          className="mt-4 w-full"
+          variant={sub ? "secondary" : "primary"}
+          loading={loading}
+          disabled={busy || !checkoutAvailable}
+          onClick={onChoose}
+          title={checkoutAvailable ? undefined : "Configure Razorpay in Admin → Settings → Payments first"}
+        >
           {sub ? `Switch to ${p.name}` : `Upgrade to ${p.name}`}
         </Button>
       )}

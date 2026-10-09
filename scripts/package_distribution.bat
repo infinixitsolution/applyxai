@@ -8,7 +8,7 @@ REM Change to repository root
 cd /d "%~dp0.."
 set REPO_ROOT=%CD%
 set DIST_DIR=%REPO_ROOT%\dist
-set PACKAGE_DIR=%REPO_ROOT%\ApplyXAI-Agent-Setup-v1.0.0
+set PACKAGE_DIR=%REPO_ROOT%\ApplyXAI-Agent-Setup-v1.1.0
 
 echo === ApplyXAI Agent Distribution Package Creator ===
 echo Repository: %REPO_ROOT%
@@ -17,6 +17,11 @@ echo.
 REM Check if executables are built
 if not exist "%DIST_DIR%\ApplyXAI-Agent-GUI.exe" (
     echo Error: GUI executable not found.
+    echo Please build first: .\scripts\build_agent.bat
+    exit /b 1
+)
+if not exist "%DIST_DIR%\ApplyXAI-Agent.exe" (
+    echo Error: CLI executable not found ^(required with GUI^).
     echo Please build first: .\scripts\build_agent.bat
     exit /b 1
 )
@@ -36,11 +41,18 @@ echo Step 3: Copying files...
 copy scripts\install_agent.bat "%PACKAGE_DIR%\" >nul
 copy scripts\install_agent.ps1 "%PACKAGE_DIR%\" >nul
 copy "%DIST_DIR%\ApplyXAI-Agent-GUI.exe" "%PACKAGE_DIR%\ApplyXAI-Agent-GUI.exe" >nul
-copy docs\INSTALLER.md "%PACKAGE_DIR%\README.txt" >nul
+copy "%DIST_DIR%\ApplyXAI-Agent.exe" "%PACKAGE_DIR%\ApplyXAI-Agent.exe" >nul
+if exist docs\INSTALLER.md (
+    copy docs\INSTALLER.md "%PACKAGE_DIR%\README.txt" >nul
+) else if exist "%PACKAGE_DIR%\README.txt" (
+    echo   Keeping existing README.txt
+) else (
+    echo See ApplyXAI docs. > "%PACKAGE_DIR%\README.txt"
+)
 
 echo.
 echo Step 4: Creating version file...
-echo ApplyXAI Agent v1.0.0 > "%PACKAGE_DIR%\VERSION.txt"
+echo ApplyXAI Agent v1.1.0 > "%PACKAGE_DIR%\VERSION.txt"
 echo Built: %date% %time% >> "%PACKAGE_DIR%\VERSION.txt"
 
 echo.
@@ -70,15 +82,33 @@ echo.
 echo Package contents:
 echo   - install_agent.bat (installer launcher)
 echo   - install_agent.ps1 (installer script)
-echo   - ApplyXAI-Agent-GUI.exe (single-file executable)
+echo   - ApplyXAI-Agent-GUI.exe + ApplyXAI-Agent.exe
 echo   - README.txt (detailed instructions)
 echo   - QUICKSTART.txt (quick start guide)
 echo   - VERSION.txt (version info)
 echo.
-echo To distribute:
-echo   1. Zip the %PACKAGE_DIR% folder
-echo   2. Upload to your website
-echo   3. Users download, extract, and run install_agent.bat
+echo Step 6: Building single-file installer (Inno Setup)...
+set INNO_SETUP=
+set "PF86=%ProgramFiles(x86)%"
+if exist "%PF86%\Inno Setup 6\ISCC.exe" set INNO_SETUP=%PF86%\Inno Setup 6\ISCC.exe
+if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set INNO_SETUP=%ProgramFiles%\Inno Setup 6\ISCC.exe
+if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set INNO_SETUP=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
+if defined INNO_SETUP (
+    "%INNO_SETUP%" "%REPO_ROOT%\build\applyxai_agent_setup.iss"
+    if not errorlevel 1 (
+        copy /Y "%DIST_DIR%\ApplyXAI-Agent-Setup.exe" "%PACKAGE_DIR%\ApplyXAI-Agent-Setup.exe" >nul
+        echo   Created ApplyXAI-Agent-Setup.exe
+    )
+) else (
+    echo   Inno Setup not installed — skip single .exe installer.
+    echo   Install from: https://jrsoftware.org/isdl.php
+    echo   Then run: "%ProgramFiles(x86)^\Inno Setup 6\ISCC.exe" build\applyxai_agent_setup.iss
+)
+
+echo.
+echo To distribute ^(pick one^):
+echo   A. One installer: dist\ApplyXAI-Agent-Setup.exe ^(or copy in package folder^)
+echo   B. Zip folder %PACKAGE_DIR% and run install_agent.bat inside
 echo.
 
 pause

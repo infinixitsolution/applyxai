@@ -96,3 +96,35 @@ class NotificationTypeIn(BaseModel):
 
 class NotificationsIn(BaseModel):
     types: dict[str, NotificationTypeIn]
+
+
+class AiFeaturesIn(BaseModel):
+    applications: bool = True
+    resume: bool = True
+
+
+class AiModelsIn(BaseModel):
+    fast: str = Field(min_length=1, max_length=120)
+    strong: str = Field(min_length=1, max_length=120)
+    embedding: str = Field(min_length=1, max_length=120)
+
+
+class PaymentsIn(BaseModel):
+    provider: Literal["null", "razorpay"] = "null"
+    key_id: str = Field(default="", max_length=64)
+    key_secret: str = ""  # empty = keep existing
+    webhook_secret: str = ""  # empty = keep existing
+
+
+class AiIn(BaseModel):
+    enabled: bool = False
+    provider: Literal["openai", "openai_compatible", "gemini"] = "openai"
+    base_url: str = Field(default="https://api.openai.com/v1", max_length=512)
+    api_key: str = ""  # empty = keep existing
+    models: AiModelsIn = Field(default_factory=AiModelsIn)
+    features: AiFeaturesIn = Field(default_factory=AiFeaturesIn)
+
+    @field_validator("base_url")
+    @classmethod
+    def _strip_url(cls, value: str) -> str:
+        return value.rstrip("/")

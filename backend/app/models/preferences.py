@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base, JSONType, TimestampMixin, UUIDPrimaryKeyMixin
@@ -39,3 +39,8 @@ class ApplicationPreferences(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
     answers: Mapped[dict] = mapped_column(JSONType, default=dict)
+    human_questions: Mapped[list] = mapped_column(JSONType, default=list)
+    ai_applications_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_information_all: Mapped[str] = mapped_column(Text, default="")
+    ai_policy: Mapped[dict] = mapped_column(JSONType, default=lambda: {"deny_label_contains": ["gender", "race", "ethnicity", "disability", "veteran", "sexual"]})
+    pending_form_questions: Mapped[list] = mapped_column(JSONType, default=list)

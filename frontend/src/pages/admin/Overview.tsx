@@ -23,6 +23,8 @@ const RUN_STATUSES: RunStatus[] = ["queued", "running", "paused", "completed", "
 
 const QUICK_LINKS = [
   { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/institutes", label: "Institutes", icon: Users },
+  { to: "/admin/partners", label: "Partners", icon: CreditCard },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },

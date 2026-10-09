@@ -2,6 +2,7 @@ import io
 import zipfile
 
 import pytest
+from docx import Document
 
 from backend.app.core.config import get_settings
 from backend.app.models import Plan, Subscription, SubscriptionStatus, User
@@ -9,6 +10,25 @@ from backend.app.services.resume_service import DOCX_MIME, safe_display_name
 from backend.tests.conftest import csrf_headers
 
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def make_text_docx() -> bytes:
+    buf = io.BytesIO()
+    doc = Document()
+    doc.add_paragraph("Alice Rao")
+    doc.add_paragraph("9876543210")
+    doc.add_paragraph("Summary")
+    doc.add_paragraph("Python developer with five years of experience.")
+    doc.add_paragraph("Experience")
+    doc.add_paragraph("Senior Engineer")
+    doc.add_paragraph("Acme")
+    doc.add_paragraph("2020 - Present")
+    doc.add_paragraph("Education")
+    doc.add_paragraph("B.S. Computer Science")
+    doc.add_paragraph("State University")
+    doc.add_paragraph("2016 - 2020")
+    doc.save(buf)
+    return buf.getvalue()
 
 
 def make_docx(macro: bool = False) -> bytes:
@@ -98,6 +118,24 @@ def test_free_plan_resume_limit_is_enforced_server_side(alice, db):
     give_plan(db, "alice@example.com", "starter", resumes=3)
     assert upload(alice).status_code == 201
     assert alice.get("/api/resumes").json()["data"]["limit"] == 3
+
+
+def test_intake_fills_profile_and_cover_letter(alice, db):
+    give_plan(db, "alice@example.com", "pro", resumes=5)
+    h = csrf_headers(alice)
+    rid = upload(alice, filename="cv.docx", data=make_text_docx(), mime=DOCX_MIME).json()["data"]["id"]
+    resp = alice.post(f"/api/resumes/{rid}/intake", json={"apply": True}, headers=h)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()["data"]
+    assert body["source"] in ("ai", "heuristic")
+    assert body["profile"]["phone"]
+    assert body["cover_letter"]
+    assert body["profile"].get("work_history")
+    assert body["profile"].get("education")
+    prefs = alice.get("/api/preferences/application").json()["data"]["answers"]
+    assert prefs.get("cover_letter")
+    assert prefs.get("years_of_experience")
+    assert alice.get("/api/preferences/application").json()["data"].get("user_information_all")
 
 
 def test_upload_requires_csrf(alice):

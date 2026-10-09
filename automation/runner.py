@@ -21,10 +21,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent.win_process import background_creationflags
 from automation import events as ev
 from modules.run_hooks import CONTROL_ENV, EVENTS_ENV, MAX_APPLIED_ENV, PROFILE_ENV
 
-ENGINE_ROOT = Path(__file__).resolve().parent.parent
+try:
+    from agent.engine_bootstrap import engine_argv, engine_root
+except ImportError:
+    engine_root = lambda: Path(__file__).resolve().parent.parent  # type: ignore[assignment,misc]
+
+    def engine_argv() -> list[str]:
+        root = Path(__file__).resolve().parent.parent
+        return [sys.executable, str(root / "runAiBot.py")]
+
+
+ENGINE_ROOT = engine_root()
 ENGINE_SCRIPT = ENGINE_ROOT / "runAiBot.py"
 RUN_CONFIG_ENV = "APPLYXAI_RUN_CONFIG"
 
@@ -64,7 +75,7 @@ class EngineRun:
         self._offset = 0
 
     # ---------------------------------------------------------------- lifecycle
-    def start(self, config: dict, *, max_applied: int | None = None) -> None:
+    def start(self, config: dict, *, max_applied: int | None = None, extra_env: dict | None = None) -> None:
         """Launch the engine. With `max_applied`, it stops by itself after that many applications."""
         if self._proc is not None:
             raise RunnerError("this run has already been started")
@@ -86,13 +97,16 @@ class EngineRun:
         env.pop(MAX_APPLIED_ENV, None)
         if max_applied is not None:
             env[MAX_APPLIED_ENV] = str(max(int(max_applied), 0))
+        if extra_env:
+            env.update({k: str(v) for k, v in extra_env.items() if v is not None})
         kwargs = {"cwd": str(ENGINE_ROOT), "env": env, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = background_creationflags(new_process_group=True)
         else:
             kwargs["start_new_session"] = True
+        cmd = engine_argv() if getattr(sys, "frozen", False) else [self._python, str(ENGINE_SCRIPT)]
         with open(self.log_path, "w", encoding="utf-8") as log:
-            self._proc = self._popen([self._python, str(ENGINE_SCRIPT)], stdout=log, **kwargs)
+            self._proc = self._popen(cmd, stdout=log, **kwargs)
 
     def pause(self) -> None:
         self._write_control(PAUSE)

@@ -1,3 +1,5 @@
+export type Workspace = "app" | "admin" | "institute" | "partner";
+
 export interface User {
   id: string;
   email: string;
@@ -7,6 +9,28 @@ export interface User {
   is_admin: boolean;
   created_at: string;
   last_login_at: string | null;
+  workspace?: Workspace;
+  institute_id?: string | null;
+  partner_id?: string | null;
+  institute_status?: string | null;
+  partner_status?: string | null;
+}
+
+export interface EducationEntry {
+  school: string;
+  degree: string;
+  field: string;
+  start_year: string;
+  end_year: string;
+}
+
+export interface WorkEntry {
+  title: string;
+  company: string;
+  location: string;
+  start: string;
+  end: string;
+  summary: string;
 }
 
 export interface Profile {
@@ -22,6 +46,20 @@ export interface Profile {
   skills: string[];
   preferred_roles: string[];
   preferred_locations: string[];
+  preferred_resume_template: string;
+  education: EducationEntry[];
+  work_history: WorkEntry[];
+}
+
+export interface ResumeTemplate {
+  id: string;
+  name: string;
+  description: string;
+  accent: string;
+  body_font: string;
+  heading_font: string;
+  layout: string;
+  layout_label: string;
 }
 
 export type ProfileInput = Omit<Profile, "email">;
@@ -80,6 +118,30 @@ export interface Resume {
   file_size: number;
   is_default: boolean;
   created_at: string;
+  master_skills?: string[] | null;
+  subskills_by_master?: Record<string, string[]> | null;
+  ai_metadata?: Record<string, unknown> | null;
+}
+
+export interface ResumeAiPreview {
+  gate_passed: boolean;
+  match_score: number;
+  missing_keywords: string[];
+  fit_score: number | null;
+  validation_warnings?: string[];
+  patch?: Record<string, unknown> | null;
+  disclaimer?: string;
+}
+
+export type ResumeTextExtraction = "pdf_text" | "ocr" | "pdf_text+ocr" | "docx";
+
+export interface ResumeIntake {
+  source: "ai" | "heuristic";
+  text_extraction: ResumeTextExtraction;
+  profile: Profile;
+  cover_letter: string | null;
+  master_skills_count: number;
+  resume_id: string;
 }
 
 export type ApplicationStatus =
@@ -109,6 +171,16 @@ export interface JobDetail extends JobSummary {
   description: string;
 }
 
+export interface ResumeVersion {
+  id: string;
+  name: string;
+  filename: string;
+  file_type: string;
+  created_at: string;
+  is_default?: boolean;
+  generated_by?: string | null;
+}
+
 export interface Application {
   id: string;
   status: ApplicationStatus;
@@ -119,6 +191,8 @@ export interface Application {
   created_at: string;
   updated_at: string;
   job: JobSummary;
+  resume?: ResumeVersion | null;
+  generated_resumes?: ResumeVersion[];
 }
 
 export interface ApplicationDetail extends Application {
@@ -184,6 +258,15 @@ export interface AgentDevice {
   online: boolean;
 }
 
+export type ResumeRunMode = "default" | "tailor_if_gate";
+
+export interface ResumeTailorOverview {
+  mode: ResumeRunMode;
+  resume_ai_available: boolean;
+  master_skills_ready: boolean;
+  can_tailor: boolean;
+}
+
 export interface AutomationOverview {
   active: AutomationRun | null;
   recent: AutomationRun[];
@@ -191,6 +274,7 @@ export interface AutomationOverview {
   agent_online: boolean;
   readiness: { ready: boolean; problems: string[] };
   usage: Usage;
+  resume_tailor?: ResumeTailorOverview;
 }
 
 export interface RunLogLine {
@@ -223,13 +307,16 @@ export interface Notification {
   created_at: string;
 }
 
+export type PlanKind = "personal" | "institute";
+
 export interface Plan {
   code: string;
   name: string;
   price_cents: number;
   currency: string;
   interval: string;
-  limits: { applications_per_month: number; resumes: number };
+  kind?: PlanKind;
+  limits: { applications_per_month: number; resumes: number; seats?: number };
 }
 
 export type SubscriptionStatus = "pending" | "trialing" | "active" | "past_due" | "cancelled" | "expired";
@@ -257,6 +344,9 @@ export interface PaymentRecord {
 
 export interface BillingOverview {
   provider: string;
+  checkout_available?: boolean;
+  razorpay_mode?: "test" | "live" | "unknown" | null;
+  checkout_live?: boolean;
   subscription: Subscription | null;
   pending: Subscription | null;
   usage: Usage;
@@ -268,7 +358,12 @@ export interface CheckoutOptions {
   subscription_id: string;
   name: string;
   description: string;
+  currency?: string;
   prefill: { email: string; name: string };
+  theme?: { color: string };
+  modal?: { confirm_close?: boolean; escape?: boolean };
+  razorpay_mode?: "test" | "live";
+  test_hint?: string;
 }
 
 export interface CheckoutResult {
@@ -431,7 +526,63 @@ export interface AdminPlatformSettings {
     payment_provider: string;
     payment_keys_configured: boolean;
   };
+  ai: {
+    enabled: boolean;
+    provider: string;
+    base_url: string;
+    api_key_configured: boolean;
+    models: { fast: string; strong: string; embedding: string };
+    features: { applications: boolean; resume: boolean };
+    ready: boolean;
+  };
+  payments: {
+    provider: "null" | "razorpay";
+    key_id: string;
+    key_secret_configured: boolean;
+    webhook_secret_configured: boolean;
+    ready: boolean;
+    source: "database" | "environment";
+    razorpay_mode: "test" | "live" | "unknown";
+    live_checkout: boolean;
+    test_checkout: boolean;
+  };
   unverified_users: number;
+}
+
+export type HumanQuestionMatch = "contains" | "exact";
+
+export interface HumanQuestion {
+  id: string;
+  match: HumanQuestionMatch;
+  pattern: string;
+  answer: string;
+  field_types: string[];
+  locked?: boolean;
+}
+
+export interface PendingFormQuestion {
+  id: string;
+  label: string;
+  question_type: string;
+  options: string[];
+  job_id?: string;
+  job_title?: string;
+  company?: string;
+  needs_answer: boolean;
+  has_saved_rule?: boolean;
+  times_seen?: number;
+  first_seen_at?: string;
+  last_seen_at?: string;
+}
+
+export interface ApplicationPreferencesOut {
+  answers: Record<string, unknown>;
+  human_questions: HumanQuestion[];
+  pending_form_questions: PendingFormQuestion[];
+  ai_applications_enabled: boolean;
+  user_information_all: string;
+  ai_policy: { deny_label_contains: string[] };
+  ai_available: boolean;
 }
 
 export type PublicSite = Pick<PlatformCms, "branding" | "banner" | "landing" | "legal">;
@@ -448,6 +599,186 @@ export interface PlanUpdate {
   price_cents: number;
   applications_per_month: number;
   resumes: number;
+  seats?: number;
   is_active: boolean;
   sort_order: number;
+}
+
+export interface SeatCounts {
+  total: number;
+  available: number;
+  assigned: number;
+  by_status: Record<string, number>;
+}
+
+export interface InstituteSettings {
+  timezone: string;
+  notify_invites: boolean;
+  notify_acceptances: boolean;
+  notify_low_seats: boolean;
+  low_seat_threshold: number;
+  invite_expiry_days: number;
+  invite_note: string;
+}
+
+export interface Institute {
+  id: string;
+  name: string;
+  email: string;
+  contact_name: string;
+  phone: string;
+  institute_type: string;
+  gstin: string;
+  pan_number: string;
+  status: string;
+  partner_id: string | null;
+  source: string;
+  settings: InstituteSettings | Record<string, unknown>;
+  seats: SeatCounts;
+  created_at: string;
+}
+
+export interface InstituteSeat {
+  id: string;
+  subscription_id: string;
+  status: string;
+  created_at: string;
+}
+
+export interface InstituteLogin {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_verified: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+}
+
+export interface InstituteMember {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string;
+  role: string;
+  status: string;
+}
+
+export interface InstitutePartnerBrief {
+  id: string;
+  organization: string;
+  referral_code: string;
+  status: string;
+  kyc_status: string;
+}
+
+export interface AdminInstituteDetail {
+  institute: Institute;
+  dashboard: InstituteDashboard;
+  login: InstituteLogin | null;
+  partner: InstitutePartnerBrief | null;
+  subscription: Subscription | null;
+  subscriptions: Subscription[];
+  payments: PaymentRecord[];
+  students: InstituteAssignment[];
+  invitations: InstituteAssignment[];
+  seats: { counts: SeatCounts; items: InstituteSeat[] };
+  reports: { seats: SeatCounts; assignments_by_status: Record<string, number> };
+  members: InstituteMember[];
+  commissions: PartnerCommission[];
+}
+
+export interface InstituteAssignment {
+  id: string;
+  candidate_email: string;
+  student_user_id: string | null;
+  seat_id: string | null;
+  status: string;
+  note: string;
+  accepted_at: string | null;
+  released_at: string | null;
+  created_at: string;
+}
+
+export interface Partner {
+  id: string;
+  user_id: string;
+  organization: string;
+  contact_name: string;
+  phone: string;
+  referral_code: string;
+  status: string;
+  kyc_status: string;
+  commission_bps: number;
+  gstin: string;
+  pan_number: string;
+  payout_account: string;
+  payout_ifsc: string;
+  kyc_documents: { filename: string; note: string; uploaded_at: string }[];
+  click_count: number;
+  wallet: { accrued_cents: number; approved_cents: number; available_cents: number };
+  created_at: string;
+}
+
+export interface PartnerCommission {
+  id: string;
+  institute_id: string | null;
+  institute_name?: string | null;
+  amount_cents: number;
+  currency: string;
+  rate_bps: number;
+  status: string;
+  note: string;
+  created_at: string;
+}
+
+export interface PartnerPayout {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  note: string;
+  processed_at: string | null;
+  created_at: string;
+}
+
+export interface PartnerCampaign {
+  id: string;
+  name: string;
+  code: string;
+  click_count: number;
+  note: string;
+  path: string;
+  created_at: string;
+}
+
+export interface InstituteDashboard {
+  institute: Institute;
+  subscription: Subscription | null;
+  students: number;
+  pending_invites: number;
+  seats: SeatCounts;
+  recent_assignments: InstituteAssignment[];
+}
+
+export interface PartnerDashboard {
+  partner: Partner;
+  institutes: number;
+  recent_institutes: Institute[];
+  recent_commissions: PartnerCommission[];
+  referral_path: string;
+}
+
+export interface AdminPartnerDetail extends PartnerDashboard {
+  login: InstituteLogin | null;
+  institute_list: Institute[];
+  commissions: PartnerCommission[];
+  payouts: PartnerPayout[];
+  campaigns: PartnerCampaign[];
+  reports: {
+    institutes_by_status: Record<string, number>;
+    commissions_by_status: Record<string, number>;
+    payouts_by_status: Record<string, number>;
+  };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeNext } from "../auth/session";
+import { consumeNext, homeFor, rememberNext, safeNext, storedNext, withNext } from "../auth/session";
 import { fromDraft, toDraft } from "../components/DynamicField";
 import { appLink } from "../components/NotificationBell";
 import { resumeFileProblem } from "../features/ResumeManager";
@@ -29,6 +29,30 @@ describe("safeNext (post-login redirect)", () => {
     ["/\\evil.example", "/app"],
     [null, "/app"],
   ])("%s", (input, expected) => expect(safeNext(input)).toBe(expected));
+});
+
+describe("homeFor", () => {
+  it("sends each workspace to its portal", () => {
+    const base = { id: "u1", email: "a@b.c", first_name: "A", last_name: "B", is_verified: true, is_admin: false, created_at: "", last_login_at: null };
+    expect(homeFor({ ...base, is_admin: true })).toBe("/admin");
+    expect(homeFor({ ...base, workspace: "institute" })).toBe("/institute");
+    expect(homeFor({ ...base, workspace: "partner" })).toBe("/partner");
+    expect(homeFor({ ...base, workspace: "app" })).toBe("/app");
+  });
+});
+
+describe("invite next persistence", () => {
+  it("stores only same-site paths and appends them to auth URLs", () => {
+    rememberNext("/invite/abc");
+    expect(storedNext()).toBe("/invite/abc");
+    rememberNext("//evil.example");
+    expect(storedNext()).toBe("/invite/abc");
+    expect(withNext("/login?verified=1", "/invite/abc")).toBe("/login?verified=1&next=%2Finvite%2Fabc");
+    expect(withNext("/register", "/invite/abc")).toBe("/register?next=%2Finvite%2Fabc");
+    expect(withNext("/login", "//evil")).toBe("/login");
+    expect(consumeNext()).toBe("/invite/abc");
+    expect(storedNext()).toBeNull();
+  });
 });
 
 describe("appLink", () => {

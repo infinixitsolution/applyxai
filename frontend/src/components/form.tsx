@@ -31,15 +31,43 @@ type TextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "onChange"> & 
   error?: string;
   hint?: ReactNode;
   onChange: (value: string) => void;
+  /** Server has a secret stored; show “Key uploaded” when the input is empty. */
+  configured?: boolean;
+  configuredMessage?: string;
 };
 
-export function TextInput({ label, error, hint, onChange, className, ...rest }: TextInputProps) {
+export function TextInput({
+  label,
+  error,
+  hint,
+  onChange,
+  className,
+  configured,
+  configuredMessage = "Key uploaded",
+  value,
+  placeholder,
+  ...rest
+}: TextInputProps) {
+  const stored = configured && !(typeof value === "string" ? value : "").length;
+  const resolvedHint = hint ?? (stored ? (
+    <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+      <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {configuredMessage}
+    </span>
+  ) : undefined);
   return (
-    <Field label={label} error={error} hint={hint}>
+    <Field label={label} error={error} hint={resolvedHint}>
       {(id, describedBy) => (
-        <input id={id} aria-invalid={!!error} aria-describedby={describedBy} {...rest}
-               onChange={(e) => onChange(e.target.value)}
-               className={cx(INPUT, error && "ring-red-400", className)} />
+        <input
+          id={id}
+          aria-invalid={!!error}
+          aria-describedby={describedBy}
+          value={value}
+          placeholder={stored ? configuredMessage : placeholder}
+          {...rest}
+          onChange={(e) => onChange(e.target.value)}
+          className={cx(INPUT, stored && "text-slate-500 placeholder:text-emerald-700/90", error && "ring-red-400", className)}
+        />
       )}
     </Field>
   );

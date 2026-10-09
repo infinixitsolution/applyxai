@@ -79,12 +79,12 @@ def seed_plans() -> int:
 
 def sync_plans() -> int:
     from backend.app.services.billing_service import sync_provider_plans
-    from backend.app.services.payments import get_payment_provider
-    provider = get_payment_provider()
-    if provider.name == "null":
-        print("PAYMENT_PROVIDER is null; set it to razorpay (with its keys) first.", file=sys.stderr)
-        return 1
+    from backend.app.services.payments import resolve_payment_provider
     with SessionLocal() as db:
+        provider = resolve_payment_provider(db)
+        if provider.name == "null":
+            print("Payments are in test mode. Configure Razorpay under /admin/system → Payments or set PAYMENT_PROVIDER=razorpay in .env.", file=sys.stderr)
+            return 1
         created = sync_provider_plans(db, provider)
         db.commit()
     for code, provider_id in created:

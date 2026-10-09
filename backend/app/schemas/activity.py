@@ -28,6 +28,18 @@ class JobDetail(JobSummary):
     description: str
 
 
+class ResumeVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    filename: str
+    file_type: str
+    created_at: datetime
+    is_default: bool = False
+    generated_by: str | None = None
+
+
 class ApplicationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +52,8 @@ class ApplicationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     job: JobSummary
+    resume: ResumeVersionOut | None = None
+    generated_resumes: list[ResumeVersionOut] = []
 
 
 class ApplicationDetail(ApplicationOut):

@@ -135,6 +135,18 @@ def account_exists_email(to: str, db: Session | None = None) -> Email:
     )
 
 
+def institute_invite_email(to: str, institute_name: str, token: str, db: Session | None = None) -> Email:
+    auth = ps.get_effective_auth(db)
+    link = f"{auth.frontend_url}/invite/{token}?token={token}"
+    return Email(
+        to,
+        f"{institute_name} invited you to {auth.app_name}",
+        f"{institute_name} reserved a seat for you on {auth.app_name}.\n\n"
+        f"Accept the invitation:\n{link}\n\n"
+        "Create an account with this email if you don't have one yet, then open the link.",
+    )
+
+
 def notification_email(to: str, title: str, body: str, link: str, db: Session | None = None) -> Email:
     auth = ps.get_effective_auth(db)
     url = f"{auth.frontend_url}{link}" if link.startswith("/") else link

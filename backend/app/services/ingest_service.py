@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from automation import events as ev
 from backend.app.models import ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus
-from backend.app.services import application_service, notification_service
+from backend.app.services import application_service, notification_service, preferences_service
 
 _STATUS_FOR_OUTCOME = {
     ev.APPLIED: ApplicationStatus.APPLIED,
@@ -70,9 +70,21 @@ def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
     applied_at = None
     if status == ApplicationStatus.APPLIED:
         applied_at = ev.parse_time(event.get("date_applied")) or ev.parse_time(event.get("ts"))
+    event_resume_id = None
+    raw_resume = event.get("resume_id")
+    if raw_resume:
+        try:
+            event_resume_id = uuid.UUID(str(raw_resume))
+        except (ValueError, TypeError):
+            event_resume_id = None
+    resume_id = event_resume_id
+    if status == ApplicationStatus.APPLIED and resume_id is None:
+        resume_id = application_service.resolve_applied_resume_id(
+            db, user_id, job, event_resume_id=None, external_job_id=job_id,
+        )
     application_service.record_application(
         db, user_id, job, status, automation_job_id=run.id if run else None,
-        failure_reason=reason, applied_at=applied_at, count_usage=count_usage,
+        resume_id=resume_id, failure_reason=reason, applied_at=applied_at, count_usage=count_usage,
     )
 
 
@@ -113,6 +125,11 @@ def _log_message(event: dict, details: dict, stop_reason: str = "") -> tuple[str
         if event.get("error"):
             return "error", f"Run stopped because of an error: {_text(event.get('error'), 500)}"
         return "info", _stopped_message(stop_reason) if event.get("stopped") else "Run finished."
+    if kind == ev.FORM_QUESTION:
+        label = _text(event.get("label"), 120)
+        if event.get("needs_answer"):
+            return "warning", f"Need an answer: {label}"
+        return "info", f"Form question: {label}"
     return "info", kind
 
 
@@ -128,9 +145,17 @@ def _finish(db: Session, run: AutomationJob, event: dict, at: datetime) -> None:
         run.status = AutomationStatus.COMPLETED
     applied, external = int(event.get("applied") or 0), int(event.get("external") or 0)
     body = f"{applied} applied, {external} external, {int(event.get('failed') or 0)} failed, {int(event.get('skipped') or 0)} skipped."
+    from backend.app.models import User
+
+    user = db.get(User, run.user_id)
+    if user is not None:
+        pending = preferences_service.application_document(db, user).get("pending_form_questions") or []
+        need = [p for p in pending if p.get("needs_answer")]
+        if need:
+            body += f" {len(need)} LinkedIn question(s) need your answer — open Automation to fill them in."
     title = {AutomationStatus.FAILED: "Automation run stopped with an error",
              AutomationStatus.CANCELLED: "Automation run stopped"}.get(run.status, "Automation run finished")
-    notification_service.notify(db, run.user_id, "run_finished", title, body, "/automation")
+    notification_service.notify(db, run.user_id, "run_finished", title, body, "/app/automation?pending=1")
 
 
 def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
@@ -168,6 +193,10 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
             _record_outcome(db, user_id, event, details, run, count_usage)
             setattr(result, kind, getattr(result, kind) + 1)
             result.context.pop(str(event["job_id"]), None)
+        elif kind == ev.FORM_QUESTION:
+            job_id = str(event.get("job_id") or "")
+            job_details = result.context.get(job_id, {}) if job_id else {}
+            preferences_service.capture_form_question(db, user_id, event, job_details)
 
         if run is None:
             continue
@@ -197,9 +226,10 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
             limit_reached = True
 
         stop_reason = "plan_limit" if limit_reached and not run.stop_reason else run.stop_reason
-        level, message = _log_message(event, details, stop_reason)
-        seq += 1
-        db.add(AutomationLog(automation_job_id=run.id, user_id=user_id, seq=seq, ts=at,
-                             level=level, event=kind, message=message))
+        if kind != ev.FORM_QUESTION or event.get("needs_answer"):
+            level, message = _log_message(event, details, stop_reason)
+            seq += 1
+            db.add(AutomationLog(automation_job_id=run.id, user_id=user_id, seq=seq, ts=at,
+                                 level=level, event=kind, message=message))
     db.flush()
     return result

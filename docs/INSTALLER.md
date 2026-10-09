@@ -4,15 +4,30 @@ This installer makes the ApplyXAI Agent installable on any Windows laptop withou
 
 ## Installation Methods
 
-### Method 1: Automated Installer (Recommended)
+### Method 1: Single setup executable (Recommended)
 
-**For End Users:**
+**For end users:** download **`ApplyXAI-Agent-Setup.exe`** (one file). It installs both:
 
-1. Download the installer package containing:
+- `ApplyXAI-Agent-GUI.exe` — desktop app (Connect, Start Agent)
+- `ApplyXAI-Agent.exe` — automation engine (required; must sit in the same folder)
+
+Double-click the setup, approve UAC, optional desktop shortcut, then launch **ApplyXAI Agent** from the Start Menu.
+
+**Build the setup (developers):** after `scripts\build_agent.bat`, install [Inno Setup 6](https://jrsoftware.org/isdl.php), then:
+
+```bat
+scripts\build_installer.bat
+```
+
+Output: `dist\ApplyXAI-Agent-Setup.exe`
+
+### Method 2: Zip + batch installer
+
+1. Download the package folder (or zip) containing:
    - `install_agent.bat`
    - `install_agent.ps1`
    - `ApplyXAI-Agent-GUI.exe`
-   - `_internal/` folder
+   - `ApplyXAI-Agent.exe`
 
 2. Right-click `install_agent.bat` and select **"Run as administrator"**
 

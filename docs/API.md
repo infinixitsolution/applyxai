@@ -75,8 +75,8 @@ All require login and only ever touch the caller's own data.
 | GET | `/preferences/options` | none | Allowed values for every option field, plus form metadata (`key, label, type, help, options`) for the extra search settings and application answers |
 | GET | `/preferences/search` | none | Saved search, or the defaults with `"configured": false` |
 | PUT | `/preferences/search` | see below | Full replace |
-| GET | `/preferences/application` | none | `{engine_setting: value}`; only keys the user has set |
-| PATCH | `/preferences/application` | `{engine_setting: value \| null}` | Merges; `null` removes a key so the engine default applies |
+| GET | `/preferences/application` | none | `{answers, human_questions, ai_applications_enabled, user_information_all, ai_policy, ai_available}` |
+| PATCH | `/preferences/application` | partial | Engine keys merge into `answers` (`null` removes a key); QA keys replace when sent |
 
 Search body:
 
@@ -110,6 +110,10 @@ Option values are the exact strings the automation engine uses (it clicks Linked
 | POST | `/resumes/{id}/default` | none | Make default (exactly one per user) |
 | DELETE | `/resumes/{id}` | none | Deleting the default promotes the newest remaining resume |
 | GET | `/resumes/{id}/download` | none | The file, as an attachment |
+| POST | `/resumes/{id}/analyze-master` | none | Parse upload + profile skills into `master_skills` |
+| PATCH | `/resumes/{id}/master-skills` | `{master_skills: string[]}` | Confirm master list (locked during AI tailor) |
+| POST | `/resumes/ai/preview` | `{resume_id, job_description}` | Match score, 60% gate, optional tailor patch (no save) |
+| POST | `/resumes/ai/tailor` | `{resume_id, job_description, job_id?}` | 201; saves new DOCX when gate passes. 20/hour |
 
 Resume object: `{id, name, filename, file_type, file_size, is_default, created_at}`. `filename` is the sanitised upload name, for display only.
 
@@ -195,8 +199,9 @@ Called only by the agent (`python -m agent`). It authenticates with `Authorizati
 | POST | `/agent/pair` | No auth. Body `{code, name, platform, agent_version}`. Returns `{token, device_id, user_id, name}`; the token is shown once. `INVALID_PAIRING_CODE` 400. 10/minute and 50/hour per IP |
 | GET | `/agent/me` | This computer, as in `/automation/devices`. Never hands out a run |
 | POST | `/agent/unpair` | Revokes this token. `{revoked: true}` |
-| POST | `/agent/poll` | Body `{active_run_id, platform, agent_version}`. Returns `{run, user_id}`; `run` is null when there's nothing to do, otherwise `{id, dry_run, control, next_seq, values, resume, remaining_applications}`. A held run that isn't reported as active is marked failed |
+| POST | `/agent/poll` | Body `{active_run_id, platform, agent_version}`. Returns `{run, user_id}`; `run` is null when there's nothing to do, otherwise `{id, dry_run, control, next_seq, values, resume, remaining_applications, application_qa, ai_available, resume_mode}`. A held run that isn't reported as active is marked failed |
 | GET | `/agent/runs/{id}/resume` | The run's default resume file, only while the run is active |
+| POST | `/agent/runs/{id}/ai/answer` | Body `{question, question_type, options?, job_description?, job_title?, company?}`. Platform AI draft for an application question; requires user AI toggle and admin AI. Returns `{answer}`. 60/minute per device |
 | POST | `/agent/runs/{id}/events` | Body `{first_seq, events}` (at most 200). Returns `{next_seq, control, status, remaining_applications}`. `SEQUENCE_GAP` 409 with `details.next_seq` |
 
 ## Billing
@@ -249,6 +254,11 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | PUT | `/admin/settings/smtp` | `{enabled, host, port, username, password?, from_address}`. Empty `password` keeps the stored password; empty `host` clears DB SMTP and falls back to `.env` |
 | PUT | `/admin/settings/auth-email` | `{require_verification, verification_hours, password_reset_minutes, frontend_url}` |
 | PUT | `/admin/settings/notifications` | `{types: {event_type: {email: bool}}}` for known event types only |
+| PUT | `/admin/settings/payments` | `{provider: null\|razorpay, key_id, key_secret?, webhook_secret?}`. Secrets encrypted; never returned. Overrides `.env` when `key_id` is saved here |
+| POST | `/admin/settings/payments/test` | Validates Razorpay Key ID + secret against the API |
+| POST | `/admin/settings/payments/sync-plans` | Creates paid plans at Razorpay (same as `python -m backend.app.cli sync-plans`) |
+| PUT | `/admin/settings/ai` | `{enabled, provider, base_url, api_key?, models: {fast, strong, embedding}, features: {applications, resume}}`. API key encrypted; never returned. Configure before enabling user AI toggles in production |
+| POST | `/admin/settings/ai/test` | Smoke-test chat with the configured provider |
 | GET | `/admin/email` | Legacy summary; prefer `/admin/settings`. `{mode, host, port, …, unverified_users}` |
 | POST | `/admin/email/test` | Body `{to?}` (defaults to the admin's address). Sends right away and returns `{delivered, mode, error}`; `error` is the mail server's reason when it refuses. 10/hour per admin |
 | POST | `/admin/users/{id}/verify-email` | Marks the address verified and voids outstanding verification links. `ALREADY_VERIFIED` 409 |

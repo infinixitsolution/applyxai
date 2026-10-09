@@ -9,7 +9,7 @@ def test_agent_imports():
     """Test that agent modules can be imported."""
     import agent
     assert hasattr(agent, 'AGENT_VERSION')
-    assert agent.AGENT_VERSION == "1.0.0"
+    assert agent.AGENT_VERSION == "1.1.2"
 
     from agent import config
     assert hasattr(config, 'default_home')

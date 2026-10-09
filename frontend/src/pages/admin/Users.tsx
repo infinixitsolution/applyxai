@@ -61,8 +61,11 @@ function usePlanOptions(first: { value: string; label: string }) {
 }
 
 export function AdminUsersPage() {
+  const client = useQueryClient();
+  const toast = useToast();
   const [params] = useSearchParams();
   const [q, setQ] = useState("");
+  const [verifyUser, setVerifyUser] = useState<AdminUser | null>(null);
   const [status, setStatus] = useState<UserListStatus>(() => {
     const initial = params.get("status") ?? "";
     return USER_STATUS_FILTERS.some((f) => f.value === initial) ? (initial as UserListStatus) : "";
@@ -74,6 +77,19 @@ export function AdminUsersPage() {
   const query = { q: search || undefined, status: status || undefined, plan: plan || undefined, page, page_size: PAGE_SIZE };
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["admin", "users", query], queryFn: () => admin.users(query), placeholderData: keepPreviousData,
+  });
+  const markVerified = useMutation({
+    mutationFn: (userId: string) => admin.verifyEmail(userId),
+    onSuccess: (_detail, userId) => {
+      void client.invalidateQueries({ queryKey: ["admin", "users"] });
+      void client.invalidateQueries({ queryKey: ["admin", "user", userId] });
+      setVerifyUser(null);
+      toast.success("Email marked as verified.");
+    },
+    onError: (e) => {
+      setVerifyUser(null);
+      toast.error(errorMessage(e));
+    },
   });
   const resetPage = () => setPage(1);
   const hasFilters = Boolean(search || status || plan);
@@ -138,10 +154,22 @@ export function AdminUsersPage() {
                     )}
                   </Td>
                   <Td>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       {!u.is_active && <Badge tone="red">Disabled</Badge>}
                       {u.is_admin && <Badge tone="brand">Admin</Badge>}
-                      {!u.is_verified && <Badge tone="amber">Unverified</Badge>}
+                      {!u.is_verified && (
+                        <>
+                          <Badge tone="amber">Unverified</Badge>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-brand-700"
+                            onClick={() => setVerifyUser(u)}
+                          >
+                            Mark verified
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </Td>
                 </tr>
@@ -151,6 +179,19 @@ export function AdminUsersPage() {
           </Card>
         )}
       </div>
+
+      {verifyUser && (
+        <ConfirmDialog
+          open
+          title="Mark this email as verified?"
+          message={`Only do this if you're sure ${verifyUser.email} belongs to this person. They can sign in straight away.`}
+          confirmLabel="Mark verified"
+          danger={false}
+          loading={markVerified.isPending}
+          onConfirm={() => markVerified.mutate(verifyUser.id)}
+          onClose={() => setVerifyUser(null)}
+        />
+      )}
     </>
   );
 }

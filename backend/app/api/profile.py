@@ -65,3 +65,14 @@ def patch_application(body: dict = Body(...), user: User = Depends(get_current_u
         return ok(preferences_service.update_application(db, user, body))
     except FieldErrors as exc:
         raise AppError("VALIDATION_ERROR", "Some settings are invalid", status_code=422, details=exc.errors) from None
+
+
+@router.post("/preferences/application/resolve-pending", summary="Answer LinkedIn questions collected during automation")
+def resolve_pending(body: dict = Body(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    answers = body.get("answers") if isinstance(body, dict) else None
+    if not isinstance(answers, list):
+        raise AppError("VALIDATION_ERROR", "answers must be a list", 422)
+    try:
+        return ok(preferences_service.resolve_pending_questions(db, user, answers))
+    except ValueError as exc:
+        raise AppError("VALIDATION_ERROR", str(exc), 422) from None

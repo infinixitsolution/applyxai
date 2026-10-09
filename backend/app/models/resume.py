@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -19,6 +19,13 @@ class Resume(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     file_size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64), default="")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    master_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    subskills_by_master: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    structured_content: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("applications.id", ondelete="SET NULL"), index=True, nullable=True
+    )
 
     __table_args__ = (
         Index(

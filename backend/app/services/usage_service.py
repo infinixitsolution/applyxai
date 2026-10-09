@@ -29,10 +29,27 @@ def period_bounds(period: str) -> tuple[datetime, datetime]:
 
 
 def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
-    """Limits of the user's entitled subscription, or the free plan."""
+    """Limits of the user's entitled subscription, or the free plan.
+
+    An active institute seat assignment takes precedence over a personal plan.
+    """
     now = datetime.now(timezone.utc)
+    from backend.app.services import institute_service
+    assignment = institute_service.active_assignment_for_user(db, user_id)
+    if assignment is not None and assignment.seat_id:
+        seat = db.get(institute_service.InstituteSeat, assignment.seat_id)
+        if seat is not None:
+            sub = db.get(Subscription, seat.subscription_id)
+            if sub is not None and sub.status in _ENTITLED and (
+                sub.current_period_end is None or _aware(sub.current_period_end) > now
+            ):
+                return _limits_of(sub.plan)
     subs = db.scalars(
-        select(Subscription).where(Subscription.user_id == user_id, Subscription.status.in_(_ENTITLED))
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.institute_id.is_(None),
+            Subscription.status.in_(_ENTITLED),
+        )
         .order_by(Subscription.created_at.desc())
     ).all()
     for sub in subs:

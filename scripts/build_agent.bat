@@ -82,12 +82,14 @@ set INNO_PATH1=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe
 set INNO_PATH2=%ProgramFiles%\Inno Setup 6\ISCC.exe
 set INNO_PATH3=%ProgramFiles(x86)%\Inno Setup 5\ISCC.exe
 set INNO_PATH4=%ProgramFiles%\Inno Setup 5\ISCC.exe
+set INNO_PATH5=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
 
 set INNO_SETUP=
 if exist "%INNO_PATH1%" set INNO_SETUP=%INNO_PATH1%
 if exist "%INNO_PATH2%" set INNO_SETUP=%INNO_PATH2%
 if exist "%INNO_PATH3%" set INNO_SETUP=%INNO_PATH3%
 if exist "%INNO_PATH4%" set INNO_SETUP=%INNO_PATH4%
+if exist "%INNO_PATH5%" set INNO_SETUP=%INNO_PATH5%
 
 if defined INNO_SETUP (
     set INSTALLER_SPEC=%BUILD_DIR%\applyxai_agent_setup.iss
@@ -106,19 +108,17 @@ echo.
 echo === Build Complete ===
 echo.
 echo Artifacts:
-echo   CLI: %DIST_DIR%\ApplyXAI-Agent\ApplyXAI-Agent.exe
-echo   GUI: %DIST_DIR%\ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe
+echo   CLI: %DIST_DIR%\ApplyXAI-Agent.exe
+echo   GUI: %DIST_DIR%\ApplyXAI-Agent-GUI.exe
 if defined INNO_SETUP (
     echo   Installer: %DIST_DIR%\ApplyXAI-Agent-Setup.exe
+) else (
+    echo   Installer: run scripts\package_distribution.bat after installing Inno Setup 6
 )
 echo.
-echo To test the CLI:
-echo   cd %DIST_DIR%\ApplyXAI-Agent
-echo   ApplyXAI-Agent.exe --help
-echo.
-echo To test the GUI:
-echo   cd %DIST_DIR%\ApplyXAI-Agent-GUI
-echo   ApplyXAI-Agent-GUI.exe
+echo To test:
+echo   %DIST_DIR%\ApplyXAI-Agent-GUI.exe
+echo   %DIST_DIR%\ApplyXAI-Agent.exe --help
 echo.
 
 pause

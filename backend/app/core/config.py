@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     STORAGE_DIR: Path = DEFAULT_STORAGE_DIR
     MAX_RESUME_BYTES: int = 5 * 1024 * 1024
+    # Desktop agent download: prefer single Setup.exe, else GUI-only fallback.
+    DESKTOP_AGENT_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Setup.exe"
+    DESKTOP_AGENT_GUI_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-GUI.exe"
 
     # Where the SPA lives; used to build links in verification / reset emails.
     FRONTEND_URL: str = "http://localhost:5173"
@@ -61,6 +64,8 @@ class Settings(BaseSettings):
     PAYMENT_KEY_ID: str = ""
     PAYMENT_SECRET: str = ""
     PAYMENT_WEBHOOK_SECRET: str = ""
+    # When true and PAYMENT_PROVIDER=null, /billing/checkout still grants plans without Razorpay (local dev only).
+    PAYMENT_DEV_INSTANT_CHECKOUT: bool = False
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

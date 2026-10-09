@@ -14,6 +14,7 @@ Every event has "event" and "ts" (ISO-8601, UTC). Outcome events carry the Linke
     paused, resumed
     limit_reached   applied (the run's application cap, APPLYXAI_MAX_APPLIED, was reached)
     run_finished    applied, external, failed, skipped, stopped, daily_limit_reached, error
+    form_question   label, question_type, options, needs_answer, job_id (optional)
 """
 
 import json
@@ -30,15 +31,18 @@ PAUSED = "paused"
 RESUMED = "resumed"
 LIMIT_REACHED = "limit_reached"
 RUN_FINISHED = "run_finished"
+FORM_QUESTION = "form_question"
 
 OUTCOMES = {APPLIED, EXTERNAL, FAILED, SKIPPED}
-KNOWN_EVENTS = OUTCOMES | {RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, LIMIT_REACHED, RUN_FINISHED}
+KNOWN_EVENTS = OUTCOMES | {RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, LIMIT_REACHED, RUN_FINISHED, FORM_QUESTION}
 
 
 def validate_event(event) -> dict | None:
     """The event if it's a known kind with the fields it needs, otherwise None."""
     if not isinstance(event, dict) or event.get("event") not in KNOWN_EVENTS:
         return None
+    if event["event"] == FORM_QUESTION:
+        return event if str(event.get("label") or "").strip() else None
     if event["event"] in OUTCOMES | {JOB_STARTED} and not str(event.get("job_id") or "").strip():
         return None
     return event

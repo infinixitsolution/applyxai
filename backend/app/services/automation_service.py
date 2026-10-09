@@ -19,9 +19,9 @@ from sqlalchemy.orm import Session
 
 from automation import events as ev
 from backend.app.core.errors import AppError
-from backend.app.models import AgentDevice, AutomationJob, AutomationLog, AutomationStatus, User
+from backend.app.models import AgentDevice, AutomationJob, AutomationLog, AutomationStatus, SearchConfig, User
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
-from backend.app.services import agent_service, ingest_service, notification_service, run_config_service, usage_service
+from backend.app.services import agent_service, ingest_service, notification_service, preferences_service, run_config_service, usage_service
 
 CONTROL_RUN, CONTROL_PAUSE, CONTROL_STOP = "run", "pause", "stop"
 RUN_STALE_SECONDS = 180
@@ -95,6 +95,51 @@ def readiness(db: Session, user_id: uuid.UUID) -> list[str]:
     return problems
 
 
+def _resume_tailor_snapshot(db: Session, user_id: uuid.UUID) -> dict:
+    from backend.app.services.ai_service import ai_available
+
+    search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == user_id))
+    raw = (search.extra or {}).get("resume_mode", "default") if search and search.extra else "default"
+    mode = raw if raw in ("default", "tailor_if_gate") else "default"
+    resume = run_config_service.default_resume(db, user_id)
+    masters = bool(resume and list(resume.master_skills or []))
+    ai_on = ai_available(db, feature="resume")
+    return {
+        "mode": mode,
+        "resume_ai_available": ai_on,
+        "master_skills_ready": masters,
+        "can_tailor": ai_on and masters,
+    }
+
+
+def _persist_resume_mode(db: Session, user_id: uuid.UUID, resume_mode: str) -> None:
+    if resume_mode not in ("default", "tailor_if_gate"):
+        raise AppError("VALIDATION_ERROR", "resume_mode must be default or tailor_if_gate.", 422)
+    if resume_mode == "tailor_if_gate":
+        snap = _resume_tailor_snapshot(db, user_id)
+        if not snap["resume_ai_available"]:
+            raise AppError(
+                "AI_DISABLED",
+                "Resume AI is not enabled. Ask an admin to configure Platform AI → Resume AI, or choose default resume.",
+                422,
+            )
+        if not snap["master_skills_ready"]:
+            raise AppError(
+                "MASTER_REQUIRED",
+                "Analyze master skills on your default resume before using tailor per job.",
+                422,
+            )
+    search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == user_id))
+    if search is None:
+        search = SearchConfig(user_id=user_id, extra={})
+        db.add(search)
+        db.flush()
+    extra = dict(search.extra or {})
+    extra["resume_mode"] = resume_mode
+    search.extra = extra
+    db.flush()
+
+
 def overview(db: Session, user_id: uuid.UUID) -> dict:
     if reap_stale_runs(db, user_id=user_id):
         db.commit()
@@ -110,10 +155,11 @@ def overview(db: Session, user_id: uuid.UUID) -> dict:
         "agent_online": any(agent_service.is_online(d, now) for d in devices),
         "readiness": {"ready": not problems, "problems": problems},
         "usage": usage_service.usage_summary(db, user_id),
+        "resume_tailor": _resume_tailor_snapshot(db, user_id),
     }
 
 
-def start_run(db: Session, user: User, *, dry_run: bool = False) -> AutomationJob:
+def start_run(db: Session, user: User, *, dry_run: bool = False, resume_mode: str = "default") -> AutomationJob:
     reap_stale_runs(db, user_id=user.id)
     problems = readiness(db, user.id)
     if problems:
@@ -125,6 +171,7 @@ def start_run(db: Session, user: User, *, dry_run: bool = False) -> AutomationJo
         raise AppError("NO_AGENT", "Connect the ApplyXAI desktop agent on your computer first.", 409)
     if active_run(db, user.id) is not None:
         raise AppError("RUN_ACTIVE", "A run is already in progress. Stop it before starting another.", 409)
+    _persist_resume_mode(db, user.id, resume_mode)
     run = AutomationJob(user_id=user.id, status=AutomationStatus.QUEUED, dry_run=dry_run)
     try:
         with db.begin_nested():
@@ -194,13 +241,28 @@ def _fail_claim(db: Session, run: AutomationJob, message: str) -> None:
 
 
 def run_payload(db: Session, run: AutomationJob) -> dict:
+    from backend.app.services.ai_service import ai_available
+
     resume = run_config_service.default_resume(db, run.user_id)
+    user = db.get(User, run.user_id)
+    doc = preferences_service.application_document(db, user)
+    avail = ai_available(db, feature="applications")
+    search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == run.user_id))
+    resume_mode = (search.extra or {}).get("resume_mode", "default") if search and search.extra else "default"
     return {
         "id": str(run.id), "dry_run": run.dry_run, "control": run.control, "next_seq": run.event_seq + 1,
         "values": run_config_service.engine_values(db, run.user_id),
         "resume": None if resume is None else {"id": str(resume.id), "filename": resume.filename,
                                                "file_type": resume.file_type, "file_size": resume.file_size},
         "remaining_applications": usage_service.remaining_applications(db, run.user_id),
+        "application_qa": {
+            "human_questions": doc["human_questions"],
+            "ai_applications_enabled": doc["ai_applications_enabled"],
+            "user_information_all": doc["user_information_all"],
+            "ai_policy": doc["ai_policy"],
+        },
+        "ai_available": avail,
+        "resume_mode": resume_mode if resume_mode in ("default", "tailor_if_gate") else "default",
     }
 
 

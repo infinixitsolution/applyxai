@@ -19,6 +19,9 @@ _PLACEHOLDER_PASSWORD = "example_password"
 
 MIN_PHONE_LENGTH = 10
 
+# Stored on search preferences in the SaaS but consumed via config.applyxai at run time.
+_APPLYXAI_VALUE_KEYS = frozenset({"resume_mode"})
+
 
 class RunConfigError(ValueError):
     def __init__(self, problems: list[str]):
@@ -46,13 +49,20 @@ def missing_requirements(values: dict) -> list[str]:
 
 
 def build_run_config(values: dict, *, history_dir: str | Path, run_dir: str | Path,
-                     resume_path: str | Path | None = None, dry_run: bool = False) -> dict:
+                     resume_path: str | Path | None = None, dry_run: bool = False,
+                     use_ai: bool = False, applyxai_qa: dict | None = None) -> dict:
     """
     `history_dir` keeps applied/failed CSVs across runs (the engine skips jobs listed there);
     `run_dir` holds this run's logs and screenshots. Raises RunConfigError when required
     details are missing or a value names a setting the engine doesn't know.
     """
     sections = _sections()
+    values = dict(values)
+    qa = dict(applyxai_qa or {})
+    for key in _APPLYXAI_VALUE_KEYS:
+        if key in values:
+            qa.setdefault(key, values.pop(key))
+
     problems = missing_requirements(values)
     config: dict[str, dict] = {name: {} for name in ("personals", "questions", "search", "settings", "secrets")}
 
@@ -89,7 +99,14 @@ def build_run_config(values: dict, *, history_dir: str | Path, run_dir: str | Pa
     config["secrets"] = {
         "username": _PLACEHOLDER_USERNAME,
         "password": _PLACEHOLDER_PASSWORD,
-        "use_AI": False,
+        "use_AI": bool(use_ai),
         "llm_api_key": "",
+    }
+    config["applyxai"] = {
+        "ai_use_platform_proxy": bool(use_ai and qa.get("ai_available")),
+        "run_id": str(qa.get("run_id") or ""),
+        "human_questions": list(qa.get("human_questions") or []),
+        "ai_policy": qa.get("ai_policy") or {"deny_label_contains": []},
+        "resume_mode": qa.get("resume_mode") or "default",
     }
     return config

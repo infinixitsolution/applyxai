@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import settings
 from backend.app.core.errors import AppError
 from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
 from backend.app.models import BillingEvent, Payment, Plan, Subscription, SubscriptionStatus, User
@@ -44,13 +45,30 @@ def _iso(dt: datetime | None) -> str | None:
 # ----------------------------------------------------------------------------- plans
 def seed_plans(db: Session) -> int:
     """Copy the default catalogue into an empty `plans` table. Returns rows added. The caller commits."""
-    if db.scalar(select(func.count()).select_from(Plan)):
-        return 0
+    from backend.app.models.enums import PlanKind
+
+    added = 0
+    existing = {p.code: p for p in db.scalars(select(Plan)).all()}
+    if not existing:
+        for order, (code, plan) in enumerate(PLAN_LIMITS.items()):
+            kind = PlanKind.INSTITUTE if plan.get("kind") == "institute" else PlanKind.PERSONAL
+            limits = {k: v for k, v in plan.items() if k in ("applications_per_month", "resumes", "seats")}
+            db.add(Plan(code=code, name=plan["name"], kind=kind, price_cents=plan["price_cents"], currency="INR",
+                        interval="month", limits=limits, sort_order=order))
+            added += 1
+        db.flush()
+        return added
     for order, (code, plan) in enumerate(PLAN_LIMITS.items()):
-        db.add(Plan(code=code, name=plan["name"], price_cents=plan["price_cents"], currency="INR",
-                    interval="month", limits={}, sort_order=order))
-    db.flush()
-    return len(PLAN_LIMITS)
+        if code in existing:
+            continue
+        kind = PlanKind.INSTITUTE if plan.get("kind") == "institute" else PlanKind.PERSONAL
+        limits = {k: v for k, v in plan.items() if k in ("applications_per_month", "resumes", "seats")}
+        db.add(Plan(code=code, name=plan["name"], kind=kind, price_cents=plan["price_cents"], currency="INR",
+                    interval="month", limits=limits, sort_order=order))
+        added += 1
+    if added:
+        db.flush()
+    return added
 
 
 def get_plan(db: Session, code: str) -> Plan:
@@ -77,6 +95,17 @@ def plan_out(plan: Plan) -> dict:
             "currency": plan.currency, "interval": plan.interval}
 
 
+def charge_cents(plan: Plan) -> int:
+    """What a new subscriber pays: personal plans as listed; campus plans are price × minimum students."""
+    from backend.app.models.enums import PlanKind
+    seats = int((plan.limits or {}).get("seats") or PLAN_LIMITS.get(plan.code, {}).get("seats") or 1)
+    kind = getattr(plan, "kind", None)
+    institute = kind == PlanKind.INSTITUTE or getattr(kind, "value", kind) == "institute"
+    if not institute:
+        institute = PLAN_LIMITS.get(plan.code, {}).get("kind") == "institute"
+    return int(plan.price_cents) * seats if institute and seats > 0 else int(plan.price_cents)
+
+
 # ----------------------------------------------------------------------------- reading
 def sub_out(sub: Subscription | None) -> dict | None:
     if sub is None:
@@ -101,35 +130,51 @@ def _entitled(sub: Subscription, now: datetime) -> bool:
 def current_subscription(db: Session, user_id: uuid.UUID) -> Subscription | None:
     """The paid subscription the user is entitled to right now, if any."""
     now = _now()
-    subs = db.scalars(select(Subscription).where(Subscription.user_id == user_id, Subscription.status.in_(ENTITLED))
-                      .order_by(Subscription.created_at.desc())).all()
+    subs = db.scalars(select(Subscription).where(
+        Subscription.user_id == user_id, Subscription.institute_id.is_(None), Subscription.status.in_(ENTITLED),
+    ).order_by(Subscription.created_at.desc())).all()
     return next((s for s in subs if _entitled(s, now)), None)
 
 
 def _pending(db: Session, user_id: uuid.UUID) -> Subscription | None:
     """A checkout started in the last hour that the provider hasn't activated yet."""
     return db.scalar(select(Subscription).where(Subscription.user_id == user_id,
+                                                Subscription.institute_id.is_(None),
                                                 Subscription.status == SubscriptionStatus.PENDING,
                                                 Subscription.created_at > _now() - PENDING_SHOWN_FOR)
                      .order_by(Subscription.created_at.desc()).limit(1))
 
 
 def overview(db: Session, user: User, provider: PaymentProvider) -> dict:
+    from backend.app.services.platform_settings_service import get_effective_payments
+
     payments = db.scalars(select(Payment).where(Payment.user_id == user.id)
                           .order_by(Payment.created_at.desc()).limit(RECENT_PAYMENTS)).all()
-    return {
+    eff = get_effective_payments(db)
+    out = {
         "provider": provider.name,
         "subscription": sub_out(current_subscription(db, user.id)),
         "pending": sub_out(_pending(db, user.id)),
         "usage": usage_service.usage_summary(db, user.id),
         "payments": [payment_out(p) for p in payments],
     }
+    out["checkout_available"] = eff.configured
+    if provider.name == "razorpay":
+        out["razorpay_mode"] = eff.razorpay_mode
+        out["checkout_live"] = eff.razorpay_mode == "live"
+    else:
+        out["razorpay_mode"] = None
+        out["checkout_live"] = False
+    return out
 
 
 # ----------------------------------------------------------------------------- state changes
 def _end_others(db: Session, provider: PaymentProvider, keep: Subscription) -> None:
     """A newly active subscription replaces any other paid one at once."""
-    others = db.scalars(select(Subscription).where(Subscription.user_id == keep.user_id, Subscription.id != keep.id,
+    scope = [Subscription.institute_id == keep.institute_id] if keep.institute_id else [
+        Subscription.user_id == keep.user_id, Subscription.institute_id.is_(None),
+    ]
+    others = db.scalars(select(Subscription).where(*scope, Subscription.id != keep.id,
                                                    Subscription.status.in_(ENTITLED + (SubscriptionStatus.PAST_DUE,))
                                                    )).all()
     for old in others:
@@ -158,6 +203,9 @@ def apply_remote(db: Session, provider: PaymentProvider, sub: Subscription, remo
     name = sub.plan.name
     if sub.status in ENTITLED:
         _end_others(db, provider, sub)
+        if sub.institute_id:
+            from backend.app.services import institute_service
+            institute_service.ensure_seats_for_subscription(db, sub)
         notification_service.notify(db, sub.user_id, "plan_active", f"Your {name} plan is active",
                                     f"You can now send up to {usage_service.plan_limits(db, sub.user_id)['applications_per_month']:,}"
                                     " applications a month.", "/billing")
@@ -192,22 +240,48 @@ def record_payment(db: Session, provider: PaymentProvider, user_id: uuid.UUID, s
     payment.description = remote.description or (f"{sub.plan.name} plan" if sub else "")
     payment.paid_at = remote.created_at or payment.paid_at
     db.flush()
+    if sub is not None and sub.institute_id:
+        from backend.app.services import partner_service
+        partner_service.maybe_accrue_commission(db, payment, sub)
     return payment
 
 
 # ----------------------------------------------------------------------------- user actions
-def checkout(db: Session, user: User, provider: PaymentProvider, plan_code: str) -> dict:
+def checkout(db: Session, user: User, provider: PaymentProvider, plan_code: str,
+             institute_id: uuid.UUID | None = None) -> dict:
+    from backend.app.models.enums import PlanKind
     plan = get_plan(db, plan_code)
+    wanted = PlanKind.INSTITUTE if institute_id else PlanKind.PERSONAL
+    if getattr(plan, "kind", PlanKind.PERSONAL) != wanted:
+        raise AppError("WRONG_PLAN_KIND", "That plan is not available for this workspace.", 400)
     if plan.price_cents <= 0 or plan.code == FREE_PLAN:
         raise AppError("FREE_PLAN", "The Free plan doesn't need a subscription. Cancel your paid plan to go back to it.", 400)
-    current = current_subscription(db, user.id)
+    if institute_id:
+        from backend.app.services import institute_service
+        current = institute_service.current_subscription(db, institute_id)
+    else:
+        current = current_subscription(db, user.id)
     if current is not None and current.plan_id == plan.id:
         raise AppError("ALREADY_SUBSCRIBED", f"You're already on the {plan.name} plan.", 409)
+    if provider.name == "null" and not settings.PAYMENT_DEV_INSTANT_CHECKOUT:
+        raise AppError(
+            "CHECKOUT_DISABLED",
+            "Razorpay checkout is not enabled. An admin must open Settings → Payments, choose Razorpay, "
+            "save test or live API keys, then Sync plans to Razorpay.",
+            503,
+        )
+    if provider.name == "razorpay" and not (plan.provider_plan_id or "").strip():
+        raise AppError(
+            "PLAN_NOT_AVAILABLE",
+            f"The {plan.name} plan is not linked to Razorpay yet. An admin must run Sync plans to Razorpay in Settings → Payments.",
+            503,
+        )
     replaces = sub_out(current)
     # Earlier unfinished checkouts stay pending: if one is paid after all, it still activates.
     remote = provider.create_subscription(plan, user)
-    sub = Subscription(user_id=user.id, plan_id=plan.id, plan=plan, status=SubscriptionStatus.PENDING,
-                       provider=provider.name, provider_subscription_id=remote.id[:255],
+    sub = Subscription(user_id=user.id, institute_id=institute_id, plan_id=plan.id, plan=plan,
+                       status=SubscriptionStatus.PENDING, provider=provider.name,
+                       provider_subscription_id=remote.id[:255],
                        provider_customer_id=remote.customer_id[:255])
     db.add(sub)
     db.flush()

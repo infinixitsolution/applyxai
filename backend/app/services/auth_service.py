@@ -90,7 +90,23 @@ def _consume_email_token(db: Session, raw: str, purpose: TokenPurpose) -> User:
 
 
 # --------------------------------------------------------------------------- registration
-def register(db: Session, email: str, password: str, first_name: str, last_name: str) -> tuple[User | None, str | None]:
+def register(
+    db: Session,
+    email: str,
+    password: str,
+    first_name: str,
+    last_name: str,
+    *,
+    account_type: str = "candidate",
+    institute_name: str = "",
+    contact_name: str = "",
+    phone: str = "",
+    gstin: str = "",
+    pan_number: str = "",
+    organization: str = "",
+    referral_code: str = "",
+    agreed: bool = False,
+) -> tuple[User | None, str | None]:
     """
     Returns (new_user, verification_token), or (None, None) when the email is already
     registered. The API answers both cases identically so it can't be used to discover
@@ -99,6 +115,10 @@ def register(db: Session, email: str, password: str, first_name: str, last_name:
     email = normalize_email(email)
     if password.lower() == email:
         raise AppError("WEAK_PASSWORD", "Password must not be your email address.", 422)
+    if account_type not in ("candidate", "institute", "partner"):
+        raise AppError("INVALID_ACCOUNT_TYPE", "Choose candidate, institute, or partner.", 422)
+    if account_type in ("institute", "partner") and not agreed:
+        raise AppError("AGREEMENT_REQUIRED", "Please accept the terms to continue.", 422)
     if db.scalar(select(User.id).where(User.email == email)) is not None:
         return None, None
 
@@ -107,6 +127,23 @@ def register(db: Session, email: str, password: str, first_name: str, last_name:
                 is_verified=not auth.require_verification)
     db.add(user)
     db.flush()
+    if account_type == "institute":
+        from backend.app.services import partner_service
+        from backend.app.services.institute_service import register as register_institute
+        partner = partner_service.find_by_code(db, referral_code)
+        register_institute(
+            db, user, name=institute_name, contact_name=contact_name or f"{first_name} {last_name}".strip(),
+            phone=phone, gstin=gstin, pan_number=pan_number,
+            partner_id=partner.id if partner else None,
+            source="partner" if partner else "direct",
+        )
+    elif account_type == "partner":
+        from backend.app.services.partner_service import register as register_partner
+        register_partner(
+            db, user, organization=organization or f"{first_name} {last_name}".strip() or email,
+            contact_name=contact_name or f"{first_name} {last_name}".strip(), phone=phone,
+            gstin=gstin, pan_number=pan_number,
+        )
     token = None
     if auth.require_verification:
         token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=auth.verification_hours))

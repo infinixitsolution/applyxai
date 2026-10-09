@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.errors import AppError
-from backend.app.core.platform_defaults import DEFAULT_CMS, DEFAULT_NOTIFICATIONS, PLATFORM_SETTINGS_KEY
+from backend.app.core.platform_defaults import DEFAULT_AI, DEFAULT_CMS, DEFAULT_NOTIFICATIONS, DEFAULT_PAYMENTS, PLATFORM_SETTINGS_KEY
 from backend.app.models import PlatformSettings
-from backend.app.schemas.platform_settings import AuthEmailIn, CmsIn, NotificationsIn, SmtpIn
+from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, NotificationsIn, PaymentsIn, SmtpIn
 
 logger = logging.getLogger("applyxai.settings")
 
@@ -82,12 +82,72 @@ class EffectiveSmtp:
 
 
 @dataclass(frozen=True)
+class EffectiveAi:
+    enabled: bool
+    provider: str
+    base_url: str
+    api_key: str
+    models: dict[str, str]
+    features: dict[str, bool]
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def feature_on(self, name: str) -> bool:
+        return self.enabled and self.configured and bool(self.features.get(name))
+
+
+@dataclass(frozen=True)
+class EffectivePayments:
+    provider: str
+    key_id: str
+    key_secret: str
+    webhook_secret: str
+
+    @property
+    def configured(self) -> bool:
+        return self.provider == "razorpay" and bool(self.key_id and self.key_secret)
+
+    @property
+    def active(self) -> bool:
+        return self.configured
+
+    @property
+    def razorpay_mode(self) -> str:
+        from backend.app.services.payments.razorpay_util import razorpay_mode_from_key_id
+
+        return razorpay_mode_from_key_id(self.key_id)
+
+
+@dataclass(frozen=True)
 class EffectiveAuthEmail:
     require_verification: bool
     verification_hours: int
     password_reset_minutes: int
     frontend_url: str
     app_name: str
+
+
+def get_effective_payments(db: Session | None) -> EffectivePayments:
+    db_pay: dict = {}
+    if db is not None:
+        db_pay = _row(db).payments or {}
+    key_id = str(db_pay.get("key_id") or settings.PAYMENT_KEY_ID or "").strip()
+    if db_pay.get("key_secret_encrypted"):
+        key_secret = decrypt_secret(db_pay.get("key_secret_encrypted") or "") or settings.PAYMENT_SECRET
+    else:
+        key_secret = settings.PAYMENT_SECRET
+    if db_pay.get("webhook_secret_encrypted"):
+        webhook = decrypt_secret(db_pay.get("webhook_secret_encrypted") or "") or settings.PAYMENT_WEBHOOK_SECRET
+    else:
+        webhook = settings.PAYMENT_WEBHOOK_SECRET
+    provider = str(db_pay.get("provider") or settings.PAYMENT_PROVIDER or "null")
+    if provider not in ("null", "razorpay"):
+        provider = "null"
+    if provider == "razorpay" and not (key_id and key_secret):
+        provider = "null"
+    return EffectivePayments(provider=provider, key_id=key_id, key_secret=key_secret, webhook_secret=webhook)
 
 
 def get_effective_smtp(db: Session | None) -> EffectiveSmtp:
@@ -132,9 +192,16 @@ def get_effective_auth(db: Session | None) -> EffectiveAuthEmail:
     )
 
 
+_LEGACY_FOOTER = "Built on the open-source Auto Job Applier (MIT)."
+
+
 def get_effective_cms(db: Session) -> dict:
     row = _row(db)
-    return _deep_merge(DEFAULT_CMS, row.cms or {})
+    cms = _deep_merge(DEFAULT_CMS, row.cms or {})
+    branding = cms.setdefault("branding", {})
+    if (branding.get("footer_line") or "").strip() == _LEGACY_FOOTER:
+        branding["footer_line"] = ""
+    return cms
 
 
 def get_public_site(db: Session) -> dict:
@@ -146,6 +213,24 @@ def get_public_site(db: Session) -> dict:
         "landing": cms.get("landing", DEFAULT_CMS["landing"]),
         "legal": cms.get("legal", DEFAULT_CMS["legal"]),
     }
+
+
+def get_effective_ai(db: Session | None) -> EffectiveAi:
+    db_ai: dict = {}
+    if db is not None:
+        db_ai = _deep_merge(dict(DEFAULT_AI), _row(db).ai or {})
+    enabled = bool(db_ai.get("enabled"))
+    api_key = decrypt_secret(db_ai.get("api_key_encrypted") or "") if db_ai.get("api_key_encrypted") else ""
+    models = _deep_merge(dict(DEFAULT_AI["models"]), db_ai.get("models") or {})
+    features = _deep_merge(dict(DEFAULT_AI["features"]), db_ai.get("features") or {})
+    return EffectiveAi(
+        enabled=enabled,
+        provider=str(db_ai.get("provider") or DEFAULT_AI["provider"]),
+        base_url=str(db_ai.get("base_url") or DEFAULT_AI["base_url"]).rstrip("/"),
+        api_key=api_key,
+        models=models,
+        features=features,
+    )
 
 
 def get_notification_prefs(db: Session) -> dict[str, dict]:
@@ -189,14 +274,16 @@ def build_admin_view(db: Session) -> dict:
             "frontend_url": auth_eff.frontend_url,
         },
         "notifications": get_notification_prefs(db),
+        "ai": _admin_ai_view(db),
+        "payments": _admin_payments_view(db),
         "infrastructure": {
             "app_env": settings.APP_ENV,
             "app_version": settings.APP_VERSION,
             "database": "sqlite" if settings.is_sqlite else "postgresql",
             "redis_url_set": bool(settings.REDIS_URL),
             "cors_origins": settings.cors_origins,
-            "payment_provider": settings.PAYMENT_PROVIDER,
-            "payment_keys_configured": bool(settings.PAYMENT_KEY_ID and settings.PAYMENT_SECRET),
+            "payment_provider": get_effective_payments(db).provider,
+            "payment_keys_configured": get_effective_payments(db).configured,
         },
     }
 
@@ -238,6 +325,101 @@ def update_auth_email(db: Session, payload: AuthEmailIn) -> dict:
     row.auth_email = payload.model_dump()
     invalidate_caches()
     return build_admin_view(db)["auth_email"]
+
+
+def _admin_ai_view(db: Session) -> dict:
+    eff = get_effective_ai(db)
+    row = _row(db)
+    db_ai = row.ai or {}
+    return {
+        "enabled": eff.enabled,
+        "provider": eff.provider,
+        "base_url": eff.base_url,
+        "api_key_configured": bool(db_ai.get("api_key_encrypted")),
+        "models": eff.models,
+        "features": eff.features,
+        "ready": eff.enabled and eff.configured,
+    }
+
+
+def _admin_payments_view(db: Session) -> dict:
+    eff = get_effective_payments(db)
+    row = _row(db)
+    db_pay = row.payments or {}
+    mode = eff.razorpay_mode if eff.key_id else "unknown"
+    return {
+        "provider": eff.provider if eff.configured else str(db_pay.get("provider") or settings.PAYMENT_PROVIDER or "null"),
+        "key_id": eff.key_id,
+        "key_secret_configured": bool(db_pay.get("key_secret_encrypted")) or bool(settings.PAYMENT_SECRET),
+        "webhook_secret_configured": bool(db_pay.get("webhook_secret_encrypted")) or bool(settings.PAYMENT_WEBHOOK_SECRET),
+        "ready": eff.configured,
+        "source": "database" if db_pay.get("key_id") else "environment",
+        "razorpay_mode": mode,
+        "live_checkout": eff.configured and mode == "live",
+        "test_checkout": eff.configured and mode == "test",
+    }
+
+
+def update_payments(db: Session, payload: PaymentsIn) -> dict:
+    row = _row(db)
+    if payload.provider == "razorpay":
+        kid = payload.key_id.strip() or str((row.payments or {}).get("key_id") or settings.PAYMENT_KEY_ID or "")
+        if not kid:
+            raise AppError("VALIDATION_ERROR", "Razorpay Key ID is required.", 422)
+        from backend.app.services.payments.razorpay_util import validate_key_id
+
+        validate_key_id(kid)
+        if payload.key_secret and _fernet() is None:
+            raise AppError("CONFIG_ERROR", "Set SECRET_KEY or JWT_SECRET (32+ chars) before saving payment secrets.", 503)
+        if settings.APP_ENV == "production" and kid.startswith("rzp_test_"):
+            raise AppError(
+                "VALIDATION_ERROR",
+                "Production requires live Razorpay keys (rzp_live_…). Use test keys only on staging or local.",
+                422,
+            )
+    existing = row.payments or {}
+    if payload.provider == "null" and not payload.key_id.strip():
+        row.payments = {"provider": "null", "key_id": ""}
+        invalidate_caches()
+        return _admin_payments_view(db)
+    stored: dict[str, Any] = {
+        "provider": payload.provider,
+        "key_id": payload.key_id.strip() or str(existing.get("key_id") or settings.PAYMENT_KEY_ID or ""),
+    }
+    if payload.key_secret:
+        stored["key_secret_encrypted"] = encrypt_secret(payload.key_secret)
+    elif existing.get("key_secret_encrypted"):
+        stored["key_secret_encrypted"] = existing["key_secret_encrypted"]
+    elif settings.PAYMENT_SECRET and payload.provider == "razorpay":
+        pass  # env-only secret; nothing to store
+    if payload.webhook_secret:
+        stored["webhook_secret_encrypted"] = encrypt_secret(payload.webhook_secret)
+    elif existing.get("webhook_secret_encrypted"):
+        stored["webhook_secret_encrypted"] = existing["webhook_secret_encrypted"]
+    row.payments = stored
+    invalidate_caches()
+    return _admin_payments_view(db)
+
+
+def update_ai(db: Session, payload: AiIn) -> dict:
+    if payload.api_key and _fernet() is None:
+        raise AppError("CONFIG_ERROR", "Set SECRET_KEY or JWT_SECRET (32+ chars) before saving AI API keys.", 503)
+    row = _row(db)
+    existing = row.ai or {}
+    stored: dict[str, Any] = {
+        "enabled": payload.enabled,
+        "provider": payload.provider,
+        "base_url": payload.base_url.rstrip("/"),
+        "models": payload.models.model_dump(),
+        "features": payload.features.model_dump(),
+    }
+    if payload.api_key:
+        stored["api_key_encrypted"] = encrypt_secret(payload.api_key)
+    elif existing.get("api_key_encrypted"):
+        stored["api_key_encrypted"] = existing["api_key_encrypted"]
+    row.ai = stored
+    invalidate_caches()
+    return _admin_ai_view(db)
 
 
 def update_notifications(db: Session, payload: NotificationsIn) -> dict:

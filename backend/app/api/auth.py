@@ -7,9 +7,10 @@ from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, error_response, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import User
-from backend.app.schemas.auth import EmailIn, LoginIn, RegisterIn, ResetPasswordIn, TokenIn, UserOut
+from backend.app.schemas.auth import EmailIn, LoginIn, RegisterIn, ResetPasswordIn, TokenIn
 from backend.app.services import auth_service
 from backend.app.services import platform_settings_service as ps
+from backend.app.services.workspace import user_payload
 from backend.app.services.email_service import (
     EmailSender, account_exists_email, password_reset_email, verification_email,
 )
@@ -19,15 +20,21 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _CHECK_EMAIL = "If that address can receive email, a message is on its way. Please check your inbox."
 
 
-def _user(user: User) -> dict:
-    return UserOut.model_validate(user).model_dump(mode="json")
+def _user(db: Session, user: User) -> dict:
+    return user_payload(db, user)
 
 
 @router.post("/register", status_code=202, summary="Create an account and send a verification email")
 def register(body: RegisterIn, request: Request, background: BackgroundTasks, db: Session = Depends(get_db),
              limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
     limiter.hit("10/hour", "register", client_ip(request))
-    user, token = auth_service.register(db, body.email, body.password, body.first_name, body.last_name)
+    referral = body.referral_code or request.cookies.get("ax_partner_ref", "")
+    user, token = auth_service.register(
+        db, body.email, body.password, body.first_name, body.last_name,
+        account_type=body.account_type, institute_name=body.institute_name, contact_name=body.contact_name,
+        phone=body.phone, gstin=body.gstin, pan_number=body.pan_number, organization=body.organization,
+        referral_code=referral, agreed=body.agreed,
+    )
     if user is None:
         background.add_task(mailer.send, account_exists_email(auth_service.normalize_email(body.email), db))
     elif token:
@@ -45,7 +52,7 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     limiter.hit("10/hour", "login-email", auth_service.normalize_email(body.email))
     session = auth_service.login(db, body.email, body.password)
     set_session_cookies(response, session.access_token, session.refresh_token)
-    return ok({"user": _user(session.user)})
+    return ok({"user": _user(db, session.user)})
 
 
 @router.post("/refresh", summary="Rotate the session using the refresh cookie")
@@ -62,7 +69,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db),
         clear_session_cookies(failed)
         return failed
     set_session_cookies(response, session.access_token, session.refresh_token)
-    return ok({"user": _user(session.user)})
+    return ok({"user": _user(db, session.user)})
 
 
 @router.post("/logout", summary="End this session")
@@ -81,8 +88,8 @@ def logout_all(response: Response, user: User = Depends(get_current_user), db: S
 
 
 @router.get("/me", summary="The logged-in user")
-def me(user: User = Depends(get_current_user)):
-    return ok({"user": _user(user)})
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ok({"user": _user(db, user)})
 
 
 @router.post("/verify-email", summary="Confirm an email address with the emailed token")
@@ -90,7 +97,7 @@ def verify_email(body: TokenIn, request: Request, db: Session = Depends(get_db),
                  limiter: RateLimiter = Depends(get_rate_limiter)):
     limiter.hit("20/hour", "verify-email", client_ip(request))
     user = auth_service.verify_email(db, body.token)
-    return ok({"user": _user(user)})
+    return ok({"user": _user(db, user)})
 
 
 @router.post("/resend-verification", status_code=202, summary="Send a new verification email")

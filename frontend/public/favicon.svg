@@ -1,1 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#4f46e5"/><path d="M9 23 16 8l7 15h-4l-3-7-3 7z" fill="#fff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#2563eb"/>
+  <circle cx="16" cy="11" r="4" fill="#fff" opacity="0.95"/>
+  <rect x="10" y="16" width="12" height="10" rx="3" fill="#fff" opacity="0.95"/>
+  <text x="16" y="23" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="7" font-weight="700" fill="#2563eb">AI</text>
+</svg>

@@ -118,8 +118,8 @@ def test_application_preferences_merge_and_reset(alice):
                        json={"desired_salary": 1200000, "require_visa": "No", "cover_letter": "Hi"}, headers=h)
     assert resp.status_code == 200, resp.text
     resp = alice.patch("/api/preferences/application", json={"notice_period": 30, "cover_letter": None}, headers=h)
-    assert resp.json()["data"] == {"desired_salary": 1200000, "require_visa": "No", "notice_period": 30}
-    assert alice.get("/api/preferences/application").json()["data"]["notice_period"] == 30
+    assert resp.json()["data"]["answers"] == {"desired_salary": 1200000, "require_visa": "No", "notice_period": 30}
+    assert alice.get("/api/preferences/application").json()["data"]["answers"]["notice_period"] == 30
 
 
 @pytest.mark.parametrize("body,field", [
@@ -139,4 +139,33 @@ def test_application_preferences_reject_invalid(alice, body, field):
     assert resp.status_code == 422
     err = resp.json()["error"]
     assert err["code"] == "VALIDATION_ERROR" and err["details"][0]["field"] == field
-    assert alice.get("/api/preferences/application").json()["data"] == {}
+    assert alice.get("/api/preferences/application").json()["data"]["answers"] == {}
+
+
+def test_resolve_pending_saves_human_questions(alice, db):
+    from backend.app.models import User
+    from backend.app.services import preferences_service
+
+    h = csrf_headers(alice)
+    row = db.query(User).filter_by(email="alice@example.com").one()
+    preferences_service.capture_form_question(
+        db,
+        row.id,
+        {"label": "Years of Kubernetes?", "question_type": "text", "needs_answer": True},
+        {"title": "SRE", "company": "Acme"},
+    )
+    db.commit()
+    doc = alice.get("/api/preferences/application").json()["data"]
+    assert len(doc["pending_form_questions"]) == 1
+    qid = doc["pending_form_questions"][0]["id"]
+    resp = alice.post(
+        "/api/preferences/application/resolve-pending",
+        json={"answers": [{"id": qid, "answer": "5 years"}]},
+        headers=h,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert len(data["pending_form_questions"]) == 1
+    assert data["pending_form_questions"][0]["needs_answer"] is False
+    assert data["pending_form_questions"][0].get("has_saved_rule") is True
+    assert any(hq["pattern"] == "Years of Kubernetes?" and hq["answer"] == "5 years" for hq in data["human_questions"])

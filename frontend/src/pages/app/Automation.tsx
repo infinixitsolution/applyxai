@@ -1,15 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, Copy, Laptop, Pause, Play, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { PendingQuestionsModal } from "../../components/PendingQuestionsModal";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { Alert, Badge, Button, ButtonLink, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
 import { agentServerUrl } from "../../lib/config";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
-import { automation } from "../../services/endpoints";
-import type { AgentDevice, AutomationOverview, AutomationRun, RunLogLine, RunStatus } from "../../types";
+import { automation, preferences } from "../../services/endpoints";
+import type {
+  AgentDevice,
+  AutomationOverview,
+  AutomationRun,
+  PendingFormQuestion,
+  ResumeRunMode,
+  RunLogLine,
+  RunStatus,
+} from "../../types";
 
 const LIVE_POLL_MS = 3000;
 const IDLE_POLL_MS = 15000;
@@ -33,7 +42,10 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
 
 export function AutomationPage() {
   const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
   const [connectOpen, setConnectOpen] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingItems, setPendingItems] = useState<PendingFormQuestion[]>([]);
   const { data, isLoading, error } = useQuery({
     queryKey: ["automation"],
     queryFn: automation.overview,
@@ -48,9 +60,29 @@ export function AutomationPage() {
       for (const key of ["dashboard", "usage", "applications", "jobs", "notifications"]) {
         void client.invalidateQueries({ queryKey: [key] });
       }
+      void preferences.application().then((doc) => {
+        const pending = (doc.pending_form_questions ?? []).filter((q) => q.needs_answer && !q.has_saved_rule);
+        if (pending.length) {
+          setPendingItems(pending);
+          setPendingOpen(true);
+        }
+      });
     }
     previousActive.current = activeId;
   }, [activeId, client]);
+
+  useEffect(() => {
+    if (params.get("pending") !== "1") return;
+    void preferences.application().then((doc) => {
+      const pending = (doc.pending_form_questions ?? []).filter((q) => q.needs_answer);
+      if (pending.length) {
+        setPendingItems(pending);
+        setPendingOpen(true);
+      }
+      params.delete("pending");
+      setParams(params, { replace: true });
+    });
+  }, [params, setParams]);
 
   if (isLoading) return <Spinner />;
   if (!data) return <Alert kind="error">{errorMessage(error)}</Alert>;
@@ -81,6 +113,11 @@ export function AutomationPage() {
         </div>
       </div>
       <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} knownIds={data.devices.map((d) => d.id)} />
+      <PendingQuestionsModal
+        open={pendingOpen}
+        onClose={() => setPendingOpen(false)}
+        items={pendingItems}
+      />
     </>
   );
 }
@@ -90,16 +127,33 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
   const client = useQueryClient();
   const toast = useToast();
   const [dryRun, setDryRun] = useState(false);
+  const tailorSnap = overview.resume_tailor;
+  const [resumeMode, setResumeMode] = useState<ResumeRunMode>(tailorSnap?.mode ?? "default");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [modalChoice, setModalChoice] = useState<ResumeRunMode | null>(null);
+
+  useEffect(() => {
+    if (tailorSnap?.mode) setResumeMode(tailorSnap.mode);
+  }, [tailorSnap?.mode]);
+
   const start = useMutation({
-    mutationFn: () => automation.start(dryRun),
+    mutationFn: (mode: ResumeRunMode) => automation.start({ dry_run: dryRun, resume_mode: mode }),
     onSuccess: () => {
       toast.success(dryRun ? "Practice run queued." : "Run queued.");
+      setConfirmOpen(false);
       void client.invalidateQueries({ queryKey: ["automation"] });
+      void client.invalidateQueries({ queryKey: ["preferences", "search"] });
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
   const { readiness, devices, usage } = overview;
   const canStart = readiness.ready && devices.length > 0 && !usage.limit_reached;
+  const canPickTailor = tailorSnap?.can_tailor ?? false;
+
+  const openConfirm = () => {
+    setModalChoice(null);
+    setConfirmOpen(true);
+  };
 
   return (
     <Card title="Start a run">
@@ -146,6 +200,53 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
           </Alert>
         )}
 
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-medium text-slate-900">Resume for this run</p>
+          <p className="mt-1 text-xs text-slate-600">
+            Tailor builds a JD-matched resume per job (when match ≥60%) and uploads it to LinkedIn.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!canStart}
+              onClick={() => setResumeMode("default")}
+              className={cx(
+                "rounded-lg px-4 py-2 text-sm font-medium ring-1 transition",
+                resumeMode === "default"
+                  ? "bg-white text-brand-700 ring-brand-600 shadow-sm"
+                  : "bg-transparent text-slate-600 ring-slate-300 hover:bg-white",
+              )}
+            >
+              Default resume only
+            </button>
+            <button
+              type="button"
+              disabled={!canStart || !canPickTailor}
+              title={
+                !canPickTailor
+                  ? "Requires Platform Resume AI and master skills on your default resume"
+                  : undefined
+              }
+              onClick={() => setResumeMode("tailor_if_gate")}
+              className={cx(
+                "rounded-lg px-4 py-2 text-sm font-medium ring-1 transition",
+                resumeMode === "tailor_if_gate"
+                  ? "bg-brand-600 text-white ring-brand-600 shadow-sm"
+                  : "bg-transparent text-slate-600 ring-slate-300 hover:bg-white",
+                !canPickTailor && "cursor-not-allowed opacity-50",
+              )}
+            >
+              Tailor per job (JD)
+            </button>
+          </div>
+          {!canPickTailor && (
+            <p className="mt-2 text-xs text-amber-800">
+              To enable tailoring: admin turns on <strong>Resume AI</strong>, then{" "}
+              <Link to="/app/resumes" className="font-medium underline">analyze master skills</Link> on your default resume.
+            </p>
+          )}
+        </div>
+
         <label className="flex items-start gap-2">
           <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" checked={dryRun}
                  onChange={(e) => setDryRun(e.target.checked)} />
@@ -154,10 +255,78 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
             <span className="block text-slate-500">Fill in applications but stop before submitting them.</span>
           </span>
         </label>
-        <Button onClick={() => start.mutate()} loading={start.isPending} disabled={!canStart}>
+        <Button onClick={openConfirm} loading={start.isPending} disabled={!canStart}>
           <Play className="h-4 w-4" aria-hidden /> Start run
         </Button>
       </div>
+
+      <Modal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title="Confirm before starting"
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button
+              loading={start.isPending}
+              disabled={modalChoice === null}
+              onClick={() => modalChoice && start.mutate(modalChoice)}
+            >
+              Start run
+            </Button>
+          </>
+        }
+      >
+        <p className="mb-4 text-slate-600">
+          Choose how resumes are handled for <strong>this run</strong>. You must pick one option below.
+        </p>
+        <div className="space-y-3">
+          <label
+            className={cx(
+              "flex cursor-pointer gap-3 rounded-lg border p-4",
+              modalChoice === "default" ? "border-brand-600 bg-brand-50/50 ring-1 ring-brand-600" : "border-slate-200",
+            )}
+          >
+            <input
+              type="radio"
+              name="resume_mode_confirm"
+              className="mt-1"
+              checked={modalChoice === "default"}
+              onChange={() => setModalChoice("default")}
+            />
+            <span>
+              <span className="font-medium text-slate-900">Off — default resume only</span>
+              <span className="mt-1 block text-sm text-slate-600">
+                Upload your default resume for every Easy Apply job.
+              </span>
+            </span>
+          </label>
+          <label
+            className={cx(
+              "flex gap-3 rounded-lg border p-4",
+              !canPickTailor ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+              modalChoice === "tailor_if_gate" ? "border-brand-600 bg-brand-50/50 ring-1 ring-brand-600" : "border-slate-200",
+            )}
+          >
+            <input
+              type="radio"
+              name="resume_mode_confirm"
+              className="mt-1"
+              disabled={!canPickTailor}
+              checked={modalChoice === "tailor_if_gate"}
+              onChange={() => setModalChoice("tailor_if_gate")}
+            />
+            <span>
+              <span className="font-medium text-slate-900">On — tailor per job (tailor_if_gate)</span>
+              <span className="mt-1 block text-sm text-slate-600">
+                After reading each job description, AI tailors your resume when it matches well enough, saves a version,
+                and uploads it to LinkedIn.
+              </span>
+            </span>
+          </label>
+        </div>
+      </Modal>
     </Card>
   );
 }
@@ -371,6 +540,7 @@ function CopyLine({ text }: { text: string }) {
 
 function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: () => void; knownIds: string[] }) {
   const known = useRef<string[]>(knownIds);
+  const [devOpen, setDevOpen] = useState(false);
   const code = useMutation({ mutationFn: automation.pairingCode });
   const devices = useQuery({ queryKey: ["automation", "devices"], queryFn: automation.devices, enabled: open,
                              refetchInterval: open ? LIVE_POLL_MS : false });
@@ -378,12 +548,16 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
   useEffect(() => {
     if (open) {
       known.current = knownIds;
-      mutate();
     } else {
       reset();
+      setDevOpen(false);
     }
-    // Only when the dialog opens or closes; knownIds changes on every poll.
-  }, [open, mutate, reset]);
+  }, [open, reset]);
+  useEffect(() => {
+    if (open && devOpen && !code.data && !code.isPending) {
+      mutate();
+    }
+  }, [open, devOpen, code.data, code.isPending, mutate]);
   const connected = devices.data?.find((d) => !known.current.includes(d.id));
   const server = agentServerUrl();
 
@@ -394,41 +568,55 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-500" aria-hidden />
           <p className="font-medium text-slate-900">{connected.name} is connected</p>
-          <p>Leave <code>{AGENT} run</code> open on it, then start a run from this page.</p>
+          <p>Click <strong>Start Agent</strong> in the desktop app, then start a run from this page.</p>
         </div>
       ) : (
         <ol className="space-y-5">
           <li>
-            <p className="font-medium text-slate-900">1. Open a terminal in the ApplyXAI folder (the one that contains <code>app.py</code> and <code>venv</code>):</p>
-            <CopyLine text={IS_WINDOWS ? "cd C:\\path\\to\\applyxai" : "cd /path/to/applyxai"} />
-            <p className="mt-1 text-xs text-slate-500">
-              Use the project's <code>venv</code> Python as shown below. Running plain <code>python</code> from another folder gives
-              &quot;No module named agent&quot;.
+            <p className="font-medium text-slate-900">1. Install and open the ApplyXAI desktop agent on this computer.</p>
+            <p className="mt-1 text-sm text-slate-600">
+              Use the Windows installer package, or run from source with <code>{AGENT}</code>.
             </p>
           </li>
           <li>
-            <p className="font-medium text-slate-900">2. Connect this computer with your one-time code:</p>
-            {code.isPending ? <Spinner label="Getting a code\u2026" /> : code.isError ? (
-              <div className="mt-2"><Alert kind="error">{errorMessage(code.error)}</Alert></div>
-            ) : code.data && (
-              <div className="mt-2 flex flex-wrap items-center gap-4">
-                <span className="rounded-lg bg-brand-50 px-4 py-2 font-mono text-2xl font-semibold tracking-widest text-brand-700"
-                      data-testid="pairing-code">{code.data.code}</span>
-                <span className="text-xs text-slate-500">
-                  Expires {formatRelative(code.data.expires_at)}.{" "}
-                  <button type="button" className="font-medium text-brand-600 hover:underline" onClick={() => mutate()}>Get a new code</button>
-                </span>
-              </div>
-            )}
-            <CopyLine text={`${AGENT} pair --server ${server}${code.data ? ` --code ${code.data.code}` : ""}`} />
+            <p className="font-medium text-slate-900">2. Click <strong>Connect — Live</strong> (or <strong>Connect — Local</strong> while developing).</p>
+            <p className="mt-1 text-sm text-slate-600">
+              Your browser opens here — sign in if needed and approve the computer. No server URL or pairing code is required.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Live: <code>https://applyxai.com</code> · Local dev: <code>http://localhost:5173</code> (with the web app and API running).
+            </p>
           </li>
           <li>
-            <p className="font-medium text-slate-900">3. Start the agent and leave it running while you use automation:</p>
-            <CopyLine text={`${AGENT} run`} />
+            <p className="font-medium text-slate-900">3. Click <strong>Start Agent</strong> and leave the app running.</p>
           </li>
           <li className="text-xs text-slate-500">
-            The agent opens a browser on this computer and asks you to sign in to LinkedIn there. Your LinkedIn password
-            never goes to ApplyXAI. This page updates by itself once the computer is connected.
+            LinkedIn sign-in happens in Chrome on this computer. Your LinkedIn password never goes to ApplyXAI.
+            This dialog updates when the computer appears in your device list.
+          </li>
+          <li>
+            <button
+              type="button"
+              className="text-sm font-medium text-brand-600 hover:underline"
+              onClick={() => setDevOpen((v) => !v)}
+            >
+              {devOpen ? "Hide" : "Show"} developer pairing (terminal + one-time code)
+            </button>
+            {devOpen && (
+              <div className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+                {code.isPending ? <Spinner label="Getting a code\u2026" /> : code.isError ? (
+                  <Alert kind="error">{errorMessage(code.error)}</Alert>
+                ) : code.data ? (
+                  <>
+                    <p className="font-medium text-slate-900">One-time code</p>
+                    <span className="inline-block rounded-lg bg-brand-50 px-4 py-2 font-mono text-xl font-semibold tracking-widest text-brand-700"
+                          data-testid="pairing-code">{code.data.code}</span>
+                    <CopyLine text={`${AGENT} pair --server ${server} --code ${code.data.code}`} />
+                  </>
+                ) : null}
+                <CopyLine text={`${AGENT} run`} />
+              </div>
+            )}
           </li>
         </ol>
       )}

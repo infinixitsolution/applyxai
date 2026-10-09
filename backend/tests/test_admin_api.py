@@ -198,14 +198,16 @@ def test_grant_validation(admin, alice, body, code, status):
     assert resp.status_code == status and resp.json()["error"]["code"] == code
 
 
-def test_no_grant_over_a_paid_plan(admin, alice):
+def test_no_grant_over_a_paid_plan(admin, alice, monkeypatch):
+    monkeypatch.setattr("backend.app.services.billing_service.settings.PAYMENT_DEV_INSTANT_CHECKOUT", True)
     assert alice.post("/api/billing/checkout", json={"plan": "starter"}, headers=csrf_headers(alice)).status_code == 200
     resp = send(admin, "POST", f"/users/{alice.user.id}/grant-plan", {"plan": "pro", "months": 1})
     assert resp.status_code == 409 and resp.json()["error"]["code"] == "HAS_SUBSCRIPTION"
     assert plan_of(alice) == "starter"
 
 
-def test_buying_a_plan_ends_a_complimentary_one(admin, alice, db):
+def test_buying_a_plan_ends_a_complimentary_one(admin, alice, db, monkeypatch):
+    monkeypatch.setattr("backend.app.services.billing_service.settings.PAYMENT_DEV_INSTANT_CHECKOUT", True)
     data(send(admin, "POST", f"/users/{alice.user.id}/grant-plan", {"plan": "starter", "months": 6}))
     assert alice.post("/api/billing/checkout", json={"plan": "pro"}, headers=csrf_headers(alice)).status_code == 200
     assert plan_of(alice) == "pro"
@@ -378,9 +380,22 @@ def plan_body(**kw):
 
 def test_plans_list_includes_limits_and_subscribers(admin):
     plans = data(get(admin, "/plans"))["plans"]
-    assert [p["code"] for p in plans] == ["free", "starter", "pro", "premium"]
+    assert [p["code"] for p in plans] == ["free", "starter", "pro", "premium", "campus", "campus_pro"]
     starter = plans[1]
+    assert starter["kind"] == "personal"
     assert starter["limits"] == {"applications_per_month": 100, "resumes": 3} and starter["subscribers"] == 0
+    campus = next(p for p in plans if p["code"] == "campus")
+    assert campus["kind"] == "institute" and campus["limits"]["seats"] == 10
+
+
+def test_editing_an_institute_plan_updates_seats(admin):
+    out = data(send(admin, "PUT", "/plans/campus", {
+        "name": "Campus", "price_cents": 49900, "applications_per_month": 100, "resumes": 3,
+        "seats": 25, "is_active": True, "sort_order": 4,
+    }))
+    assert out["kind"] == "institute" and out["limits"] == {
+        "applications_per_month": 100, "resumes": 3, "seats": 25,
+    }
 
 
 def test_editing_a_plan_changes_limits_for_everyone_on_it(admin, alice, db):

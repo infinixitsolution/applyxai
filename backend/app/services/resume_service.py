@@ -96,13 +96,34 @@ def get_resume(db: Session, user: User, resume_id: uuid.UUID) -> Resume:
     return resume
 
 
-async def upload_resume(db: Session, user: User, upload: UploadFile, name: str | None = None) -> Resume:
+def counts_toward_plan_limit(resume: Resume) -> bool:
+    """Per-job generated copies are stored for application history, not user library slots."""
+    if (resume.ai_metadata or {}).get("generated_by") in ("ai", "automation"):
+        return False
+    return True
+
+
+def resumes_counting_toward_limit(db: Session, user_id: uuid.UUID) -> int:
+    rows = db.scalars(select(Resume).where(Resume.user_id == user_id)).all()
+    return sum(1 for r in rows if counts_toward_plan_limit(r))
+
+
+async def upload_resume(
+    db: Session,
+    user: User,
+    upload: UploadFile,
+    name: str | None = None,
+    *,
+    counts_against_plan: bool = True,
+) -> Resume:
     limit = plan_limits(db, user.id)["resumes"]
-    count = db.scalar(select(func.count()).select_from(Resume).where(Resume.user_id == user.id))
-    if count >= limit:
-        raise AppError("PLAN_LIMIT_REACHED",
-                       f"Your plan allows {limit} resume{'s' if limit != 1 else ''}. Delete one or upgrade.",
-                       status_code=403)
+    library_count = resumes_counting_toward_limit(db, user.id) if counts_against_plan else 0
+    if counts_against_plan and library_count >= limit:
+        raise AppError(
+            "PLAN_LIMIT_REACHED",
+            f"Your plan allows {limit} resume{'s' if limit != 1 else ''}. Delete one or upgrade.",
+            status_code=403,
+        )
 
     display = safe_display_name(upload.filename)
     file_type = _extension(display)
@@ -124,8 +145,10 @@ async def upload_resume(db: Session, user: User, upload: UploadFile, name: str |
     path.write_bytes(data)
 
     label = (name or "").strip()[:255] or os.path.splitext(display)[0][:255] or "Resume"
+    # Per-job copies must not become the default; that unique slot already belongs to the master.
+    make_default = counts_against_plan and library_count == 0
     resume = Resume(user_id=user.id, name=label, filename=display, storage_path=rel, file_type=file_type,
-                    file_size=len(data), sha256=hashlib.sha256(data).hexdigest(), is_default=count == 0)
+                    file_size=len(data), sha256=hashlib.sha256(data).hexdigest(), is_default=make_default)
     db.add(resume)
     try:
         db.commit()
@@ -156,6 +179,47 @@ def set_default(db: Session, user: User, resume_id: uuid.UUID) -> Resume:
         db.commit()
     db.refresh(resume)
     return resume
+
+
+async def apply_style_and_save(
+    db: Session,
+    user: User,
+    resume_id: uuid.UUID,
+    template_id: str,
+    *,
+    application_id: uuid.UUID | None = None,
+) -> Resume:
+    from backend.app.services import application_service, resume_text_service
+    from backend.app.services.resume_templates import get_template, normalize_template_id
+
+    style_id = normalize_template_id(template_id)
+    source = get_resume(db, user, resume_id)
+    src_path = absolute_path(source)
+    text = resume_text_service.extract_text(src_path, source.file_type)
+    tmp = src_path.parent / f"styled-{uuid.uuid4().hex}.docx"
+    resume_text_service.render_tailored_docx(
+        src_path, {}, tmp, resume_text=text, template_id=style_id,
+    )
+    data = tmp.read_bytes()
+    label = f"{source.name} ({get_template(style_id).name})"[:255]
+    file_stub = re.sub(r"[^\w\s.-]+", "", label).strip().replace(" ", "_") or "resume"
+    upload = UploadFile(filename=f"{file_stub}.docx", file=io.BytesIO(data))
+    new_resume = await upload_resume(db, user, upload, name=label)
+    new_resume.ai_metadata = {
+        "generated_by": "style",
+        "source_resume_id": str(resume_id),
+        "template_id": style_id,
+        "template_name": get_template(style_id).name,
+    }
+    if application_id is not None:
+        application_service.attach_generated_resume(db, user.id, application_id, new_resume.id)
+    db.commit()
+    db.refresh(new_resume)
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return new_resume
 
 
 def delete_resume(db: Session, user: User, resume_id: uuid.UUID) -> None:

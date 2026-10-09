@@ -40,6 +40,7 @@ from config.personals import *
 from config.questions import *
 from config.search import *
 from config.secrets import use_AI, username, password, ai_provider
+from config.applyxai import ai_use_platform_proxy, human_questions as qa_human_questions, ai_policy as qa_ai_policy, resume_mode as applyxai_resume_mode
 from config.settings import *
 
 from modules.open_chrome import *
@@ -50,6 +51,7 @@ from modules import run_hooks
 
 if use_AI:
     from modules.ai.connections import create_ai_client, extract_skills, answer_question, close_ai_client
+from automation.qa_resolver import resolve_missing_answer
 
 from typing import Literal
 
@@ -87,6 +89,38 @@ randomly_answered_questions = set()
 # Questions the LAST `answer_questions` pass could not answer at all - reset every pass.
 # Two identical passes in a row means the form can never advance on its own.
 unanswered_questions = set()
+_form_questions_emitted: set[tuple[str, str]] = set()
+
+
+def reset_form_question_emitter() -> None:
+    _form_questions_emitted.clear()
+
+
+def emit_form_question(
+    label: str,
+    question_type: str,
+    *,
+    options=None,
+    needs_answer: bool = False,
+    job_id: str = "",
+    job_title: str = "",
+    job_company: str = "",
+) -> None:
+    key = (question_type, (label or "").strip().lower()[:400])
+    if key in _form_questions_emitted and not needs_answer:
+        return
+    _form_questions_emitted.add(key)
+    run_hooks.emit(
+        "form_question",
+        label=(label or "")[:500],
+        question_type=question_type,
+        options=[str(o)[:200] for o in (options or [])[:30]],
+        needs_answer=bool(needs_answer),
+        job_id=job_id or "",
+        job_title=job_title or "",
+        company=job_company or "",
+    )
+
 
 class StoppedBeforeSubmit(Exception):
     '''
@@ -652,12 +686,168 @@ def get_job_description(
         
 
 
+def _resume_file_input(modal: WebElement):
+    """LinkedIn's Easy Apply file input is often hidden and no longer named `file`."""
+    candidates = modal.find_elements(By.CSS_SELECTOR, "input[type='file']")
+    if not candidates:
+        candidates = modal.find_elements(By.NAME, "file")
+    preferred = []
+    others = []
+    for el in candidates:
+        blob = " ".join([
+            el.get_attribute("id") or "",
+            el.get_attribute("name") or "",
+            el.get_attribute("accept") or "",
+            el.get_attribute("aria-label") or "",
+        ]).lower()
+        if "cover" in blob:
+            continue
+        if any(token in blob for token in ("resume", "pdf", "doc", "file")):
+            preferred.append(el)
+        else:
+            others.append(el)
+    pool = preferred or others
+    return pool[0] if pool else None
+
+
+def _resume_step_visible(modal: WebElement) -> bool:
+    """True when this Easy Apply step is the one that attaches a resume."""
+    try:
+        text = (modal.text or "").lower()
+    except Exception:
+        text = ""
+    if "upload resume" in text or "deselect resume" in text:
+        return True
+    file_input = _resume_file_input(modal)
+    if file_input is None:
+        return False
+    try:
+        return bool(file_input.is_displayed())
+    except Exception:
+        return False
+
+
+def _wait_until_resume_attached(modal: WebElement, filename: str, timeout: float = 30) -> bool:
+    """Poll until LinkedIn shows the uploaded name, or the upload message has cleared."""
+    stem = os.path.splitext(filename)[0].lower()
+    needle = stem[:24] if len(stem) > 24 else stem
+    deadline = time.time() + timeout
+    saw_upload = False
+    quiet_since = None
+    while time.time() < deadline:
+        try:
+            text = (modal.text or "").lower()
+        except Exception:
+            text = ""
+        uploading = "uploading" in text
+        if uploading:
+            saw_upload = True
+            quiet_since = None
+        elif needle and needle in text:
+            return True
+        else:
+            if quiet_since is None:
+                quiet_since = time.time()
+            quiet_for = time.time() - quiet_since
+            if saw_upload and quiet_for >= 1.5:
+                return True
+            if quiet_for >= 4:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _select_uploaded_resume(modal: WebElement, filename: str) -> None:
+    """If LinkedIn lists saved resumes as radios, select the card for the file just uploaded."""
+    stem = os.path.splitext(filename)[0].lower()
+    target = filename.lower()
+    for radio in modal.find_elements(By.CSS_SELECTOR, "input[type='radio']"):
+        label_text = ""
+        try:
+            rid = radio.get_attribute("id") or ""
+            if rid:
+                labels = modal.find_elements(By.XPATH, f".//label[@for={_xpath_literal(rid)}]")
+                if labels:
+                    label_text = labels[0].text or ""
+            if not label_text:
+                label_text = radio.find_element(By.XPATH, "./ancestor::label[1]").text or ""
+        except Exception:
+            continue
+        lowered = label_text.lower()
+        if target not in lowered and stem not in lowered:
+            continue
+        if radio.is_selected():
+            return
+        try:
+            radio.click()
+        except Exception:
+            try:
+                modal.parent.execute_script("arguments[0].click();", radio)
+            except Exception:
+                pass
+        return
+
+
+def _xpath_literal(value: str) -> str:
+    if "'" not in value:
+        return f"'{value}'"
+    if '"' not in value:
+        return f'"{value}"'
+    parts = value.split("'")
+    return "concat(" + ", \"'\", ".join(f"'{part}'" for part in parts) + ")"
+
+
 # Function to upload resume
 def upload_resume(modal: WebElement, resume: str) -> tuple[bool, str]:
+    path = os.path.abspath(resume) if resume else ""
+    name = os.path.basename(path) if path else ""
+    if not path or not os.path.isfile(path):
+        print_lg(f'Resume file missing, keeping the previous LinkedIn resume: {resume}')
+        return False, "Previous resume"
     try:
-        modal.find_element(By.NAME, "file").send_keys(os.path.abspath(resume))
-        return True, os.path.basename(default_resume_path)
-    except: return False, "Previous resume"
+        file_input = _resume_file_input(modal)
+        if file_input is None:
+            return False, "Previous resume"
+        file_input.send_keys(path)
+        if _resume_step_visible(modal):
+            print_lg(f'Waiting until LinkedIn finishes attaching "{name}"...')
+            if not _wait_until_resume_attached(modal, name):
+                print_lg(f'Resume "{name}" is not attached yet.')
+                return False, "Previous resume"
+        else:
+            buffer(1)
+        _select_uploaded_resume(modal, name)
+        print_lg(f'Resume "{name}" is ready.')
+        return True, name
+    except Exception as e:
+        print_lg(f'Could not upload resume "{name}": {e}')
+        return False, "Previous resume"
+
+def _qa_extra_answer(
+    label_org: str,
+    label: str,
+    question_type: str,
+    *,
+    options=None,
+    job_description=None,
+    job_title: str = "",
+    job_company: str = "",
+) -> str | None:
+    return resolve_missing_answer(
+        label_org=label_org,
+        label_lower=label,
+        question_type=question_type,
+        human_questions=qa_human_questions,
+        ai_policy=qa_ai_policy,
+        use_ai=use_AI,
+        options=list(options) if options else None,
+        job_description=job_description,
+        job_title=job_title,
+        company=job_company,
+        user_information_all=user_information_all,
+        platform_proxy=bool(ai_use_platform_proxy),
+    )
+
 
 # Function to answer common questions for Easy Apply
 def answer_common_questions(label: str, answer: str | None) -> str | None:
@@ -666,7 +856,16 @@ def answer_common_questions(label: str, answer: str | None) -> str | None:
 
 
 # Function to answer the questions for Easy Apply
-def answer_questions(modal: WebElement, questions_list: set, work_location: str, job_description: str | None = None ) -> set:
+def answer_questions(
+    modal: WebElement,
+    questions_list: set,
+    work_location: str,
+    job_description: str | None = None,
+    *,
+    job_id: str = "",
+    job_title: str = "",
+    job_company: str = "",
+) -> set:
     # Get all questions from the page
      
     # The container class churns (it is `fb-dash-form-element` today, paired with a random
@@ -674,6 +873,18 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
     all_questions = modal.find_elements(By.XPATH, ".//div[@data-test-form-element]")
     # Per-pass, not cumulative: the caller compares consecutive passes to spot a stall.
     unanswered_questions.clear()
+
+    def _seen(label_org: str, qtype: str, *, options=None, needs_answer: bool = False) -> None:
+        emit_form_question(
+            label_org,
+            qtype,
+            options=options,
+            needs_answer=needs_answer,
+            job_id=job_id,
+            job_title=job_title,
+            job_company=job_company,
+        )
+
     # all_list_questions = modal.find_elements(By.XPATH, ".//div[@data-test-text-entity-list-form-component]")
     # all_single_line_questions = modal.find_elements(By.XPATH, ".//div[@data-test-single-line-text-form-component]")
     # all_questions = all_questions + all_list_questions + all_single_line_questions
@@ -731,6 +942,13 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         answer = work_location
                 else:
                     answer = answer_common_questions(label, answer)
+                if answer is None:
+                    extra = _qa_extra_answer(
+                        label_org, label, "select", options=optionsText, job_description=job_description,
+                        job_title=job_title, job_company=job_company,
+                    )
+                    if extra:
+                        answer = extra
                 try:
                     if answer is None: raise NoSuchElementException(label_org)
                     select.select_by_visible_text(answer)
@@ -748,8 +966,10 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         answer = prev_answer
                         randomly_answered_questions.add((f'{label_org} [ {options} ]', "select"))
                         unanswered_questions.add(f'{label_org} [ {options} ]')
+                        _seen(label_org, "select", options=optionsText, needs_answer=True)
             else: answer = prev_answer
             questions_list.add((f'{label_org} [ {options} ]', answer, "select", prev_answer))
+            _seen(label_org, "select", options=optionsText if label != "phone country code" else None)
             continue
         
         # Check if it's a radio Question
@@ -786,6 +1006,13 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                 elif label_has(label, 'disability', 'handicapped'): 
                     answer = disability_status
                 else: answer = answer_common_questions(label,answer)
+                if answer is None:
+                    extra = _qa_extra_answer(
+                        label_org.rstrip(" [ "), label, "radio", options=option_texts, job_description=job_description,
+                        job_title=job_title, job_company=job_company,
+                    )
+                    if extra:
+                        answer = extra
                 foundOption = try_xp(radio, f".//label[normalize-space()='{answer}']", False) if answer else False
                 if foundOption: 
                     actions.move_to_element(foundOption).click().perform()
@@ -800,11 +1027,13 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         answer = prev_answer
                         randomly_answered_questions.add((f'{label_org} ]',"radio"))
                         unanswered_questions.add(f'{label_org} ]')
+                        _seen(label_org.split(" [ ")[0], "radio", options=option_texts, needs_answer=True)
                     else:
                         actions.move_to_element(options[matched]).click().perform()
                         answer = options_labels[matched]
             else: answer = prev_answer
             questions_list.add((label_org+" ]", answer, "radio", prev_answer))
+            _seen(label_org.split(" [ ")[0], "radio", options=option_texts)
             continue
         
         # Check if it's a text question
@@ -876,9 +1105,17 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                 elif label_has(label, 'zip', 'zipcode', 'postal', 'postcode', 'code'): answer = zipcode
                 elif label_has(label, 'country'): answer = country
                 else: answer = answer_common_questions(label,answer)
+                if answer in (None, ""):
+                    extra = _qa_extra_answer(
+                        label_org, label, "text", job_description=job_description,
+                        job_title=job_title, job_company=job_company,
+                    )
+                    if extra:
+                        answer = extra
+                        print_lg(f'AI/custom answered "{label_org}": "{answer}"')
                 if answer == "":
                     ai_answer = ""
-                    if use_AI and aiClient:
+                    if use_AI and aiClient and not ai_use_platform_proxy:
                         try:
                             ai_answer = answer_question(aiClient, label_org, question_type="text", job_description=job_description, user_information_all=user_information_all)
                         except Exception as e:
@@ -886,7 +1123,7 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     if ai_answer and isinstance(ai_answer, str) and ai_answer.strip():
                         answer = ai_answer.strip()
                         print_lg(f'AI answered "{label_org}": "{answer}"')
-                    else:
+                    elif answer == "":
                         # Leave it empty. It used to fall back to `years_of_experience`, so
                         # "How many years of Kubernetes?", "What is your expected salary?"
                         # and "How many people did you manage?" were all submitted as the
@@ -895,6 +1132,7 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         print_lg(f'No answer for the text question "{label_org}". Leaving it empty - add it to config/questions.py.')
                         randomly_answered_questions.add((label_org, "text"))
                         unanswered_questions.add(label_org)
+                        _seen(label_org, "text", needs_answer=True)
                 text.clear()
                 human_type(text, answer)
                 if do_actions:
@@ -902,6 +1140,7 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     actions.send_keys(Keys.ARROW_DOWN)
                     actions.send_keys(Keys.ENTER).perform()
             questions_list.add((label, text.get_attribute("value"), "text", prev_answer))
+            _seen(label_org, "text")
             continue
 
         # Check if it's a textarea question
@@ -915,9 +1154,17 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             if not prev_answer or overwrite_previous_answers:
                 if label_has(label, 'summary'): answer = linkedin_summary
                 elif label_has(label, 'cover'): answer = cover_letter
+                if answer in ("", None):
+                    extra = _qa_extra_answer(
+                        label_org, label, "textarea", job_description=job_description,
+                        job_title=job_title, job_company=job_company,
+                    )
+                    if extra:
+                        answer = extra
+                        print_lg(f'AI/custom answered "{label_org}": "{answer}"')
                 if answer == "":
                     ai_answer = ""
-                    if use_AI and aiClient:
+                    if use_AI and aiClient and not ai_use_platform_proxy:
                         try:
                             ai_answer = answer_question(aiClient, label_org, question_type="textarea", job_description=job_description, user_information_all=user_information_all)
                         except Exception as e:
@@ -925,12 +1172,14 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     if ai_answer and isinstance(ai_answer, str) and ai_answer.strip():
                         answer = ai_answer.strip()
                         print_lg(f'AI answered "{label_org}": "{answer}"')
-                    else:
+                    elif answer == "":
                         randomly_answered_questions.add((label_org, "textarea"))
                         unanswered_questions.add(label_org)
+                        _seen(label_org, "textarea", needs_answer=True)
             text_area.clear()
             human_type(text_area, answer)
             questions_list.add((label, text_area.get_attribute("value"), "textarea", prev_answer))
+            _seen(label_org, "textarea")
             continue
 
         # Check if it's a checkbox question
@@ -959,7 +1208,9 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     blocked, f'is an attestation or consent ("{term}")' if term else 'cannot be classified'))
                 randomly_answered_questions.add((blocked, "checkbox"))
                 unanswered_questions.add(blocked)
+                _seen(label_org, "checkbox", needs_answer=True)
             questions_list.add((f'{label} ([X] {answer})', checked, "checkbox", prev_answer))
+            _seen(label_org, "checkbox")
             continue
 
 
@@ -1097,15 +1348,19 @@ def screenshot(driver: WebDriver, job_id: str, failedAt: str) -> str:
 def submitted_jobs(job_id: str, title: str, company: str, work_location: str, work_style: str, description: str, experience_required: int | Literal['Unknown', 'Error in extraction'], 
                    skills: list[str] | Literal['In Development'], hr_name: str | Literal['Unknown'], hr_link: str | Literal['Unknown'], resume: str, 
                    reposted: bool, date_listed: datetime | Literal['Unknown'], date_applied:  datetime | Literal['Pending'], job_link: str, application_link: str, 
-                   questions_list: set | None, connect_request: Literal['In Development']) -> None:
+                   questions_list: set | None, connect_request: Literal['In Development'], resume_id: str | None = None) -> None:
     '''
     Function to create or update the Applied jobs CSV file, once the application is submitted successfully
     '''
-    run_hooks.emit("applied" if application_link == "Easy Applied" else "external",
-                   job_id=job_id, title=title, company=company, work_location=work_location,
-                   work_style=work_style, description=description, experience_required=experience_required,
-                   reposted=reposted, date_listed=date_listed, date_applied=date_applied,
-                   job_link=job_link, application_link=application_link)
+    applied_payload = dict(
+        job_id=job_id, title=title, company=company, work_location=work_location,
+        work_style=work_style, description=description, experience_required=experience_required,
+        reposted=reposted, date_listed=date_listed, date_applied=date_applied,
+        job_link=job_link, application_link=application_link,
+    )
+    if resume_id:
+        applied_payload["resume_id"] = resume_id
+    run_hooks.emit("applied" if application_link == "Easy Applied" else "external", **applied_payload)
     try:
         with open(file_name, mode='a', newline='', encoding='utf-8') as csv_file:
             fieldnames = ['Job ID', 'Title', 'Company', 'Work Location', 'Work Style', 'About Job', 'Experience required', 'Skills required', 'HR Name', 'HR Link', 'Resume', 'Re-posted', 'Date Posted', 'Date Applied', 'Job Link', 'External Job link', 'Questions Found', 'Connect Request']
@@ -1213,6 +1468,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     job_id,title,company,work_location,work_style,skip = get_job_main_details(job, blacklisted_companies, rejected_jobs)
                     
                     if skip: continue
+                    reset_form_question_emitter()
                     run_hooks.emit("job_started", job_id=job_id, title=title, company=company,
                                    work_location=work_location, work_style=work_style)
                     # Redundant fail safe check for applied jobs!
@@ -1307,6 +1563,33 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             skills = "Error extracting skills"
 
                     uploaded = False
+                    resume_upload_path = default_resume_path
+                    applied_resume_id = None
+                    if applyxai_resume_mode == "tailor_if_gate" and description and description != "Unknown":
+                        from automation import job_resume
+                        print_lg("Preparing a tailored resume. Easy Apply waits until that file is ready.")
+                        resume_upload_path, applied_resume_id = job_resume.resolve_upload_path(
+                            resume_mode=applyxai_resume_mode,
+                            default_path=default_resume_path,
+                            job_id=job_id,
+                            job_description=description,
+                            job_title=title,
+                            company=company,
+                            cache_dir=generated_resume_path,
+                        )
+                        if applied_resume_id:
+                            print_lg(f"Tailored resume saved ({os.path.basename(resume_upload_path)}).")
+                        else:
+                            print_lg("No tailored resume for this job. Easy Apply will use the default resume.")
+                    if useNewResume:
+                        from automation.job_resume import wait_until_file_ready
+                        print_lg(f"Waiting until the resume file is ready: {os.path.basename(resume_upload_path)}")
+                        if not wait_until_file_ready(resume_upload_path):
+                            print_lg("Resume file was not ready. Skipping this job instead of applying without it.")
+                            failed_job(job_id, job_link, resume, date_listed, "Resume was not ready", "The resume file was not ready, so this job was not applied.", "Skipped", screenshot_name)
+                            skip_count += 1
+                            continue
+                        print_lg("Resume is ready. Applying now.")
                     # Is this an Easy Apply job? Try each locator in `easy_apply_locators` in
                     # turn and confirm by the modal opening; a new browser tab means external.
                     is_easy_apply = False
@@ -1342,7 +1625,10 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             try:
                                 errored = ""
                                 modal = find_by_class(driver, "jobs-easy-apply-modal")
-                                wait_xp_click(modal, next_button_xpath, 1)
+                                # Stay on the first step when a resume still has to be attached.
+                                # Clicking Next here used to leave the resume step before the file was ready.
+                                if not useNewResume:
+                                    wait_xp_click(modal, next_button_xpath, 1)
                                 resume = "Previous resume"
                                 next_button = True
                                 questions_list = set()
@@ -1360,7 +1646,10 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                         screenshot_name = screenshot(driver, job_id, "Failed at questions")
                                         errored = "stuck"
                                         raise Exception("Seems like stuck in a continuous loop of next, probably because of new questions.")
-                                    questions_list = answer_questions(modal, questions_list, work_location, job_description=description)
+                                    questions_list = answer_questions(
+                                        modal, questions_list, work_location, job_description=description,
+                                        job_id=job_id, job_title=title, job_company=company,
+                                    )
                                     # `pause_at_failed_question` users want the manual prompt the
                                     # counter above gives them, so only bail out when it is off.
                                     if not pause_at_failed_question and questions_are_stalled(blocked_questions):
@@ -1369,15 +1658,28 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                             'Skipping "{}" - no answer in config/questions.py for:\n  {}'.format(
                                                 title, "\n  ".join(sorted(unanswered_questions))))
                                     blocked_questions = set(unanswered_questions)
-                                    if useNewResume and not uploaded: uploaded, resume = upload_resume(modal, default_resume_path)
-                                    # Scoped to the dialog on purpose: a document-wide search
-                                    # for "Next" matches the search results PAGINATION control
-                                    # (aria-label "View next page") and paged away mid-application.
-                                    try: next_button = modal.find_element(By.XPATH, review_button_xpath)
-                                    except NoSuchElementException:  next_button = modal.find_element(By.XPATH, next_button_xpath)
-                                    try: next_button.click()
-                                    except ElementClickInterceptedException: break    # Happens when it tries to click Next button in About Company photos section
-                                    buffer(click_gap)
+                                    advance = True
+                                    if useNewResume and not uploaded:
+                                        on_resume_step = _resume_step_visible(modal)
+                                        if on_resume_step or _resume_file_input(modal) is not None:
+                                            if on_resume_step:
+                                                print_lg("Resume step is open. Waiting until it is attached before continuing.")
+                                            uploaded, resume = upload_resume(modal, resume_upload_path)
+                                        if on_resume_step and not uploaded:
+                                            print_lg("Resume is not attached yet. Staying on this step.")
+                                            buffer(2)
+                                            advance = False
+                                    # Do not `continue` here: this loop sits inside try/finally, and
+                                    # continue would run the finally block and try to submit early.
+                                    if advance:
+                                        # Scoped to the dialog on purpose: a document-wide search
+                                        # for "Next" matches the search results PAGINATION control
+                                        # (aria-label "View next page") and paged away mid-application.
+                                        try: next_button = modal.find_element(By.XPATH, review_button_xpath)
+                                        except NoSuchElementException:  next_button = modal.find_element(By.XPATH, next_button_xpath)
+                                        try: next_button.click()
+                                        except ElementClickInterceptedException: break    # Happens when it tries to click Next button in About Company photos section
+                                        buffer(click_gap)
 
                             except NoSuchElementException: errored = "nose"
                             finally:
@@ -1452,8 +1754,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             return
                         if skip: continue
 
-                    submitted_jobs(job_id, title, company, work_location, work_style, description, experience_required, skills, hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link, questions_list, connect_request)
-                    if uploaded:   useNewResume = False
+                    submitted_jobs(job_id, title, company, work_location, work_style, description, experience_required, skills, hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link, questions_list, connect_request, resume_id=applied_resume_id if uploaded else None)
 
                     print_lg(f'Successfully saved "{title} | {company}" job. Job ID: {job_id} info')
                     current_count += 1
@@ -1531,8 +1832,16 @@ def main() -> None:
         
         linkedIn_tab = driver.current_window_handle
 
+        aiClient = None
+        from automation import job_resume
+        job_resume.configure()
         if use_AI:
-            aiClient = create_ai_client()
+            from automation import qa_resolver
+            if ai_use_platform_proxy:
+                qa_resolver.configure()
+            else:
+                aiClient = create_ai_client()
+                qa_resolver.configure(local_answer=answer_question)
 
         # Start applying to jobs
         driver.switch_to.window(linkedIn_tab)

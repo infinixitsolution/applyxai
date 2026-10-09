@@ -43,5 +43,8 @@ class UserProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     experience_years: Mapped[int | None] = mapped_column(Integer)
     current_title: Mapped[str] = mapped_column(String(255), default="")
     current_company: Mapped[str] = mapped_column(String(255), default="")
+    preferred_resume_template: Mapped[str] = mapped_column(String(32), default="modern", server_default="modern")
+    education: Mapped[list] = mapped_column(JSONType, default=list)
+    work_history: Mapped[list] = mapped_column(JSONType, default=list)
 
     user: Mapped[User] = relationship(back_populates="profile")

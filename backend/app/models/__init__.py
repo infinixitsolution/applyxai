@@ -1,13 +1,18 @@
 """Importing this package registers every model on `Base.metadata` (Alembic relies on it)."""
 
 from backend.app.models.base import Base
-from backend.app.models.enums import ApplicationStatus, AutomationStatus, SubscriptionStatus, TokenPurpose
+from backend.app.models.enums import (
+    OPEN_ASSIGNMENT_STATUSES, ApplicationStatus, AssignmentStatus, AutomationStatus, CommissionStatus,
+    InstituteMemberRole, InstituteStatus, KycStatus, PartnerStatus, PayoutStatus, PlanKind, SeatStatus,
+    SubscriptionStatus, TokenPurpose,
+)
 from backend.app.models.user import User, UserProfile
 from backend.app.models.auth_token import AuthToken
 from backend.app.models.preferences import ApplicationPreferences, SearchConfig
 from backend.app.models.resume import Resume
 from backend.app.models.job import Job
 from backend.app.models.agent import AgentDevice
+from backend.app.models.agent_connect import AgentConnectSession
 from backend.app.models.automation import AutomationJob, AutomationLog
 from backend.app.models.application import Application
 from backend.app.models.subscription import Plan, Subscription
@@ -16,12 +21,20 @@ from backend.app.models.usage import UsageCounter
 from backend.app.models.notification import Notification
 from backend.app.models.admin import AdminAction
 from backend.app.models.platform_settings import PlatformSettings
+from backend.app.models.partner import Partner, PartnerAttribution, PartnerCampaign, PartnerCommission, PartnerPayout
+from backend.app.models.institute import Institute, InstituteAssignment, InstituteInvite, InstituteMember, InstituteSeat
 
 __all__ = [
     "Base",
-    "ApplicationStatus", "AutomationStatus", "SubscriptionStatus", "TokenPurpose",
+    "OPEN_ASSIGNMENT_STATUSES",
+    "ApplicationStatus", "AssignmentStatus", "AutomationStatus", "CommissionStatus", "InstituteMemberRole",
+    "InstituteStatus", "KycStatus", "PartnerStatus", "PayoutStatus", "PlanKind", "SeatStatus",
+    "SubscriptionStatus", "TokenPurpose",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
+    "AgentConnectSession",
     "AutomationJob",
     "AutomationLog", "Application", "Plan", "Subscription", "Payment", "BillingEvent", "UsageCounter", "Notification",
     "AdminAction", "PlatformSettings",
+    "Partner", "PartnerAttribution", "PartnerCampaign", "PartnerCommission", "PartnerPayout",
+    "Institute", "InstituteAssignment", "InstituteInvite", "InstituteMember", "InstituteSeat",
 ]

@@ -135,6 +135,42 @@ def upsert_job(db: Session, *, external_id: str, platform: str = "linkedin", **f
     raise RuntimeError("could not upsert job")
 
 
+def resolve_applied_resume_id(
+    db: Session,
+    user_id: uuid.UUID,
+    job: Job,
+    *,
+    event_resume_id: uuid.UUID | None,
+    external_job_id: str,
+) -> uuid.UUID | None:
+    """
+    Pick the resume row that was actually used for an application.
+    The agent may omit resume_id when tailoring succeeded server-side before the applied event.
+    """
+    if event_resume_id:
+        return event_resume_id
+    app = db.scalar(select(Application).where(Application.user_id == user_id, Application.job_id == job.id))
+    if app is not None and app.resume_id:
+        resume = db.get(Resume, app.resume_id)
+        if resume is not None and resume.user_id == user_id:
+            meta = resume.ai_metadata or {}
+            if meta.get("generated_by") == "ai" or resume.application_id == app.id:
+                return app.resume_id
+    key = str(external_job_id or "").strip()
+    if not key:
+        return None
+    rows = db.scalars(
+        select(Resume)
+        .where(Resume.user_id == user_id)
+        .order_by(Resume.created_at.desc())
+    ).all()
+    for resume in rows:
+        meta = resume.ai_metadata or {}
+        if meta.get("generated_by") == "ai" and str(meta.get("job_id") or "") == key:
+            return resume.id
+    return None
+
+
 def record_application(db: Session, user_id: uuid.UUID, job: Job, status: ApplicationStatus, *,
                        automation_job_id: uuid.UUID | None = None, resume_id: uuid.UUID | None = None,
                        failure_reason: str = "", applied_at: datetime | None = None,
@@ -159,7 +195,11 @@ def record_application(db: Session, user_id: uuid.UUID, job: Job, status: Applic
             usage_service.increment(db, user_id, jobs_discovered=1)
         newly_applied = status == ApplicationStatus.APPLIED
     elif app.status == ApplicationStatus.APPLIED:
-        return app                                   # final: re-seeing an applied job changes nothing
+        if resume_id:
+            app.resume_id = resume_id
+        if automation_job_id:
+            app.automation_job_id = automation_job_id
+        return app
     else:
         newly_applied = status == ApplicationStatus.APPLIED
         app.status = status
@@ -175,3 +215,50 @@ def record_application(db: Session, user_id: uuid.UUID, job: Job, status: Applic
             usage_service.increment(db, user_id, applications=1)
     db.flush()
     return app
+
+
+def application_for_external_job(db: Session, user_id: uuid.UUID, external_job_id: str) -> Application | None:
+    job_key = str(external_job_id or "").strip()
+    if not job_key:
+        return None
+    job = db.scalar(select(Job).where(Job.external_id == job_key))
+    if job is None:
+        return None
+    return db.scalar(select(Application).where(Application.user_id == user_id, Application.job_id == job.id))
+
+
+def attach_generated_resume(db: Session, user_id: uuid.UUID, application_id: uuid.UUID, resume_id: uuid.UUID) -> Application:
+    app = get_application(db, user_id, application_id)
+    resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == user_id))
+    if resume is None:
+        raise _not_found("Resume")
+    resume.application_id = application_id
+    app.resume_id = resume_id
+    meta = dict(resume.ai_metadata or {})
+    meta["application_id"] = str(application_id)
+    resume.ai_metadata = meta
+    db.flush()
+    return app
+
+
+def generated_resumes_for_applications(db: Session, user_id: uuid.UUID, application_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Resume]]:
+    if not application_ids:
+        return {}
+    rows = db.scalars(
+        select(Resume)
+        .where(Resume.user_id == user_id, Resume.application_id.in_(application_ids))
+        .order_by(Resume.created_at.desc())
+    ).all()
+    grouped: dict[uuid.UUID, list[Resume]] = {}
+    for row in rows:
+        if row.application_id is None:
+            continue
+        grouped.setdefault(row.application_id, []).append(row)
+    return grouped
+
+
+def primary_resumes(db: Session, user_id: uuid.UUID, resume_ids: list[uuid.UUID]) -> dict[uuid.UUID, Resume]:
+    if not resume_ids:
+        return {}
+    rows = db.scalars(select(Resume).where(Resume.user_id == user_id, Resume.id.in_(resume_ids))).all()
+    return {row.id: row for row in rows}

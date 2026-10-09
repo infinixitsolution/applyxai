@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
 from backend.app.core.security import hash_token
-from backend.app.models import AgentDevice, User
+from backend.app.models import AgentConnectSession, AgentDevice, User
 
 PAIRING_MINUTES = 10
+CONNECT_MINUTES = 15
 MAX_DEVICES = 5
 ONLINE_SECONDS = 45
 TOKEN_PREFIX = "axd_"
@@ -128,6 +129,78 @@ def device_out(device: AgentDevice, now: datetime | None = None) -> dict:
     }
 
 
+def start_connect_session(
+    db: Session,
+    *,
+    name: str,
+    platform: str,
+    agent_version: str,
+) -> tuple[AgentConnectSession, str]:
+    secret = secrets.token_urlsafe(32)
+    session = AgentConnectSession(
+        secret_hash=hash_token(secret),
+        expires_at=_now() + timedelta(minutes=CONNECT_MINUTES),
+        requested_name=name.strip()[:100] or "My computer",
+        platform=platform.strip()[:50],
+        agent_version=agent_version.strip()[:32],
+    )
+    db.add(session)
+    db.flush()
+    return session, secret
+
+
+def approve_connect_session(db: Session, user: User, session_id: uuid.UUID) -> AgentConnectSession:
+    session = db.get(AgentConnectSession, session_id)
+    if session is None or _aware(session.expires_at) <= _now():
+        raise AppError("CONNECT_EXPIRED", "This connection request expired. Open the desktop app and try again.", 400)
+    if session.user_id is not None and session.deliver_token:
+        return session
+    count = db.scalar(select(func.count()).select_from(_active_devices(user.id).subquery()))
+    if count >= MAX_DEVICES:
+        raise AppError("DEVICE_LIMIT_REACHED",
+                       f"You can connect up to {MAX_DEVICES} computers. Remove one to connect another.", 409)
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    device = AgentDevice(
+        user_id=user.id,
+        name=session.requested_name or "My computer",
+        platform=session.platform,
+        agent_version=session.agent_version,
+        token_hash=hash_token(token),
+        paired_at=_now(),
+        last_seen_at=_now(),
+    )
+    db.add(device)
+    db.flush()
+    session.user_id = user.id
+    session.device_id = device.id
+    session.deliver_token = token
+    db.flush()
+    return session
+
+
+def poll_connect_session(db: Session, session_id: uuid.UUID, secret: str) -> dict:
+    session = db.get(AgentConnectSession, session_id)
+    if session is None or session.secret_hash != hash_token(secret):
+        raise AppError("CONNECT_INVALID", "Invalid connection session.", 400)
+    if _aware(session.expires_at) <= _now():
+        raise AppError("CONNECT_EXPIRED", "This connection request expired.", 400)
+    if not session.deliver_token or session.device_id is None:
+        return {"status": "pending"}
+    token = session.deliver_token
+    session.deliver_token = None
+    device = db.get(AgentDevice, session.device_id)
+    db.flush()
+    return {
+        "status": "ready",
+        "token": token,
+        "device_id": str(session.device_id),
+        "user_id": str(session.user_id),
+        "name": device.name if device else session.requested_name,
+    }
+
+
 def delete_expired_pairings(db: Session, now: datetime | None = None) -> int:
+    now = now or _now()
+    db.execute(delete(AgentConnectSession).where(AgentConnectSession.expires_at < now))
     return db.execute(delete(AgentDevice).where(AgentDevice.token_hash.is_(None),
-                                                AgentDevice.pairing_expires_at < (now or _now()))).rowcount
+                                                AgentDevice.pairing_expires_at < now)).rowcount

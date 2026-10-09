@@ -30,6 +30,7 @@ storage/
 node_modules/
 frontend/dist/
 *.tsbuildinfo
+/nul
 
 # Local control-panel runtime files — contain your credentials/answers, never commit
 user_config.json

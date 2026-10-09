@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, ListChecks, Search } from "lucide-react";
+import { Download, FileText, ListChecks, Search } from "lucide-react";
 import { useState } from "react";
 import { ChipSelect, Select, TextInput } from "../../components/form";
 import { Pagination } from "../../components/Pagination";
@@ -8,10 +8,18 @@ import { ApplicationDetailModal } from "../../features/ApplicationDetailModal";
 import { formatDate, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
-import { applications, type ApplicationFilters } from "../../services/endpoints";
+import { applications, resumes as resumesApi, type ApplicationFilters } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type ApplicationStatus } from "../../types";
 
 const PAGE_SIZE = 20;
+
+function resumeKindLabel(resume: { generated_by?: string | null; is_default?: boolean } | null | undefined): string {
+  if (!resume) return "";
+  if (resume.generated_by === "ai") return "AI tailored";
+  if (resume.generated_by === "automation") return "Generated";
+  if (resume.is_default) return "Master resume";
+  return "Resume";
+}
 const SORTS = [
   { value: "-created_at", label: "Newest first" },
   { value: "created_at", label: "Oldest first" },
@@ -79,6 +87,7 @@ export function ApplicationsPage() {
                     <th className="px-5 py-3">Job</th>
                     <th className="px-5 py-3">Location</th>
                     <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Resume</th>
                     <th className="px-5 py-3">Applied</th>
                   </tr>
                 </thead>
@@ -93,6 +102,27 @@ export function ApplicationsPage() {
                       </td>
                       <td className="px-5 py-3 text-slate-600">{a.job.location || "—"}</td>
                       <td className="px-5 py-3"><Badge tone={STATUS_TONES[a.status]}>{STATUS_LABELS[a.status]}</Badge></td>
+                      <td className="max-w-[200px] px-5 py-3" onClick={(e) => e.stopPropagation()}>
+                        {(a.generated_resumes?.length ?? 0) > 0 || a.resume ? (
+                          <div className="space-y-1">
+                            {a.resume && (
+                              <div className="min-w-0">
+                                <a href={resumesApi.downloadUrl(a.resume.id)} className="flex items-center gap-1 truncate text-brand-600 hover:underline"
+                                   title={a.resume.name}>
+                                  <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                  <span className="truncate">{a.resume.name}</span>
+                                </a>
+                                <p className="text-xs text-slate-500">{resumeKindLabel(a.resume)}</p>
+                              </div>
+                            )}
+                            {(a.generated_resumes?.length ?? 0) > 1 && (
+                              <span className="text-xs text-slate-500">+{(a.generated_resumes?.length ?? 0) - 1} more in details</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
                       <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDate(a.applied_at)}</td>
                     </tr>
                   ))}

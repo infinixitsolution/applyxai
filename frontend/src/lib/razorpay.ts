@@ -52,9 +52,9 @@ export async function openRazorpayCheckout(options: CheckoutOptions): Promise<Ra
   return new Promise((resolve) => {
     new Razorpay({
       ...options,
-      theme: { color: "#4f46e5" },
+      theme: options.theme ?? { color: "#4f46e5" },
       handler: (response: RazorpaySuccess) => resolve(response),
-      modal: { ondismiss: () => resolve(null), confirm_close: true },
+      modal: { ...(options.modal ?? {}), ondismiss: () => resolve(null) },
     }).open();
   });
 }

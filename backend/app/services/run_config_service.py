@@ -41,6 +41,8 @@ def engine_values(db: Session, user_id: uuid.UUID) -> dict:
     if prefs is not None:
         # Explicit answers win over values derived from the profile above.
         values.update({k: v for k, v in (prefs.answers or {}).items() if v is not None})
+        if prefs.user_information_all and prefs.user_information_all.strip():
+            values["user_information_all"] = prefs.user_information_all.strip()
     return values
 
 

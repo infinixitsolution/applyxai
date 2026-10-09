@@ -31,26 +31,41 @@ if (-not $isAdmin) {
 Write-Host "Creating installation directory..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $InstallPath | Out-Null
 
-# Determine which executable to install
-$sourceDir = Join-Path $PSScriptRoot "..\dist"
+# Source: exes next to this script (setup zip) or repo dist\
+$distDir = Join-Path $PSScriptRoot "..\dist"
+$guiName = "ApplyXAI-Agent-GUI.exe"
+$cliName = "ApplyXAI-Agent.exe"
+$guiSrc = Join-Path $PSScriptRoot $guiName
+$cliSrc = Join-Path $PSScriptRoot $cliName
+if (-not (Test-Path $guiSrc)) { $guiSrc = Join-Path $distDir $guiName }
+if (-not (Test-Path $cliSrc)) { $cliSrc = Join-Path $distDir $cliName }
+
 if ($InstallGUI) {
-    $sourceExe = Join-Path $sourceDir "ApplyXAI-Agent-GUI.exe"
-    $exeName = "ApplyXAI-Agent-GUI.exe"
+    $exeName = $guiName
+    if (-not (Test-Path $guiSrc)) {
+        Write-Host "Error: GUI not found. Expected $guiSrc" -ForegroundColor Red
+        Write-Host "Build with: .\scripts\build_agent.bat" -ForegroundColor Yellow
+        exit 1
+    }
+    if (-not (Test-Path $cliSrc)) {
+        Write-Host "Error: $cliName is required next to the GUI (automation engine)." -ForegroundColor Red
+        exit 1
+    }
 } else {
-    $sourceExe = Join-Path $sourceDir "ApplyXAI-Agent.exe"
-    $exeName = "ApplyXAI-Agent.exe"
+    $exeName = $cliName
+    if (-not (Test-Path $cliSrc)) {
+        Write-Host "Error: CLI not found at $cliSrc" -ForegroundColor Red
+        exit 1
+    }
 }
 
-# Check if source exists
-if (-not (Test-Path $sourceExe)) {
-    Write-Host "Error: Executable not found at $sourceExe" -ForegroundColor Red
-    Write-Host "Please build the agent first using: .\scripts\build_agent.bat" -ForegroundColor Yellow
-    exit 1
+Write-Host "Copying agent files..." -ForegroundColor Yellow
+if ($InstallGUI) {
+    Copy-Item -Path $guiSrc -Destination $InstallPath -Force
+    Copy-Item -Path $cliSrc -Destination $InstallPath -Force
+} else {
+    Copy-Item -Path $cliSrc -Destination $InstallPath -Force
 }
-
-# Copy executable (single-file build)
-Write-Host "Copying executable..." -ForegroundColor Yellow
-Copy-Item -Path $sourceExe -Destination $InstallPath -Force
 
 # Create Start Menu shortcut
 Write-Host "Creating Start Menu shortcut..." -ForegroundColor Yellow
@@ -117,7 +132,7 @@ Write-Host "Registering in Programs and Features..." -ForegroundColor Yellow
 $regPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ApplyXAI Agent"
 New-Item -Path $regPath -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "DisplayName" -Value "ApplyXAI Agent" -Force | Out-Null
-New-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.0" -Force | Out-Null
+New-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.1.0" -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "Publisher" -Value "ApplyXAI" -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "InstallLocation" -Value $InstallPath -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "UninstallString" -Value "powershell.exe -ExecutionPolicy Bypass -File `"$InstallPath\uninstall.ps1`"" -Force | Out-Null
@@ -137,6 +152,7 @@ Write-Host "To uninstall, run: $InstallPath\uninstall.ps1" -ForegroundColor Yell
 Write-Host "Or use Programs and Features in Control Panel." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "The agent can be launched from the Start Menu." -ForegroundColor Cyan
+Write-Host "In the app, click Connect — Live (or Local for dev) — no server URL or pairing code needed." -ForegroundColor Cyan
 if ($CreateDesktopShortcut) {
     Write-Host "A desktop shortcut has also been created." -ForegroundColor Cyan
 }

@@ -139,10 +139,12 @@ def webhook(app, event, sub_id=None, payment=None, *, event_id=None, secret=WEBH
 # ----------------------------------------------------------------------------- plans
 def test_sync_plans_creates_paid_plans_once(db, razorpay):
     plans = {p.code: p for p in db.query(Plan).all()}
-    assert set(plans) == {"free", "starter", "pro", "premium"}
+    assert set(plans) == {"free", "starter", "pro", "premium", "campus", "campus_pro"}
     assert plans["free"].provider_plan_id == "" and plans["pro"].provider_plan_id.startswith("plan_")
     created = razorpay.plans[plans["pro"].provider_plan_id]
     assert created["period"] == "monthly" and created["item"]["amount"] == plans["pro"].price_cents
+    campus = razorpay.plans[plans["campus"].provider_plan_id]
+    assert campus["item"]["amount"] == plans["campus"].price_cents * plans["campus"].limits["seats"]
     assert billing_service.sync_provider_plans(db, razorpay.provider) == []
 
 
@@ -307,7 +309,14 @@ def test_billing_needs_a_login_and_csrf(app, alice, razorpay):
 
 
 # ----------------------------------------------------------------------------- null provider
-def test_null_provider_grants_plans_instantly_for_development(app, alice, null_provider):
+def test_null_checkout_is_blocked_without_dev_instant_flag(app, alice, null_provider):
+    resp = post(alice, "/checkout", {"plan": "starter"})
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "CHECKOUT_DISABLED"
+
+
+def test_null_provider_grants_plans_instantly_for_development(app, alice, null_provider, monkeypatch):
+    monkeypatch.setattr("backend.app.services.billing_service.settings.PAYMENT_DEV_INSTANT_CHECKOUT", True)
     started = post(alice, "/checkout", {"plan": "pro"}).json()["data"]
     assert started["checkout"] is None and started["subscription"]["status"] == "active"
     assert plan_of(alice) == "pro"

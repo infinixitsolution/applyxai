@@ -1,12 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import {
-  ArrowLeft, Bot, Briefcase, CreditCard, FileText, LayoutDashboard, ListChecks, LogOut, Menu, Package, Receipt,
-  ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, X,
+  ArrowLeft, Bot, Briefcase, Building2, CreditCard, FileText, Handshake, LayoutDashboard, Link2, ListChecks, LogOut,
+  Megaphone, Menu, Package, Receipt, ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../auth/session";
 import { Logo } from "../components/Logo";
+import { AgentDownloadButton } from "../components/AgentDownloadButton";
 import { NotificationBell } from "../components/NotificationBell";
 import { cx } from "../components/ui";
 import { auth } from "../services/endpoints";
@@ -26,6 +27,8 @@ const APP_NAV = [
 const ADMIN_NAV = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/institutes", label: "Institutes", icon: Building2 },
+  { to: "/admin/partners", label: "Partners", icon: Handshake },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
@@ -33,12 +36,45 @@ const ADMIN_NAV = [
   { to: "/admin/system", label: "Settings", icon: ServerCog },
 ];
 
-type Variant = "app" | "admin";
+const INSTITUTE_NAV = [
+  { to: "/institute", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/institute/students", label: "Students", icon: Users },
+  { to: "/institute/invitations", label: "Invitations", icon: FileText },
+  { to: "/institute/seats", label: "Seats", icon: Package },
+  { to: "/institute/subscription", label: "Subscription", icon: CreditCard },
+  { to: "/institute/reports", label: "Reports", icon: ListChecks },
+  { to: "/institute/profile", label: "Profile", icon: UserRound },
+  { to: "/institute/settings", label: "Settings", icon: Settings },
+];
+
+const PARTNER_NAV = [
+  { to: "/partner", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/partner/institutes", label: "Institutes", icon: Building2 },
+  { to: "/partner/referrals", label: "Referrals", icon: Link2 },
+  { to: "/partner/campaigns", label: "Campaigns", icon: Megaphone },
+  { to: "/partner/commissions", label: "Commissions", icon: Receipt },
+  { to: "/partner/payouts", label: "Payouts", icon: Wallet },
+  { to: "/partner/marketing", label: "Marketing", icon: Handshake },
+  { to: "/partner/links", label: "Links", icon: Link2 },
+  { to: "/partner/profile", label: "Profile", icon: UserRound },
+  { to: "/partner/kyc", label: "KYC", icon: Shield },
+  { to: "/partner/tax", label: "Tax", icon: CreditCard },
+  { to: "/partner/settings", label: "Settings", icon: Settings },
+];
+
+type Variant = "app" | "admin" | "institute" | "partner";
+
+function navFor(variant: Variant) {
+  if (variant === "admin") return ADMIN_NAV;
+  if (variant === "institute") return INSTITUTE_NAV;
+  if (variant === "partner") return PARTNER_NAV;
+  return APP_NAV;
+}
 
 function SidebarNav({ variant, onNavigate }: { variant: Variant; onNavigate?: () => void }) {
   return (
     <nav className="flex flex-1 flex-col gap-1 px-3 py-4" aria-label="Main">
-      {(variant === "admin" ? ADMIN_NAV : APP_NAV).map(({ to, label, icon: Icon, end }) => (
+      {navFor(variant).map(({ to, label, icon: Icon, end }) => (
         <NavLink key={to} to={to} end={end} onClick={onNavigate}
                  className={({ isActive }) => cx(
                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -55,9 +91,11 @@ function SidebarNav({ variant, onNavigate }: { variant: Variant; onNavigate?: ()
 function Brand({ variant }: { variant: Variant }) {
   return (
     <div className="flex items-center gap-2">
-      <Logo to={variant === "admin" ? "/admin" : "/app"} />
-      {variant === "admin" && (
-        <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Admin</span>
+      <Logo to={variant === "admin" ? "/admin" : variant === "institute" ? "/institute" : variant === "partner" ? "/partner" : "/app"} />
+      {variant !== "app" && (
+        <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+          {variant === "admin" ? "Admin" : variant === "institute" ? "Institute" : "Partner"}
+        </span>
       )}
     </div>
   );
@@ -80,8 +118,8 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
   const switchLink = "hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 sm:inline-flex";
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
+    <div className="min-h-screen bg-[#f4f7ff] font-sans text-slate-900">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white/95 backdrop-blur md:flex">
         <div className="flex h-16 items-center px-6"><Brand variant={variant} /></div>
         <SidebarNav variant={variant} />
       </aside>
@@ -102,7 +140,7 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
       )}
 
       <div className="md:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur sm:px-6">
           <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
                   className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 md:hidden">
             <Menu className="h-5 w-5" />
@@ -113,7 +151,12 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
           ) : user?.is_admin ? (
             <Link to="/admin" className={switchLink}><Shield className="h-4 w-4" aria-hidden /> Admin</Link>
           ) : null}
-          {variant === "app" && <NotificationBell />}
+          {variant === "app" && (
+            <>
+              <AgentDownloadButton />
+              <NotificationBell />
+            </>
+          )}
           <div className="hidden text-right text-sm sm:block">
             <p className="font-medium text-slate-900">{name}</p>
             {name !== user?.email && <p className="text-xs text-slate-500">{user?.email}</p>}

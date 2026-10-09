@@ -1,7 +1,8 @@
 """
 ApplyXAI desktop agent. From the project folder, with the virtual environment active:
 
-    python -m agent pair --server https://app.example.com   # once; asks for the code from the Automation page
+    python -m agent connect --preset live                    # one-click (opens browser)
+    python -m agent pair --server https://app.example.com   # legacy pairing code
     python -m agent run                                      # keep this window open while runs go
     python -m agent status
     python -m agent unpair
@@ -12,6 +13,11 @@ import logging
 import sys
 from pathlib import Path
 
+from agent.engine_bootstrap import run_engine_child_if_requested
+
+if run_engine_child_if_requested():
+    raise SystemExit(0)
+
 from agent import AGENT_VERSION, config
 from agent.client import ApiClient, ApiError, NetworkError
 from agent.supervisor import AgentStopped, Supervisor
@@ -19,6 +25,29 @@ from agent.supervisor import AgentStopped, Supervisor
 
 def _home(args) -> Path:
     return Path(args.home) if args.home else config.default_home()
+
+
+def _connect(args) -> int:
+    home = _home(args)
+    try:
+        p = config.preset(args.preset)
+    except ValueError as exc:
+        print(exc)
+        return 2
+    try:
+        from agent.connect_flow import connect_with_browser
+
+        cfg = connect_with_browser(
+            api_base=p["api"],
+            web_base=p["web"],
+            home=home,
+            log=print,
+        )
+    except (ApiError, NetworkError, TimeoutError, ValueError) as exc:
+        print(getattr(exc, "message", None) or exc)
+        return 1
+    print(f"Connected to {cfg.server} as \"{cfg.name}\". Start the agent with: python -m agent run")
+    return 0
 
 
 def _pair(args) -> int:
@@ -43,7 +72,7 @@ def _pair(args) -> int:
 def _load(args) -> config.AgentConfig | None:
     cfg = config.load(_home(args))
     if cfg is None:
-        print("This computer isn't connected yet. Run: python -m agent pair --server <your ApplyXAI address>")
+        print("This computer isn't connected yet. Run: python -m agent connect --preset live")
     return cfg
 
 
@@ -101,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help=f"where the agent keeps its files (default: {config.default_home()})")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    pair = sub.add_parser("pair", help="connect this computer to your ApplyXAI account")
+    connect = sub.add_parser("connect", help="one-click connect (opens browser; no pairing code)")
+    connect.add_argument("--preset", choices=tuple(config.SERVER_PRESETS), default="live",
+                         help="local = http://localhost:5173, live = https://applyxai.com")
+    connect.set_defaults(func=_connect)
+
+    pair = sub.add_parser("pair", help="legacy connect with a pairing code from the web app")
     pair.add_argument("--server", required=True, help="your ApplyXAI address, e.g. https://app.applyxai.com")
     pair.add_argument("--code", help="pairing code (asked for if omitted)")
     pair.add_argument("--name", help="name shown on the Automation page (default: this computer's name)")

@@ -19,7 +19,7 @@ from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
     Payment, Plan, Resume, Subscription, SubscriptionStatus, User, UsageCounter,
 )
-from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
+from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, PlanKind
 from backend.app.services import (
     agent_service, auth_service, automation_service, billing_service, dashboard_service, email_service,
     notification_service, usage_service,
@@ -429,15 +429,25 @@ def resend_verification(db: Session, admin: User, user_id: uuid.UUID) -> tuple[d
 
 
 # ----------------------------------------------------------------------------- plans
+def _plan_kind(plan: Plan) -> str:
+    kind = getattr(plan, "kind", None)
+    if kind is None:
+        return PLAN_LIMITS.get(plan.code, {}).get("kind", PlanKind.PERSONAL.value)
+    return kind.value if hasattr(kind, "value") else str(kind)
+
+
 def _plan_admin_out(db: Session, plan: Plan, now: datetime) -> dict:
     defaults = PLAN_LIMITS.get(plan.code, {})
     limits = {**defaults, **(plan.limits or {})}
+    kind = _plan_kind(plan)
+    out_limits = {"applications_per_month": limits.get("applications_per_month", 0),
+                  "resumes": limits.get("resumes", 0)}
+    if kind == PlanKind.INSTITUTE.value:
+        out_limits["seats"] = int(limits.get("seats") or 0)
     subscribers = db.scalar(select(func.count()).select_from(Subscription)
                             .where(Subscription.plan_id == plan.id, *_entitled_filter(now)))
-    return {**billing_service.plan_out(plan), "is_active": plan.is_active, "sort_order": plan.sort_order,
-            "limits": {"applications_per_month": limits.get("applications_per_month", 0),
-                       "resumes": limits.get("resumes", 0)},
-            "provider_plan_id": plan.provider_plan_id, "subscribers": subscribers}
+    return {**billing_service.plan_out(plan), "kind": kind, "is_active": plan.is_active, "sort_order": plan.sort_order,
+            "limits": out_limits, "provider_plan_id": plan.provider_plan_id, "subscribers": subscribers}
 
 
 def list_plans(db: Session) -> list[dict]:
@@ -447,7 +457,8 @@ def list_plans(db: Session) -> list[dict]:
 
 
 def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, *, name: str, price_cents: int,
-                applications_per_month: int, resumes: int, is_active: bool, sort_order: int) -> dict:
+                applications_per_month: int, resumes: int, is_active: bool, sort_order: int,
+                seats: int | None = None) -> dict:
     billing_service.seed_plans(db)
     plan = db.scalar(select(Plan).where(Plan.code == code))
     if plan is None:
@@ -463,7 +474,11 @@ def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, 
     before = _plan_admin_out(db, plan, _now())
     price_changed = price_cents != plan.price_cents
     plan.name, plan.price_cents, plan.is_active, plan.sort_order = name.strip(), price_cents, is_active, sort_order
-    plan.limits = {"applications_per_month": applications_per_month, "resumes": resumes}
+    next_limits = {"applications_per_month": applications_per_month, "resumes": resumes}
+    if _plan_kind(plan) == PlanKind.INSTITUTE.value:
+        existing = (plan.limits or {}).get("seats") or PLAN_LIMITS.get(code, {}).get("seats") or 1
+        next_limits["seats"] = int(seats if seats is not None else existing)
+    plan.limits = next_limits
     if price_changed and code != FREE_PLAN and provider.name != "null":
         # Razorpay plans can't change price: new subscribers get a new plan; existing ones keep theirs.
         plan.provider_plan_id = provider.create_plan(plan)

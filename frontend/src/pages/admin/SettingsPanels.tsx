@@ -7,6 +7,7 @@ import { Pagination } from "../../components/Pagination";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, cx } from "../../components/ui";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
+import { agentServerUrl } from "../../lib/config";
 import { errorMessage } from "../../services/api";
 import { admin } from "../../services/endpoints";
 import type { AdminPlatformSettings, LogLevel, PlatformCms } from "../../types";
@@ -18,6 +19,8 @@ const TABS = [
   { id: "smtp", label: "Email & SMTP" },
   { id: "auth", label: "Auth & verification" },
   { id: "notifications", label: "Notifications" },
+  { id: "ai", label: "AI" },
+  { id: "payments", label: "Payments" },
   { id: "integrations", label: "Integrations" },
   { id: "operations", label: "Operations" },
 ] as const;
@@ -53,7 +56,9 @@ export function AdminSettingsPage() {
           {tab === "smtp" && <SmtpTab smtp={query.data.smtp} auth={query.data.auth_email} unverified={query.data.unverified_users} />}
           {tab === "auth" && <AuthTab auth={query.data.auth_email} unverified={query.data.unverified_users} />}
           {tab === "notifications" && <NotificationsTab notifications={query.data.notifications} />}
-          {tab === "integrations" && <IntegrationsTab infra={query.data.infrastructure} smtp={query.data.smtp} />}
+          {tab === "ai" && <AiTab ai={query.data.ai} />}
+          {tab === "payments" && <PaymentsTab payments={query.data.payments} />}
+          {tab === "integrations" && <IntegrationsTab infra={query.data.infrastructure} smtp={query.data.smtp} ai={query.data.ai} payments={query.data.payments} />}
           {tab === "operations" && <OperationsTab />}
         </>
       )}
@@ -191,7 +196,16 @@ function SmtpTab({ smtp, auth, unverified }: { smtp: AdminPlatformSettings["smtp
           <TextInput label="Port (587=STARTTLS, 465=SSL)" value={port} onChange={setPort} maxLength={5} />
           <TextInput label="Username" value={username} onChange={setUsername} maxLength={320} />
           <TextInput label="From address" value={from} onChange={setFrom} maxLength={320} />
-          <TextInput label={smtp.password_configured ? "New password (leave blank to keep)" : "Password"} type="password" value={password} onChange={setPassword} maxLength={200} />
+          <TextInput
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            maxLength={200}
+            configured={smtp.password_configured}
+            configuredMessage="Password saved"
+            autoComplete="off"
+          />
         </div>
         <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
         {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
@@ -280,7 +294,222 @@ function NotificationsTab({ notifications }: { notifications: AdminPlatformSetti
   );
 }
 
-function IntegrationsTab({ infra, smtp }: { infra: AdminPlatformSettings["infrastructure"]; smtp: AdminPlatformSettings["smtp"] }) {
+function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(ai.enabled);
+  const [provider, setProvider] = useState(ai.provider);
+  const [baseUrl, setBaseUrl] = useState(ai.base_url);
+  const [apiKey, setApiKey] = useState("");
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(ai.api_key_configured);
+  const [fast, setFast] = useState(ai.models.fast);
+  const [strong, setStrong] = useState(ai.models.strong);
+  const [embedding, setEmbedding] = useState(ai.models.embedding);
+  const [featApp, setFeatApp] = useState(ai.features.applications);
+  const [featResume, setFeatResume] = useState(ai.features.resume);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setEnabled(ai.enabled);
+    setProvider(ai.provider);
+    setBaseUrl(ai.base_url);
+    setFast(ai.models.fast);
+    setStrong(ai.models.strong);
+    setEmbedding(ai.models.embedding);
+    setFeatApp(ai.features.applications);
+    setFeatResume(ai.features.resume);
+    setApiKeyConfigured(ai.api_key_configured);
+  }, [ai]);
+  const save = useMutation({
+    mutationFn: () => admin.updateAi({
+      enabled, provider, base_url: baseUrl, api_key: apiKey,
+      models: { fast, strong, embedding },
+      features: { applications: featApp, resume: featResume },
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      if (apiKey.trim()) setApiKeyConfigured(true);
+      setApiKey("");
+      setSaved(true);
+    },
+  });
+  const test = useMutation({ mutationFn: () => admin.testAi() });
+
+  return (
+    <div className="space-y-6">
+      <Card title="Platform AI" actions={<Badge tone={ai.ready ? "green" : "amber"}>{ai.ready ? "Ready" : "Not configured"}</Badge>}>
+        <p className="mb-4 text-sm text-slate-600">API keys are encrypted and never shown to users or the desktop agent. Users opt in per feature in their preferences.</p>
+        <Toggle label="Enable platform AI" checked={enabled} onChange={setEnabled} />
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Provider</span>
+            <select className="w-full rounded-lg border border-slate-300 px-3 py-2" value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <option value="openai">OpenAI</option>
+              <option value="openai_compatible">OpenAI-compatible</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </label>
+          <TextInput label="Base URL (OpenAI-compatible)" value={baseUrl} onChange={setBaseUrl} maxLength={512} />
+          <TextInput
+            label="API key"
+            type="password"
+            value={apiKey}
+            onChange={setApiKey}
+            maxLength={500}
+            configured={apiKeyConfigured}
+            configuredMessage="Key uploaded"
+            autoComplete="off"
+          />
+          <TextInput label="Fast model (Q&A, scoring)" value={fast} onChange={setFast} maxLength={120} />
+          <TextInput label="Strong model (resume tailor)" value={strong} onChange={setStrong} maxLength={120} />
+          <TextInput label="Embedding model" value={embedding} onChange={setEmbedding} maxLength={120} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-4">
+          <Toggle label="Application Q&A" checked={featApp} onChange={setFeatApp} />
+          <Toggle label="Resume AI" checked={featResume} onChange={setFeatResume} />
+        </div>
+        <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      </Card>
+      <Card title="Test AI connection">
+        <Button variant="secondary" loading={test.isPending} disabled={!apiKeyConfigured && !apiKey} onClick={() => test.mutate()}>Run test</Button>
+        {test.data && (
+          test.data.ok ? <Alert kind="success">Provider replied: {test.data.reply}</Alert>
+            : <Alert kind="error">Unexpected reply: {test.data.reply}</Alert>
+        )}
+        {test.error && <Alert kind="error">{errorMessage(test.error)}</Alert>}
+      </Card>
+    </div>
+  );
+}
+
+function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"] }) {
+  const qc = useQueryClient();
+  const webhookUrl = `${agentServerUrl()}/api/billing/webhook/razorpay`;
+  const [provider, setProvider] = useState<"null" | "razorpay">(payments.provider);
+  const [keyId, setKeyId] = useState(payments.key_id);
+  const [keySecret, setKeySecret] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setProvider(payments.provider);
+    setKeyId(payments.key_id);
+  }, [payments]);
+  const save = useMutation({
+    mutationFn: () => admin.updatePayments({
+      provider,
+      key_id: keyId,
+      key_secret: keySecret || undefined,
+      webhook_secret: webhookSecret || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      setKeySecret("");
+      setWebhookSecret("");
+      setSaved(true);
+    },
+  });
+  const test = useMutation({ mutationFn: () => admin.testPayments() });
+  const sync = useMutation({ mutationFn: () => admin.syncRazorpayPlans() });
+
+  return (
+    <div className="space-y-6">
+      <Card
+        title="Razorpay"
+        actions={
+          <Badge tone={payments.live_checkout ? "green" : payments.test_checkout ? "brand" : "amber"}>
+            {payments.live_checkout ? "Live payments" : payments.test_checkout ? "Test checkout" : "Off / dev"}
+          </Badge>
+        }
+      >
+        <p className="mb-4 text-sm text-slate-600">
+          Same Checkout flow for test and live: <code>rzp_test_…</code> opens Razorpay sandbox (no real charges);
+          <code> rzp_live_…</code> charges real UPI/cards. Secrets are encrypted here or via <code>PAYMENT_*</code> in <code>.env</code>.
+        </p>
+        {payments.ready && payments.razorpay_mode === "test" && (
+          <Alert kind="info">Test keys active — run <strong>Test API keys</strong>, then <strong>Sync plans</strong>, then upgrade on /app/billing with test card 4111 1111 1111 1111.</Alert>
+        )}
+        {payments.ready && payments.razorpay_mode === "live" && (
+          <Alert kind="success">Live keys active — Checkout collects real payments. Ensure the webhook secret matches your Razorpay Dashboard.</Alert>
+        )}
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">Mode</span>
+          <select
+            className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as "null" | "razorpay")}
+          >
+            <option value="null">Development — activate plans without charging</option>
+            <option value="razorpay">Razorpay — real checkout</option>
+          </select>
+        </label>
+        {provider === "razorpay" && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <TextInput label="Key ID" value={keyId} onChange={setKeyId} maxLength={64} placeholder="rzp_test_…" />
+            <TextInput
+              label="Key secret"
+              type="password"
+              value={keySecret}
+              onChange={setKeySecret}
+              maxLength={200}
+              configured={payments.key_secret_configured}
+              configuredMessage="Key uploaded"
+              autoComplete="off"
+            />
+            <TextInput
+              label="Webhook secret"
+              type="password"
+              value={webhookSecret}
+              onChange={setWebhookSecret}
+              maxLength={200}
+              configured={payments.webhook_secret_configured}
+              configuredMessage="Key uploaded"
+              autoComplete="off"
+            />
+          </div>
+        )}
+        <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      </Card>
+      {provider === "razorpay" && (
+        <>
+          <Card title="Webhook URL">
+            <p className="text-sm text-slate-600">In Razorpay Dashboard → Webhooks, subscribe to subscription events and point here:</p>
+            <code className="mt-2 block break-all rounded-lg bg-slate-100 p-3 text-xs">{webhookUrl}</code>
+          </Card>
+          <Card title="Plans at Razorpay">
+            <p className="mb-3 text-sm text-slate-600">After saving keys, sync paid plans once (or after price changes on new plan codes).</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" loading={test.isPending} onClick={() => test.mutate()}>Test API keys</Button>
+              <Button variant="secondary" loading={sync.isPending} onClick={() => sync.mutate()}>Sync plans to Razorpay</Button>
+            </div>
+            {test.data?.ok && (
+              <Alert kind="success">
+                {test.data.mode === "live"
+                  ? (test.data.message ?? "Live API keys verified.")
+                  : (test.data.test_checkout_hint ?? "Test API keys verified — use sandbox payment methods in Checkout.")}
+              </Alert>
+            )}
+            {test.error && <Alert kind="error">{errorMessage(test.error)}</Alert>}
+            {sync.data && (
+              <Alert kind="success">
+                {sync.data.created.length
+                  ? `Created ${sync.data.created.length} plan(s) at Razorpay.`
+                  : "Every paid plan already exists at Razorpay."}
+              </Alert>
+            )}
+            {sync.error && <Alert kind="error">{errorMessage(sync.error)}</Alert>}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+function IntegrationsTab({ infra, smtp, ai, payments }: {
+  infra: AdminPlatformSettings["infrastructure"];
+  smtp: AdminPlatformSettings["smtp"];
+  ai: AdminPlatformSettings["ai"];
+  payments: AdminPlatformSettings["payments"];
+}) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card title="Infrastructure (read-only)">
@@ -291,15 +520,23 @@ function IntegrationsTab({ infra, smtp }: { infra: AdminPlatformSettings["infras
           <Row label="Redis configured">{infra.redis_url_set ? "Yes" : "No"}</Row>
           <Row label="CORS origins">{infra.cors_origins.join(", ") || "—"}</Row>
           <Row label="Payment provider">{infra.payment_provider}</Row>
-          <Row label="Payment keys">{infra.payment_keys_configured ? "Set in .env" : "Not set"}</Row>
+          <Row label="Razorpay ready">{payments.ready ? "Yes" : "No"}</Row>
+          <Row label="Payment config source">{payments.source === "database" ? "Admin settings" : ".env"}</Row>
         </dl>
-        <p className="mt-3 text-xs text-slate-500">Change secrets via <code>.env</code> and restart the API.</p>
       </Card>
       <Card title="Email status">
         <dl className="divide-y divide-slate-100 text-sm">
           <Row label="Mode">{smtp.mode}</Row>
           <Row label="Host">{smtp.host || "—"}</Row>
           <Row label="From">{smtp.from_address}</Row>
+        </dl>
+      </Card>
+      <Card title="AI status" className="lg:col-span-2">
+        <dl className="divide-y divide-slate-100 text-sm sm:grid sm:grid-cols-2 sm:gap-x-6">
+          <Row label="Enabled">{ai.enabled ? "Yes" : "No"}</Row>
+          <Row label="Ready">{ai.ready ? "Yes" : "No"}</Row>
+          <Row label="Provider">{ai.provider}</Row>
+          <Row label="Fast model">{ai.models.fast}</Row>
         </dl>
       </Card>
     </div>

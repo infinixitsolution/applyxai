@@ -142,8 +142,24 @@ class _RunSession:
         self.engine.dir.mkdir(parents=True, exist_ok=True)
         path = self.engine.dir / _resume_filename(resume.get("filename", ""), resume.get("file_type", "pdf"))
         path.write_bytes(self.client.download_resume(self.run_id))
-        return build_run_config(self.payload.get("values") or {}, history_dir=self.s.workspace.history_dir,
-                                run_dir=self.engine.dir, resume_path=path, dry_run=bool(self.payload.get("dry_run")))
+        qa = self.payload.get("application_qa") or {}
+        use_ai = bool(qa.get("ai_applications_enabled")) and bool(self.payload.get("ai_available"))
+        applyxai_qa = {
+            "human_questions": qa.get("human_questions") or [],
+            "ai_policy": qa.get("ai_policy") or {},
+            "ai_available": bool(self.payload.get("ai_available")),
+            "run_id": self.run_id,
+            "resume_mode": self.payload.get("resume_mode") or "default",
+        }
+        return build_run_config(
+            self.payload.get("values") or {},
+            history_dir=self.s.workspace.history_dir,
+            run_dir=self.engine.dir,
+            resume_path=path,
+            dry_run=bool(self.payload.get("dry_run")),
+            use_ai=use_ai,
+            applyxai_qa=applyxai_qa,
+        )
 
     def go(self) -> None:
         logger.info("Starting run %s%s.", self.run_id, " (dry run: nothing is submitted)" if self.payload.get("dry_run") else "")
@@ -160,7 +176,12 @@ class _RunSession:
             self._flush_all()
             return
         cap = None if self.remaining is None or self.payload.get("dry_run") else int(self.remaining)
-        self.engine.start(config, max_applied=cap)
+        extra_env = {
+            "APPLYXAI_API_BASE": self.s.client.server,
+            "APPLYXAI_AGENT_TOKEN": self.s.client.token,
+            "APPLYXAI_RUN_ID": self.run_id,
+        }
+        self.engine.start(config, max_applied=cap, extra_env=extra_env)
         self._apply_control()
         self._supervise()
 

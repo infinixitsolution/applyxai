@@ -37,7 +37,7 @@ def get_current_device(request: Request, db: Session = Depends(get_db)) -> Agent
     device = agent_service.authenticate(db, token.strip()) if scheme.lower() == "bearer" else None
     if device is None:
         raise AppError("DEVICE_UNAUTHORIZED",
-                       "This computer isn't connected to ApplyXAI. Run `python -m agent pair` to connect it.", 401)
+                       "This computer isn't connected to ApplyXAI. Use Connect in the desktop app or run `python -m agent connect --preset live`.", 401)
     return device
 
 
@@ -45,6 +45,19 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
         raise AppError("FORBIDDEN", "You don't have permission to do that.", 403)
     return user
+
+
+def require_institute_member(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+) -> tuple[User, "Institute", "InstituteMember"]:
+    from backend.app.services.institute_service import membership_for
+    institute, member = membership_for(db, user)
+    return user, institute, member
+
+
+def require_partner(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from backend.app.services.partner_service import partner_for
+    return user, partner_for(db, user)
 
 
 def get_mailer(db: Session = Depends(get_db)) -> EmailSender:

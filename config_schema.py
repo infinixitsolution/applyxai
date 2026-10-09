@@ -134,6 +134,12 @@ SCHEMA = [
             _f("Profile", "questions", "require_visa", "Need visa sponsorship?", "select",
                "Do you need visa sponsorship now or in the future?",
                options=["Yes", "No"]),
+            _f("Profile", "questions", "legally_authorized", "Legally authorized to work?", "select",
+               "Are you already legally authorized to work in the country of the job (without new sponsorship)?",
+               options=["Yes", "No"]),
+            _f("Profile", "questions", "user_information_all", "Background for AI answers", "textarea",
+               "Facts the AI may use when drafting answers to unexpected questions (skills, years of experience, location, work authorization). Only used when AI is enabled.",
+               advanced=True),
             _f("Profile", "questions", "us_citizenship", "Citizenship status", "select",
                "Your work-authorization / citizenship status for US applications.",
                options=["U.S. Citizen/Permanent Resident", "Non-citizen allowed to work for any employer", "Non-citizen allowed to work for current employer", "Non-citizen seeking work authorization", "Canadian Citizen/Permanent Resident", "Other"]),
@@ -225,6 +231,11 @@ SCHEMA = [
                "Only apply to jobs at companies where you have a connection.", advanced=True),
             _f("Search", "search", "fair_chance_employer", "Fair-chance employers only", "bool",
                "Only apply to employers who identify as fair-chance employers.", advanced=True),
+            _f("Search", "search", "resume_mode", "Resume for each job", "select",
+               "default = upload your default resume every time. tailor_if_gate = when platform Resume AI is enabled "
+               "and the job description matches your master-skilled resume (60%+), create a tailored DOCX for that job, "
+               "save it as a new version linked to the application, and upload it to LinkedIn.",
+               options=["default", "tailor_if_gate"], advanced=True),
         ],
     },
     {

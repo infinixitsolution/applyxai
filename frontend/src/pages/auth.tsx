@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { MailCheck } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { homeFor, safeNext, useSetSession } from "../auth/session";
+import { consumeNext, homeFor, rememberNext, safeNext, storedNext, useSetSession, withNext } from "../auth/session";
 import { TextInput } from "../components/form";
 import { Alert, Button, ButtonLink, Spinner } from "../components/ui";
 import { AuthCard } from "../layouts/PublicLayout";
@@ -29,7 +29,12 @@ export function LoginPage() {
 
   const login = useMutation({
     mutationFn: () => auth.login(email, password),
-    onSuccess: (user) => { setSession(user); navigate(safeNext(params.get("next"), homeFor(user)), { replace: true }); },
+    onSuccess: (user) => {
+      const next = params.get("next") ?? consumeNext();
+      consumeNext();
+      setSession(user);
+      navigate(safeNext(next, homeFor(user)), { replace: true });
+    },
   });
   const resend = useMutation({ mutationFn: () => auth.resendVerification(email), onSuccess: () => setResent(true) });
   const notVerified = login.error instanceof ApiError && login.error.code === "EMAIL_NOT_VERIFIED";
@@ -37,7 +42,7 @@ export function LoginPage() {
   const submit = (e: FormEvent) => { e.preventDefault(); setResent(false); login.mutate(); };
 
   return (
-    <AuthCard title="Welcome back" subtitle={<>New here? <Link to="/register" className="font-medium text-brand-600 hover:underline">Create an account</Link></>}>
+    <AuthCard title="Welcome back" subtitle={<>New here? <Link to={withNext("/register", params.get("next"))} className="font-medium text-brand-600 hover:underline">Create an account</Link></>}>
       <form onSubmit={submit} className="space-y-4" noValidate>
         {params.get("reset") === "1" && <Alert kind="success">Password updated. Log in with your new password.</Alert>}
         {params.get("verified") === "1" && <Alert kind="success">Email verified. You can log in now.</Alert>}
@@ -65,15 +70,21 @@ export function LoginPage() {
 }
 
 export function RegisterPage() {
+  const [params] = useSearchParams();
   const navigate = useNavigate();
+  const next = params.get("next");
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", password: "", confirm: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
 
   const register = useMutation({
     mutationFn: () => auth.register({ email: form.email, password: form.password, first_name: form.first_name, last_name: form.last_name }),
-    onSuccess: (result) => navigate(result.verification_required === false
-      ? "/login?registered=1" : `/check-email?email=${encodeURIComponent(form.email)}`),
+    onSuccess: (result) => {
+      rememberNext(next);
+      navigate(result.verification_required === false
+        ? withNext("/login?registered=1", next)
+        : withNext(`/check-email?email=${encodeURIComponent(form.email)}`, next));
+    },
     onError: (error) => setErrors(fieldErrors(error)),
   });
 
@@ -86,7 +97,7 @@ export function RegisterPage() {
   };
 
   return (
-    <AuthCard title="Create your account" subtitle={<>Already have one? <Link to="/login" className="font-medium text-brand-600 hover:underline">Log in</Link></>}>
+    <AuthCard title="Create your account" subtitle={<>Already have one? <Link to={withNext("/login", next)} className="font-medium text-brand-600 hover:underline">Log in</Link></>}>
       <form onSubmit={submit} className="space-y-4" noValidate>
         {register.error && !Object.keys(fieldErrors(register.error)).length && <Alert kind="error">{errorMessage(register.error)}</Alert>}
         <div className="grid grid-cols-2 gap-3">
@@ -102,6 +113,12 @@ export function RegisterPage() {
         <p className="text-center text-xs text-slate-500">
           By creating an account you agree to our <Link to="/terms" className="underline">Terms</Link> and{" "}
           <Link to="/privacy" className="underline">Privacy Policy</Link>.
+        </p>
+        <p className="text-center text-xs text-slate-500">
+          Registering a campus or partner network?{" "}
+          <Link to="/register/institute" className="font-medium text-brand-600 hover:underline">Institute</Link>
+          {" · "}
+          <Link to="/register/partner" className="font-medium text-brand-600 hover:underline">Partner</Link>
         </p>
       </form>
     </AuthCard>
@@ -123,7 +140,7 @@ export function CheckEmailPage() {
             Resend the link
           </Button>
         )}
-        <p><Link to="/login" className="font-medium text-brand-600 hover:underline">Back to log in</Link></p>
+        <p><Link to={withNext("/login", params.get("next") ?? storedNext())} className="font-medium text-brand-600 hover:underline">Back to log in</Link></p>
       </div>
     </AuthCard>
   );
@@ -149,7 +166,7 @@ export function VerifyEmailPage() {
         : verify.isSuccess ? (
           <div className="space-y-4 text-center">
             <Alert kind="success">Your email is verified.</Alert>
-            <ButtonLink to="/login?verified=1" className="w-full">Log in</ButtonLink>
+            <ButtonLink to={withNext("/login?verified=1", storedNext())} className="w-full">Log in</ButtonLink>
           </div>
         ) : (
           <div className="space-y-4">

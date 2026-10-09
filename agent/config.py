@@ -11,6 +11,26 @@ from urllib.parse import urlparse
 HOME_ENV = "APPLYXAI_AGENT_HOME"
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
+SERVER_PRESETS: dict[str, dict[str, str]] = {
+    "local": {
+        "label": "Local (development)",
+        "api": "http://localhost:5173",
+        "web": "http://localhost:5173",
+    },
+    "live": {
+        "label": "ApplyXAI Live",
+        "api": "https://applyxai.com",
+        "web": "https://applyxai.com",
+    },
+}
+
+
+def preset(name: str) -> dict[str, str]:
+    key = (name or "").strip().lower()
+    if key not in SERVER_PRESETS:
+        raise ValueError(f"Unknown preset {name!r}. Use: {', '.join(SERVER_PRESETS)}")
+    return SERVER_PRESETS[key]
+
 
 def default_home() -> Path:
     if os.environ.get(HOME_ENV):
