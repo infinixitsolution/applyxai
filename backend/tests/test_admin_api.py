@@ -155,6 +155,36 @@ def test_admins_cannot_lock_themselves_out(admin, db):
     assert data(get(admin, "/analytics"))
 
 
+def test_admin_creates_updates_password_and_deletes_user(admin, alice, app, db):
+    import uuid
+
+    from backend.app.models import User
+    resp = send(admin, "POST", "/users", {
+        "email": "newbie@example.com",
+        "password": "correct horse battery",
+        "first_name": "New",
+        "last_name": "User",
+        "is_verified": True,
+    })
+    assert resp.status_code == 200, resp.text
+    user_id = resp.json()["data"]["user"]["id"]
+    assert resp.json()["data"]["user"]["email"] == "newbie@example.com"
+
+    updated = send(admin, "PATCH", f"/users/{user_id}", {"first_name": "Fresh"})
+    assert updated.status_code == 200
+    assert updated.json()["data"]["user"]["first_name"] == "Fresh"
+
+    pwd = send(admin, "POST", f"/users/{user_id}/password", {"password": "another horse battery"})
+    assert pwd.status_code == 200
+
+    client = TestClient(app)
+    assert client.post("/api/auth/login", json={"email": "newbie@example.com", "password": "another horse battery"}).status_code == 200
+
+    deleted = send(admin, "DELETE", f"/users/{user_id}")
+    assert deleted.status_code == 200
+    assert db.get(User, uuid.UUID(user_id)) is None
+
+
 def test_promoting_a_user_to_admin(admin, alice):
     data(send(admin, "PATCH", f"/users/{alice.user.id}", {"is_admin": True}))
     assert get(alice, "/analytics").status_code == 200

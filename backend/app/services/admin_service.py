@@ -15,6 +15,7 @@ from backend.app.core.config import settings
 from backend.app.core.errors import AppError
 from backend.app.core.pagination import PageParams, paginate, page_response
 from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
+from backend.app.core.security import hash_password
 from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
     Payment, Plan, Resume, Subscription, SubscriptionStatus, User, UsageCounter,
@@ -196,12 +197,70 @@ def user_detail(db: Session, user_id: uuid.UUID) -> dict:
     }
 
 
-def update_user(db: Session, admin: User, user_id: uuid.UUID, *, is_active: bool | None = None,
-                is_admin: bool | None = None) -> dict:
+def create_user(
+    db: Session,
+    admin: User,
+    *,
+    email: str,
+    password: str,
+    first_name: str = "",
+    last_name: str = "",
+    is_admin: bool = False,
+    is_verified: bool = True,
+) -> dict:
+    email = auth_service.normalize_email(email)
+    if password.lower() == email:
+        raise AppError("WEAK_PASSWORD", "Password must not be the email address.", 422)
+    if db.scalar(select(User.id).where(User.email == email)) is not None:
+        raise AppError("EMAIL_TAKEN", "That email already has an account.", 409)
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        first_name=first_name[:100],
+        last_name=last_name[:100],
+        is_admin=is_admin,
+        is_verified=is_verified,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    _audit(db, admin, "user.create", user, is_admin=is_admin, is_verified=is_verified)
+    db.flush()
+    return user_detail(db, user.id)
+
+
+def update_user(
+    db: Session,
+    admin: User,
+    user_id: uuid.UUID,
+    *,
+    email: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    is_active: bool | None = None,
+    is_admin: bool | None = None,
+    is_verified: bool | None = None,
+) -> dict:
     user = _get_user(db, user_id)
     if user.id == admin.id and (is_active is False or is_admin is False):
         raise AppError("CANNOT_CHANGE_SELF", "You can't disable your own account or remove your own admin access.", 400)
     changes = {}
+    if email is not None:
+        email_norm = auth_service.normalize_email(email)
+        if email_norm != user.email:
+            if db.scalar(select(User.id).where(User.email == email_norm, User.id != user.id)) is not None:
+                raise AppError("EMAIL_TAKEN", "That email already has an account.", 409)
+            changes["email"] = [user.email, email_norm]
+            user.email = email_norm
+    if first_name is not None and first_name != user.first_name:
+        changes["first_name"] = [user.first_name, first_name]
+        user.first_name = first_name[:100]
+    if last_name is not None and last_name != user.last_name:
+        changes["last_name"] = [user.last_name, last_name]
+        user.last_name = last_name[:100]
+    if is_verified is not None and is_verified != user.is_verified:
+        changes["is_verified"] = [user.is_verified, is_verified]
+        user.is_verified = is_verified
     if is_admin is not None and is_admin != user.is_admin:
         changes["is_admin"] = [user.is_admin, is_admin]
         user.is_admin = is_admin
@@ -217,6 +276,31 @@ def update_user(db: Session, admin: User, user_id: uuid.UUID, *, is_active: bool
         _audit(db, admin, "user.update", user, **changes)
     db.flush()
     return user_detail(db, user.id)
+
+
+def set_user_password(db: Session, admin: User, user_id: uuid.UUID, password: str) -> dict:
+    user = _get_user(db, user_id)
+    email = user.email
+    if password.lower() == email:
+        raise AppError("WEAK_PASSWORD", "Password must not be the email address.", 422)
+    user.password_hash = hash_password(password)
+    auth_service.revoke_all_sessions(db, user.id)
+    _audit(db, admin, "user.password", user)
+    db.flush()
+    return user_detail(db, user.id)
+
+
+def delete_user(db: Session, admin: User, user_id: uuid.UUID) -> None:
+    user = _get_user(db, user_id)
+    if user.id == admin.id:
+        raise AppError("CANNOT_DELETE_SELF", "You can't delete your own account.", 400)
+    if user.is_admin:
+        admins = db.scalar(select(func.count()).select_from(User).where(User.is_admin.is_(True))) or 0
+        if admins <= 1:
+            raise AppError("LAST_ADMIN", "At least one admin account must remain.", 400)
+    _audit(db, admin, "user.delete", user)
+    db.delete(user)
+    db.flush()
 
 
 def grant_plan(db: Session, admin: User, user_id: uuid.UUID, plan_code: str, months: int, note: str = "") -> dict:

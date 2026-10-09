@@ -4,9 +4,34 @@ from backend.app.models.enums import KycStatus, PartnerCommissionMode, PartnerSt
 from backend.app.schemas.auth import _check_password
 
 
+class UserCreateIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
+    first_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    is_admin: bool = False
+    is_verified: bool = True
+
+    _password = field_validator("password")(_check_password)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+
 class UserUpdateIn(BaseModel):
+    email: EmailStr | None = None
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
     is_active: bool | None = None
     is_admin: bool | None = None
+    is_verified: bool | None = None
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def _strip_optional(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
 
 
 class GrantPlanIn(BaseModel):

@@ -7,10 +7,10 @@ import { Select, TextArea, TextInput, Toggle } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, ProgressBar, Spinner, cx } from "../../components/ui";
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, PageHeader, ProgressBar, Spinner, cx } from "../../components/ui";
 import { formatDate, formatDateTime, formatMoney, formatRelative, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
-import { errorMessage } from "../../services/api";
+import { errorMessage, fieldErrors } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminUser, type AdminUserDetail } from "../../types";
 import { PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
@@ -60,11 +60,17 @@ function usePlanOptions(first: { value: string; label: string }) {
   return [first, ...(data ?? []).map((p) => ({ value: p.code, label: p.name }))];
 }
 
+type UserPending = { title: string; message: string; confirm: string; danger: boolean; run: () => void };
+
 export function AdminUsersPage() {
   const client = useQueryClient();
   const toast = useToast();
+  const { data: me } = useSession();
   const [params] = useSearchParams();
   const [q, setQ] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [confirm, setConfirm] = useState<UserPending | null>(null);
   const [verifyUser, setVerifyUser] = useState<AdminUser | null>(null);
   const [status, setStatus] = useState<UserListStatus>(() => {
     const initial = params.get("status") ?? "";
@@ -91,13 +97,26 @@ export function AdminUsersPage() {
       toast.error(errorMessage(e));
     },
   });
+  const deleteUser = useMutation({
+    mutationFn: (userId: string) => admin.deleteUser(userId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["admin", "users"] });
+      setConfirm(null);
+      toast.success("User deleted.");
+    },
+    onError: (e) => { setConfirm(null); toast.error(errorMessage(e)); },
+  });
   const resetPage = () => setPage(1);
   const hasFilters = Boolean(search || status || plan);
   const planLabel = planOptions.find((o) => o.value === plan)?.label;
 
   return (
     <>
-      <PageHeader title="Users" description="Accounts, plans, and activity across the platform." />
+      <PageHeader
+        title="Users"
+        description="Accounts, plans, and activity across the platform."
+        actions={<Button onClick={() => setAdding(true)}>Add user</Button>}
+      />
       <Card>
         <div className="relative mb-6 max-w-xl">
           <TextInput label="Search" value={q} onChange={(v) => { setQ(v); resetPage(); }}
@@ -130,7 +149,7 @@ export function AdminUsersPage() {
               Showing <span className="font-medium text-slate-900">{data.items.length}</span> of{" "}
               <span className="font-medium text-slate-900">{data.total.toLocaleString()}</span> users
             </p>
-            <Table head={["User", "Plan", "Applications", "Joined", "Last sign-in", "Account"]} dim={isFetching}>
+            <Table head={["User", "Plan", "Applications", "Joined", "Last sign-in", "Account", "Actions"]} dim={isFetching}>
               {data.items.map((u) => (
                 <tr key={u.id} className="hover:bg-slate-50/80">
                   <Td>
@@ -172,6 +191,26 @@ export function AdminUsersPage() {
                       )}
                     </div>
                   </Td>
+                  <Td className="whitespace-nowrap">
+                    <div className="flex justify-end gap-2">
+                      <ButtonLink to={`/admin/users/${u.id}`} size="sm" variant="secondary">View</ButtonLink>
+                      <Button size="sm" variant="secondary" onClick={() => setEditing(u)}>Edit</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={u.id === me?.id}
+                        onClick={() => setConfirm({
+                          title: "Delete this user permanently?",
+                          danger: true,
+                          confirm: "Delete user",
+                          message: `${u.email} and their applications, runs, and billing history are removed. This cannot be undone.`,
+                          run: () => deleteUser.mutate(u.id),
+                        })}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </Table>
@@ -180,6 +219,8 @@ export function AdminUsersPage() {
         )}
       </div>
 
+      {adding && <AddUserDialog onClose={() => setAdding(false)} />}
+      {editing && <EditUserDialog user={editing} selfId={me?.id} onClose={() => setEditing(null)} />}
       {verifyUser && (
         <ConfirmDialog
           open
@@ -192,7 +233,135 @@ export function AdminUsersPage() {
           onClose={() => setVerifyUser(null)}
         />
       )}
+      {confirm && (
+        <ConfirmDialog open title={confirm.title} message={confirm.message} confirmLabel={confirm.confirm}
+                       danger={confirm.danger} loading={deleteUser.isPending} onConfirm={confirm.run}
+                       onClose={() => setConfirm(null)} />
+      )}
     </>
+  );
+}
+
+function AddUserDialog({ onClose }: { onClose: () => void }) {
+  const client = useQueryClient();
+  const toast = useToast();
+  const [form, setForm] = useState({
+    email: "", password: "", first_name: "", last_name: "", is_admin: false, is_verified: true,
+  });
+  const set = (key: keyof typeof form) => (value: string | boolean) => setForm((f) => ({ ...f, [key]: value }));
+  const save = useMutation({
+    mutationFn: () => admin.createUser({
+      email: form.email.trim(),
+      password: form.password,
+      first_name: form.first_name.trim(),
+      last_name: form.last_name.trim(),
+      is_admin: form.is_admin,
+      is_verified: form.is_verified,
+    }),
+    onSuccess: () => {
+      toast.success("User created.");
+      void client.invalidateQueries({ queryKey: ["admin", "users"] });
+      onClose();
+    },
+  });
+  const errors = fieldErrors(save.error);
+  const invalid = !form.email.trim() || form.password.length < 10;
+
+  return (
+    <Modal open onClose={onClose} title="Add user" footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Create user</Button>
+      </>
+    }>
+      <div className="space-y-4">
+        {save.error && !Object.keys(errors).length && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+        <TextInput label="Email" type="email" required value={form.email} onChange={set("email")} error={errors.email} />
+        <TextInput label="Password" type="password" required value={form.password} onChange={set("password")}
+                   error={errors.password} hint="At least 10 characters. Share this with the user." />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextInput label="First name" value={form.first_name} onChange={set("first_name")} maxLength={100} error={errors.first_name} />
+          <TextInput label="Last name" value={form.last_name} onChange={set("last_name")} maxLength={100} error={errors.last_name} />
+        </div>
+        <Toggle label="Admin access" checked={form.is_admin} onChange={set("is_admin")}
+                hint="Can open this admin area and manage all accounts." />
+        <Toggle label="Email verified" checked={form.is_verified} onChange={set("is_verified")}
+                hint="When on, they can sign in immediately (if the account is active)." />
+      </div>
+    </Modal>
+  );
+}
+
+function EditUserDialog({ user, selfId, onClose }: { user: AdminUser; selfId?: string; onClose: () => void }) {
+  const client = useQueryClient();
+  const toast = useToast();
+  const self = user.id === selfId;
+  const [form, setForm] = useState({
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    is_active: user.is_active,
+    is_admin: user.is_admin,
+    is_verified: user.is_verified,
+    password: "",
+  });
+  const set = (key: keyof typeof form) => (value: string | boolean) => setForm((f) => ({ ...f, [key]: value }));
+  const save = useMutation({
+    mutationFn: async () => {
+      await admin.updateUser(user.id, {
+        email: form.email.trim(),
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        is_active: form.is_active,
+        is_admin: form.is_admin,
+        is_verified: form.is_verified,
+      });
+      if (form.password.length >= 10) {
+        await admin.userPassword(user.id, form.password);
+      }
+    },
+    onSuccess: () => {
+      toast.success(form.password.length >= 10 ? "User updated and password reset." : "User updated.");
+      void client.invalidateQueries({ queryKey: ["admin", "users"] });
+      void client.invalidateQueries({ queryKey: ["admin", "user", user.id] });
+      onClose();
+    },
+  });
+  const errors = fieldErrors(save.error);
+  const invalid = !form.email.trim() || (form.password.length > 0 && form.password.length < 10);
+
+  return (
+    <Modal open onClose={onClose} title="Edit user" wide footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Save changes</Button>
+      </>
+    }>
+      <div className="space-y-6">
+        {save.error && !Object.keys(errors).length && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Profile</h3>
+          <TextInput label="Email" type="email" required value={form.email} onChange={set("email")} error={errors.email} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextInput label="First name" value={form.first_name} onChange={set("first_name")} maxLength={100} error={errors.first_name} />
+            <TextInput label="Last name" value={form.last_name} onChange={set("last_name")} maxLength={100} error={errors.last_name} />
+          </div>
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Access</h3>
+          <Toggle label="Can sign in" checked={form.is_active} onChange={self ? () => toast.error("Ask another admin to change your own account.") : set("is_active")}
+                  hint={self ? "You can't disable your own account here." : undefined} />
+          <Toggle label="Admin" checked={form.is_admin} onChange={self ? () => toast.error("Ask another admin to change your own account.") : set("is_admin")} />
+          <Toggle label="Email verified" checked={form.is_verified} onChange={set("is_verified")} />
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold text-slate-900">Password</h3>
+          <TextInput label="New password" type="password" value={form.password} onChange={set("password")}
+                     error={form.password.length > 0 && form.password.length < 10 ? "Use at least 10 characters." : errors.password}
+                     hint="Leave blank to keep the current password. Setting a new one signs the user out everywhere." />
+        </section>
+      </div>
+    </Modal>
   );
 }
 

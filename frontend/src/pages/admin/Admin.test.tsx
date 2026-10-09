@@ -110,11 +110,14 @@ describe("admin area", () => {
 
   it("lists users and filters them by status", async () => {
     const calls = mockApi({
+      "GET /api/auth/me": { user: me },
       "GET /api/admin/users": { items: [alice], total: 1, page: 1, page_size: 25 },
       "GET /api/plans": { plans },
     });
     renderAt("/admin/users", <Route path="/admin/users" element={<AdminUsersPage />} />);
     expect(await screen.findByRole("link", { name: "alice@example.com" })).toHaveAttribute("href", "/admin/users/u1");
+    expect(screen.getByRole("button", { name: "Add user" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Disabled" }));
     await vi.waitFor(() => expect(calls.some((c) => c.url.includes("status=disabled"))).toBe(true));
   });

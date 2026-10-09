@@ -14,7 +14,8 @@ from backend.app.core.pagination import PageParams, page_params
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import ApplicationStatus, SubscriptionStatus, User
 from backend.app.schemas.admin import (
-    GrantPlanIn, InstituteCreateIn, InstituteUpdateIn, PartnerCreateIn, PartnerUpdateIn, PlanUpdateIn, TestEmailIn, UserUpdateIn,
+    GrantPlanIn, InstituteCreateIn, InstituteUpdateIn, PartnerCreateIn, PartnerUpdateIn, PlanUpdateIn, TestEmailIn,
+    UserCreateIn, UserUpdateIn,
 )
 from backend.app.schemas.institute import PasswordIn
 from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, NotificationsIn, PaymentsIn, SmtpIn
@@ -44,15 +45,37 @@ def users(q: str | None = Query(None, max_length=200),
     return ok(admin_service.list_users(db, params, q=q, status=status, plan=plan))
 
 
+@router.post("/users", summary="Create a user account")
+def create_user(body: UserCreateIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    result = admin_service.create_user(db, admin, **body.model_dump())
+    db.commit()
+    return ok(result)
+
+
 @router.get("/users/{user_id}", summary="One user's account, plan, usage, runs, and computers")
 def user_detail(user_id: uuid.UUID, db: Session = Depends(get_db)):
     return ok(admin_service.user_detail(db, user_id))
 
 
-@router.patch("/users/{user_id}", summary="Disable / enable a user, or change admin access")
+@router.patch("/users/{user_id}", summary="Update a user's profile and access")
 def update_user(user_id: uuid.UUID, body: UserUpdateIn, admin: User = Depends(require_admin),
                 db: Session = Depends(get_db)):
-    result = admin_service.update_user(db, admin, user_id, is_active=body.is_active, is_admin=body.is_admin)
+    result = admin_service.update_user(db, admin, user_id, **body.model_dump(exclude_unset=True))
+    db.commit()
+    return ok(result)
+
+
+@router.delete("/users/{user_id}", summary="Permanently delete a user account")
+def delete_user(user_id: uuid.UUID, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    admin_service.delete_user(db, admin, user_id)
+    db.commit()
+    return ok({"ok": True})
+
+
+@router.post("/users/{user_id}/password", summary="Set a new password for a user")
+def user_password(user_id: uuid.UUID, body: PasswordIn, admin: User = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    result = admin_service.set_user_password(db, admin, user_id, body.password)
     db.commit()
     return ok(result)
 

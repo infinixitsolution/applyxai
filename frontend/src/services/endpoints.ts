@@ -166,9 +166,26 @@ export const admin = {
   analytics: () => request<AdminAnalytics>("/admin/analytics"),
   users: (query: Paged & { q?: string; status?: string; plan?: string }) =>
     request<Page<AdminUser>>("/admin/users", { query }),
+  createUser: (body: {
+    email: string;
+    password: string;
+    first_name?: string;
+    last_name?: string;
+    is_admin?: boolean;
+    is_verified?: boolean;
+  }) => request<AdminUserDetail>("/admin/users", { method: "POST", body }),
   user: (id: string) => request<AdminUserDetail>(`/admin/users/${id}`),
-  updateUser: (id: string, body: { is_active?: boolean; is_admin?: boolean }) =>
-    request<AdminUserDetail>(`/admin/users/${id}`, { method: "PATCH", body }),
+  updateUser: (id: string, body: {
+    email?: string;
+    first_name?: string;
+    last_name?: string;
+    is_active?: boolean;
+    is_admin?: boolean;
+    is_verified?: boolean;
+  }) => request<AdminUserDetail>(`/admin/users/${id}`, { method: "PATCH", body }),
+  deleteUser: (id: string) => request<{ ok: true }>(`/admin/users/${id}`, { method: "DELETE" }),
+  userPassword: (id: string, password: string) =>
+    request<AdminUserDetail>(`/admin/users/${id}/password`, { method: "POST", body: { password } }),
   grantPlan: (id: string, body: { plan: string; months: number; note: string }) =>
     request<AdminUserDetail>(`/admin/users/${id}/grant-plan`, { method: "POST", body }),
   revokePlan: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/revoke-plan`, { method: "POST" }),
