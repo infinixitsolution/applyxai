@@ -150,6 +150,8 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
   });
   const { readiness, devices, usage } = overview;
   const canStart = readiness.ready && devices.length > 0 && !usage.limit_reached;
+  const aiReady = tailorSnap?.resume_ai_available ?? false;
+  const skillsReady = tailorSnap?.master_skills_ready ?? false;
   const canPickTailor = tailorSnap?.can_tailor ?? false;
 
   const openConfirm = () => {
@@ -225,9 +227,11 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
               type="button"
               disabled={!canStart || !canPickTailor}
               title={
-                !canPickTailor
-                  ? "Requires Platform Resume AI and master skills on your default resume"
-                  : undefined
+                !aiReady
+                  ? "Ask an admin to enable Platform AI and Resume AI"
+                  : !skillsReady
+                    ? "Analyze master skills on your default resume (Resumes page)"
+                    : undefined
               }
               onClick={() => setResumeMode("tailor_if_gate")}
               className={cx(
@@ -243,8 +247,15 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
           </div>
           {!canPickTailor && (
             <p className="mt-2 text-xs text-amber-800">
-              To enable tailoring: admin turns on <strong>Resume AI</strong>, then{" "}
-              <Link to="/app/resumes" className="font-medium underline">analyze master skills</Link> on your default resume.
+              {!aiReady ? (
+                <>Resume tailoring needs <strong>Platform AI</strong> with <strong>Resume AI</strong> turned on in admin Settings.</>
+              ) : (
+                <>
+                  Platform AI is ready. On{" "}
+                  <Link to="/app/resumes" className="font-medium underline">Resumes</Link>, open your{" "}
+                  <strong>default</strong> resume and click <strong>Analyze skills</strong> (or re-run resume intake if your profile already lists skills).
+                </>
+              )}
             </p>
           )}
         </div>

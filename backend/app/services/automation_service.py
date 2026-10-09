@@ -100,13 +100,14 @@ def readiness(db: Session, user_id: uuid.UUID) -> list[str]:
 
 def _resume_tailor_snapshot(db: Session, user_id: uuid.UUID) -> dict:
     from backend.app.services.ai_service import ai_available
+    from backend.app.services import resume_ai_service
 
     search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == user_id))
     raw = (search.extra or {}).get("resume_mode", "default") if search and search.extra else "default"
     mode = raw if raw in ("default", "tailor_if_gate") else "default"
     resume = run_config_service.default_resume(db, user_id)
-    masters = bool(resume and list(resume.master_skills or []))
     ai_on = ai_available(db, feature="resume")
+    masters = resume_ai_service.master_skills_ready(db, user_id, resume)
     return {
         "mode": mode,
         "resume_ai_available": ai_on,
@@ -119,6 +120,8 @@ def _persist_resume_mode(db: Session, user_id: uuid.UUID, resume_mode: str) -> N
     if resume_mode not in ("default", "tailor_if_gate"):
         raise AppError("VALIDATION_ERROR", "resume_mode must be default or tailor_if_gate.", 422)
     if resume_mode == "tailor_if_gate":
+        from backend.app.services import resume_ai_service
+
         snap = _resume_tailor_snapshot(db, user_id)
         if not snap["resume_ai_available"]:
             raise AppError(
@@ -126,12 +129,14 @@ def _persist_resume_mode(db: Session, user_id: uuid.UUID, resume_mode: str) -> N
                 "Resume AI is not enabled. Ask an admin to configure Platform AI → Resume AI, or choose default resume.",
                 422,
             )
-        if not snap["master_skills_ready"]:
-            raise AppError(
-                "MASTER_REQUIRED",
-                "Analyze master skills on your default resume before using tailor per job.",
-                422,
-            )
+        resume = run_config_service.default_resume(db, user_id)
+        if not resume_ai_service.persist_master_skills_from_profile(db, user_id, resume):
+            if not snap["master_skills_ready"]:
+                raise AppError(
+                    "MASTER_REQUIRED",
+                    "Analyze master skills on your default resume before using tailor per job.",
+                    422,
+                )
     search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == user_id))
     if search is None:
         search = SearchConfig(user_id=user_id, extra={})

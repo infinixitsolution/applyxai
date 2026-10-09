@@ -850,8 +850,12 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
 
   return (
     <div className="space-y-6">
-      <Card title="Platform AI" actions={<Badge tone={ai.ready ? "green" : "amber"}>{ai.ready ? "Ready" : "Not configured"}</Badge>}>
-        <p className="mb-4 text-sm text-slate-600">API keys are encrypted and never shown to users or the desktop agent. Users opt in per feature in their preferences.</p>
+      <Card title="Platform AI" actions={
+        <Badge tone={ai.resume_ready ? "green" : ai.ready ? "amber" : "amber"}>
+          {ai.resume_ready ? "Resume AI ready" : ai.ready ? "AI on (Resume off or key missing)" : "Not configured"}
+        </Badge>
+      }>
+        <p className="mb-4 text-sm text-slate-600">API keys are encrypted and never shown to users. Enable Platform AI, save an API key, and turn on <strong>Resume AI</strong> for JD tailoring during automation.</p>
         <Toggle label="Enable platform AI" checked={enabled} onChange={setEnabled} />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">

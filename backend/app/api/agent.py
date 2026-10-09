@@ -161,6 +161,7 @@ async def tailor_job_resume(
     resume = run_config_service.default_resume(db, run.user_id)
     if resume is None:
         raise AppError("NOT_FOUND", "Default resume missing.", 404)
+    resume_ai_service.persist_master_skills_from_profile(db, run.user_id, resume)
     if not list(resume.master_skills or []):
         raise AppError("MASTER_REQUIRED", "Analyze master skills on your default resume first.", 422)
     key = str(external_job_id).strip()

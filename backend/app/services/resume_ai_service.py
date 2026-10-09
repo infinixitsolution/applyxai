@@ -375,6 +375,13 @@ def intake_from_resume(db: Session, user: User, resume_id: uuid.UUID, *, apply: 
                 "plain_text": text[:50000],
                 "text_extraction": text_source,
             }
+        else:
+            db.refresh(user)
+            profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+            fallback = list(profile.skills or []) if profile else []
+            if fallback:
+                resume.master_skills = fallback[:80]
+                resume.subskills_by_master = resume.subskills_by_master or {}
         db.commit()
         db.refresh(user)
         db.refresh(resume)
@@ -393,6 +400,28 @@ def intake_from_resume(db: Session, user: User, resume_id: uuid.UUID, *, apply: 
     }
 
 
+def master_skills_ready(db: Session, user_id: uuid.UUID, resume: Resume | None) -> bool:
+    """True when the default resume has master skills or the profile already lists skills (from intake)."""
+    if resume and list(resume.master_skills or []):
+        return True
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    return bool(profile and list(profile.skills or []))
+
+
+def persist_master_skills_from_profile(db: Session, user_id: uuid.UUID, resume: Resume | None) -> bool:
+    """Copy profile skills onto the default resume when master_skills is empty (needed for agent tailoring)."""
+    if resume is None or list(resume.master_skills or []):
+        return False
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    skills = list(profile.skills or []) if profile else []
+    if not skills:
+        return False
+    resume.master_skills = skills[:80]
+    resume.subskills_by_master = resume.subskills_by_master or {}
+    db.flush()
+    return True
+
+
 def analyze_master(db: Session, user: User, resume_id: uuid.UUID) -> Resume:
     resume = resume_service.get_resume(db, user, resume_id)
     path = resume_service.absolute_path(resume)
@@ -400,6 +429,14 @@ def analyze_master(db: Session, user: User, resume_id: uuid.UUID) -> Resume:
     profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
     profile_skills = list(profile.skills) if profile and profile.skills else []
     skills = resume_text_service.guess_skills_from_text(text, profile_skills)
+    if ai_available(db, feature="resume") and text.strip():
+        try:
+            intake = _llm_intake(db, text, hint_first=user.first_name or "", hint_last=user.last_name or "")
+            skills = list(intake.get("skills") or []) or skills
+        except AppError:
+            pass
+    if not skills and profile_skills:
+        skills = profile_skills
     if not skills:
         raise AppError("PARSE_FAILED", "Could not detect skills. Add skills to your profile and try again.", 422)
     resume.master_skills = skills

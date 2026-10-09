@@ -359,6 +359,7 @@ def _admin_ai_view(db: Session) -> dict:
         "models": eff.models,
         "features": eff.features,
         "ready": eff.enabled and eff.configured,
+        "resume_ready": eff.feature_on("resume"),
     }
 
 

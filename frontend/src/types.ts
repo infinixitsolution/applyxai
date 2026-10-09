@@ -582,6 +582,7 @@ export interface AdminPlatformSettings {
     models: { fast: string; strong: string; embedding: string };
     features: { applications: boolean; resume: boolean };
     ready: boolean;
+    resume_ready?: boolean;
   };
   payments: {
     provider: "null" | "razorpay";

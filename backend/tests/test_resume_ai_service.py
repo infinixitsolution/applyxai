@@ -1,5 +1,13 @@
 from backend.app.services import resume_text_service
-from backend.app.services.resume_ai_service import build_resume_version_name, humanize_tailor_patch, match_score, validate_tailor_patch
+from backend.app.models import Resume, User, UserProfile
+from backend.app.services.resume_ai_service import (
+    build_resume_version_name,
+    humanize_tailor_patch,
+    master_skills_ready,
+    match_score,
+    persist_master_skills_from_profile,
+    validate_tailor_patch,
+)
 
 
 def test_heuristic_intake_finds_name_phone_and_summary():
@@ -64,6 +72,28 @@ def test_humanize_tailor_patch_cleans_summary():
         {"summary_lines": ["Results-driven Python developer."], "skills_order": ["Python"]}
     )
     assert "results-driven" not in patch["summary_lines"][0].lower()
+
+
+def test_master_skills_ready_uses_profile_when_resume_empty(db):
+    user = User(email="skills@example.com", password_hash="x", is_verified=True)
+    db.add(user)
+    db.flush()
+    db.add(UserProfile(user_id=user.id, skills=["Python", "SQL"]))
+    resume = Resume(
+        user_id=user.id,
+        name="Main",
+        filename="m.pdf",
+        storage_path="resumes/test/m.pdf",
+        file_type="pdf",
+        file_size=100,
+        is_default=True,
+    )
+    db.add(resume)
+    db.commit()
+    assert master_skills_ready(db, user.id, resume)
+    assert persist_master_skills_from_profile(db, user.id, resume)
+    db.refresh(resume)
+    assert resume.master_skills == ["Python", "SQL"]
 
 
 def test_validate_rejects_unknown_master():
