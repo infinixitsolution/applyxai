@@ -1,5 +1,5 @@
 import type {
-  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, AdminPlatformSettings, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, AdminPlatformSettings, EmailTemplates, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
   AdminInstituteDetail, AdminPartnerDetail, AdminUserDetail, AdminWorkers, AgentDevice, Application, ApplicationDetail, ApplicationStatus,
   Institute, InstituteAssignment, InstituteDashboard, Partner, PartnerCampaign, PartnerCommission,
   PartnerDashboard, PartnerPayout, SeatCounts,
@@ -210,6 +210,12 @@ export const admin = {
     request<{ auth_email: AdminPlatformSettings["auth_email"] }>("/admin/settings/auth-email", { method: "PUT", body }),
   updateNotifications: (body: { types: Record<string, { email: boolean }> }) =>
     request<{ notifications: AdminPlatformSettings["notifications"] }>("/admin/settings/notifications", { method: "PUT", body }),
+  updateEmailTemplates: (body: EmailTemplates) =>
+    request<{ email_templates: EmailTemplates }>("/admin/settings/email-templates", { method: "PUT", body }),
+  testEmailTemplate: (body: { kind: string; to?: string }) =>
+    request<TestEmailResult>("/admin/email/test-template", { method: "POST", body }),
+  broadcastNotifications: (body: { title: string; body: string; link?: string; user_ids: string[] }) =>
+    request<{ sent: number }>("/admin/notifications/broadcast", { method: "POST", body }),
   updateAi: (body: {
     enabled: boolean;
     provider: string;

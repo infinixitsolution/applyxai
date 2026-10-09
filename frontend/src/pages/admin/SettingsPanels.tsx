@@ -414,7 +414,7 @@ function TemplatesTab({
     onSuccess: () => { qc.invalidateQueries({ queryKey: SETTINGS_KEY }); setSaved(true); },
   });
   const testAuth = useMutation({
-    mutationFn: (kind: string) => admin.testEmailTemplate({ kind, to: session?.user.email }),
+    mutationFn: (kind: string) => admin.testEmailTemplate({ kind, to: session?.email }),
   });
 
   const openAuth = (mode: TemplateModalMode, key: string) => {
@@ -995,6 +995,9 @@ function OperationsTab() {
   return (
     <div className="space-y-6">
       <BroadcastNotificationsCard />
+      <Workers />
+      <Logs />
+      <AuditLog />
     </div>
   );
 }
