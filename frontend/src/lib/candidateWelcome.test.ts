@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  candidateWelcomeStorageKey,
-  hasSeenCandidateWelcome,
-  markCandidateWelcomeSeen,
+  candidateWelcomeDismissKey,
+  dismissCandidateWelcomeForSession,
+  isCandidateWelcomeDismissed,
+  resetCandidateWelcomeForLogin,
 } from "./candidateWelcome";
 
-describe("candidateWelcome storage", () => {
-  afterEach(() => localStorage.clear());
+describe("candidateWelcome session", () => {
+  afterEach(() => sessionStorage.clear());
 
-  it("tracks seen state per user", () => {
-    const key = candidateWelcomeStorageKey("user-1");
-    expect(key).toContain("user-1");
-    expect(hasSeenCandidateWelcome("user-1")).toBe(false);
-    markCandidateWelcomeSeen("user-1");
-    expect(hasSeenCandidateWelcome("user-1")).toBe(true);
-    expect(hasSeenCandidateWelcome("user-2")).toBe(false);
+  it("shows again after each login reset", () => {
+    dismissCandidateWelcomeForSession("user-1");
+    expect(isCandidateWelcomeDismissed("user-1")).toBe(true);
+    resetCandidateWelcomeForLogin("user-1");
+    expect(isCandidateWelcomeDismissed("user-1")).toBe(false);
+    expect(candidateWelcomeDismissKey("user-1")).toContain("user-1");
   });
 });

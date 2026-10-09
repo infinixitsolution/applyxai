@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { Alert, Spinner } from "../components/ui";
 import { ApiError, errorMessage } from "../services/api";
 import { auth, preferences } from "../services/endpoints";
+import { resetCandidateWelcomeForLogin } from "../lib/candidateWelcome";
 import type { User } from "../types";
 
 export const ME_KEY = ["me"] as const;
@@ -36,7 +37,10 @@ export function useSetSession() {
   const client = useQueryClient();
   return (user: User | null) => {
     if (user === null) forgetUser(client);
-    else client.setQueryData(ME_KEY, user);
+    else {
+      resetCandidateWelcomeForLogin(user.id);
+      client.setQueryData(ME_KEY, user);
+    }
   };
 }
 

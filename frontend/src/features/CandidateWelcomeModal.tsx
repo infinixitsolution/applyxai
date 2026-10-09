@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../auth/session";
 import { Modal } from "../components/Modal";
 import { Button } from "../components/ui";
-import { hasSeenCandidateWelcome, markCandidateWelcomeSeen } from "../lib/candidateWelcome";
+import { dismissCandidateWelcomeForSession, isCandidateWelcomeDismissed } from "../lib/candidateWelcome";
 
 const STEPS = [
   {
@@ -40,15 +40,13 @@ export function CandidateWelcomeModal() {
   useEffect(() => {
     if (!user?.id) return;
     if (user.workspace && user.workspace !== "app") return;
-    if (hasSeenCandidateWelcome(user.id)) return;
+    if (isCandidateWelcomeDismissed(user.id)) return;
     setOpen(true);
   }, [user?.id, user?.workspace]);
 
-  const close = () => setOpen(false);
-
-  const startSetup = () => {
-    if (user?.id) markCandidateWelcomeSeen(user.id);
-    close();
+  const close = () => {
+    if (user?.id) dismissCandidateWelcomeForSession(user.id);
+    setOpen(false);
   };
 
   if (!open) return null;
@@ -62,7 +60,7 @@ export function CandidateWelcomeModal() {
       footer={
         <>
           <Button variant="secondary" onClick={close}>Remind me later</Button>
-          <Button onClick={startSetup}>Start setup</Button>
+          <Button onClick={close}>Start setup</Button>
         </>
       }
     >

@@ -1,21 +1,30 @@
-const STORAGE_PREFIX = "applyxai_candidate_welcome_v1:";
+const DISMISS_PREFIX = "applyxai_candidate_welcome_dismissed_v1:";
 
-export function candidateWelcomeStorageKey(userId: string): string {
-  return `${STORAGE_PREFIX}${userId}`;
+export function candidateWelcomeDismissKey(userId: string): string {
+  return `${DISMISS_PREFIX}${userId}`;
 }
 
-export function hasSeenCandidateWelcome(userId: string): boolean {
+/** Call when the user signs in so the instructions popup can show again this session. */
+export function resetCandidateWelcomeForLogin(userId: string): void {
   try {
-    return localStorage.getItem(candidateWelcomeStorageKey(userId)) === "1";
+    sessionStorage.removeItem(candidateWelcomeDismissKey(userId));
   } catch {
-    return true;
+    /* blocked storage */
   }
 }
 
-export function markCandidateWelcomeSeen(userId: string): void {
+export function isCandidateWelcomeDismissed(userId: string): boolean {
   try {
-    localStorage.setItem(candidateWelcomeStorageKey(userId), "1");
+    return sessionStorage.getItem(candidateWelcomeDismissKey(userId)) === "1";
   } catch {
-    /* private mode / blocked storage */
+    return false;
+  }
+}
+
+export function dismissCandidateWelcomeForSession(userId: string): void {
+  try {
+    sessionStorage.setItem(candidateWelcomeDismissKey(userId), "1");
+  } catch {
+    /* blocked storage */
   }
 }
