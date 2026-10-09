@@ -11,7 +11,8 @@ import { PartnerKycPage, PartnerProfilePage, PartnerReferralsPage, PartnerTaxPag
 const partner: Partner = {
   id: "p1", user_id: "u3", organization: "West Coast Referral", contact_name: "Alex West",
   phone: "555", referral_code: "WCR1", status: "approved", kyc_status: "pending",
-  commission_bps: 1000, gstin: "27AAAAA0000A1Z5", pan_number: "ABCDE1234F",
+  commission_mode: "percent_payment", commission_bps: 1000, commission_flat_cents: 0,
+  gstin: "27AAAAA0000A1Z5", pan_number: "ABCDE1234F",
   payout_account: "123", payout_ifsc: "HDFC0001",
   kyc_documents: [{ filename: "pan.pdf", note: "PAN card", uploaded_at: "2026-10-09T00:00:00+00:00" }],
   click_count: 4, wallet: { accrued_cents: 0, approved_cents: 0, available_cents: 0 },

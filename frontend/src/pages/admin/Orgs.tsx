@@ -1010,7 +1010,7 @@ function EditPartnerDialog({ partner, onClose, loginEmail }: {
           <TextInput label="Organisation" required value={form.organization} onChange={set("organization")} maxLength={190} error={errors.organization} />
           <TextInput label="Contact name" value={form.contact_name} onChange={set("contact_name")} maxLength={190} error={errors.contact_name} />
           <TextInput label="Phone" value={form.phone} onChange={set("phone")} maxLength={32} error={errors.phone} />
-          <TextInput label="Referral code" value={partner.referral_code} readOnly
+          <TextInput label="Referral code" value={partner.referral_code} readOnly onChange={() => {}}
                      hint="System-assigned. Share the partner detail link for the full referral URL." />
         </section>
         <section className="space-y-4">
