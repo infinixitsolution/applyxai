@@ -194,22 +194,39 @@ def turn(
     )
 
 
+def _complete_envelope(
+    *,
+    session: MockInterviewSession | None = None,
+    feedback: dict | None = None,
+    job=None,
+) -> dict:
+    """JSON-serializable envelope (JSONResponse does not encode nested BaseModel)."""
+    detail = _detail(session) if session is not None else None
+    out = MockInterviewCompleteOut(
+        session=detail,
+        feedback=feedback,
+        job=_job_out(job) if job is not None else None,
+    )
+    return ok(out.model_dump(mode="json"))
+
+
 def _feedback_response(db, user, session_id, session, feedback, job):
     from backend.app.services.mock_interview_feedback_jobs import JOB_SUCCEEDED
 
     if job is None:
         session = svc.get_session_detail(db, user.id, session_id)
-        return ok(MockInterviewCompleteOut(session=_detail(session), feedback=feedback or session.feedback or {}))
+        return _complete_envelope(
+            session=session,
+            feedback=feedback or session.feedback or {},
+        )
     if job.status == JOB_SUCCEEDED:
         session = svc.get_session_detail(db, user.id, session_id)
-        return ok(
-            MockInterviewCompleteOut(
-                session=_detail(session),
-                feedback=feedback or session.feedback or {},
-                job=_job_out(job),
-            )
+        return _complete_envelope(
+            session=session,
+            feedback=feedback or session.feedback or {},
+            job=job,
         )
-    payload = ok(MockInterviewCompleteOut(job=_job_out(job)))
+    payload = _complete_envelope(job=job)
     return JSONResponse(status_code=202, content=payload)
 
 
