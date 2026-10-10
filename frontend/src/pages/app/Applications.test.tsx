@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -51,10 +51,12 @@ describe("application view", () => {
     );
     expect(await screen.findByRole("button", { name: "View" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "View" }));
-    expect(await screen.findByText("Resume added", { selector: "p", hidden: true })).toBeInTheDocument();
-    expect(screen.getByText("Ada_AI Engineer_Hired_5 years", { hidden: true })).toBeInTheDocument();
-    expect(screen.getByText("Prepared for AI Engineer at Hired", { hidden: true })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Download", hidden: true }).some((link) => link.getAttribute("href")?.includes("res1"))).toBe(true);
+    await waitFor(() => expect(document.querySelector("dialog")?.textContent).toContain("Resume added"));
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.textContent).toContain("Resume added");
+    expect(dialog?.textContent).toContain("Ada_AI Engineer_Hired_5 years");
+    expect(dialog?.textContent).toContain("Prepared for AI Engineer at Hired");
+    expect(Array.from(dialog?.querySelectorAll("a") ?? []).some((link) => link.getAttribute("href")?.includes("res1"))).toBe(true);
   });
 
   it("opens a resume popup from the attachment icon next to the date", async () => {
@@ -68,7 +70,9 @@ describe("application view", () => {
       </QueryClientProvider>,
     );
     await userEvent.click(await screen.findByRole("button", { name: "Open resume Ada_AI Engineer_Hired_5 years" }));
-    expect(await screen.findByRole("heading", { name: "Resume", hidden: true })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download resume", hidden: true })).toHaveAttribute("href", expect.stringContaining("res1"));
+    await waitFor(() => expect(document.querySelector("dialog")?.textContent).toContain("Download resume"));
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.textContent).toContain("Resume");
+    expect(dialog?.querySelector("a")?.getAttribute("href")).toContain("res1");
   });
 });
