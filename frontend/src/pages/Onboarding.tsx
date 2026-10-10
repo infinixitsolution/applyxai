@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { homeFor, useSession } from "../auth/session";
 import { Logo } from "../components/Logo";
-import { Button, Card, cx, Spinner } from "../components/ui";
+import { Button, Card, cx, PageHeader, Spinner } from "../components/ui";
 import { ApplicationPreferencesForm } from "../features/ApplicationPreferencesForm";
 import { ProfileForm } from "../features/ProfileForm";
 import { CandidateWelcomeModal } from "../features/CandidateWelcomeModal";
@@ -54,9 +54,9 @@ export function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-app-page">
       <CandidateWelcomeModal />
-      <header className="border-b border-slate-200 bg-white">
+      <header className="border-b border-slate-200/80 bg-white shadow-sm shadow-slate-200/30">
         <div className="mx-auto flex h-16 max-w-3xl items-center px-3 sm:px-4"><Logo to="/onboarding" /></div>
       </header>
       <main className="mx-auto max-w-3xl px-3 py-8 sm:px-4 sm:py-10">
@@ -80,8 +80,7 @@ export function OnboardingPage() {
           ))}
         </ol>
 
-        <h1 className="text-2xl font-semibold tracking-tight">{current.title}</h1>
-        <p className="mt-1 text-sm text-slate-500">Step {step + 1} of {STEPS.length} · {current.description}</p>
+        <PageHeader title={current.title} description={`Step ${step + 1} of ${STEPS.length} · ${current.description}`} />
 
         <div className="mt-6">
           {current.id === "resume" && (

@@ -30,6 +30,7 @@ class TokenPurpose(str, enum.Enum):
     VERIFY_EMAIL = "verify_email"
     RESET_PASSWORD = "reset_password"
     REFRESH = "refresh"
+    TWO_FACTOR = "two_factor"
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -117,3 +118,21 @@ class PayoutStatus(str, enum.Enum):
     APPROVED = "approved"
     PAID = "paid"
     REJECTED = "rejected"
+
+
+class MockInterviewSessionStatus(str, enum.Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
+class MockInterviewMessageRole(str, enum.Enum):
+    INTERVIEWER = "interviewer"
+    CANDIDATE = "candidate"
+
+
+class InterviewType(str, enum.Enum):
+    BEHAVIORAL = "behavioral"
+    TECHNICAL = "technical"
+    HR = "hr"
+    MIXED = "mixed"

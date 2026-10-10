@@ -81,10 +81,16 @@ def test_admin_approves_institute_and_partner(api, db, outbox):
     assert api.post("/api/auth/login", json={"email": "admin@applyxai.local", "password": PASSWORD}).status_code == 200
     partners = api.get("/api/admin/partners").json()["data"]["items"]
     partner_id = partners[0]["id"]
-    assert api.post(f"/api/admin/partners/{partner_id}/status", json={"status": "approved"},
-                    headers=csrf_headers(api)).json()["data"]["status"] == "approved"
+    blocked = api.post(
+        f"/api/admin/partners/{partner_id}/status",
+        json={"status": "approved"},
+        headers=csrf_headers(api),
+    )
+    assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "KYC_REQUIRED"
     assert api.post(f"/api/admin/partners/{partner_id}/kyc", json={"status": "verified"},
                     headers=csrf_headers(api)).json()["data"]["kyc_status"] == "verified"
+    assert api.post(f"/api/admin/partners/{partner_id}/status", json={"status": "approved"},
+                    headers=csrf_headers(api)).json()["data"]["status"] == "approved"
 
 
 def test_invite_requires_active_institute_and_free_seat(api, db, outbox):
@@ -449,3 +455,34 @@ def test_admin_creates_partner(api, db):
     assert login.status_code == 200
     user = login.json()["data"]["user"]
     assert user["workspace"] == "partner" and user["partner_status"] == "approved"
+
+
+def test_admin_cannot_approve_payout_without_kyc(api, db):
+    import uuid
+
+    from backend.app.models import PartnerPayout, PayoutStatus
+
+    admin = _admin(api, db)
+    created = admin.post("/api/admin/partners", json={
+        "organization": "Payout KYC Test", "email": "payoutkyc@admin.edu", "password": PASSWORD,
+    }, headers=csrf_headers(admin))
+    partner_id = created.json()["data"]["id"]
+    admin.put(f"/api/admin/partners/{partner_id}", json={
+        "organization": "Payout KYC Test",
+        "commission_mode": "percent_payment",
+        "commission_bps": 1000,
+        "commission_flat_cents": 0,
+        "status": "approved",
+        "kyc_status": "pending",
+    }, headers=csrf_headers(admin))
+    partner = db.get(Partner, uuid.UUID(str(partner_id)))
+    row = PartnerPayout(partner_id=partner.id, amount_cents=5000, currency="INR", status=PayoutStatus.REQUESTED)
+    db.add(row)
+    db.commit()
+    blocked = admin.post(
+        f"/api/admin/payouts/{row.id}/status",
+        json={"status": "approved"},
+        headers=csrf_headers(admin),
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "KYC_REQUIRED"

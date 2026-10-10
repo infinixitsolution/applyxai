@@ -1,17 +1,17 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ExternalLink, Laptop, ListChecks, Receipt, Search } from "lucide-react";
+import { Bot, Building, ExternalLink, Laptop, ListChecks, Receipt, Search } from "lucide-react";
 import { useState } from "react";
 import { Select, TextInput } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner, cx } from "../../components/ui";
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner, cx } from "../../components/ui";
 import { formatDate, formatDateTime, formatMoney, safeExternalUrl, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminRun, type ApplicationStatus, type SubscriptionStatus } from "../../types";
-import { PAGE_SIZE, providerLabel, RUN_LABELS, RUN_TONES, SUB_LABELS, SubBadge, Table, Td, UserLink } from "./shared";
+import { FilterChip, FilterChipBrand, PAGE_SIZE, providerLabel, RUN_LABELS, RUN_TONES, SUB_LABELS, SubBadge, Table, Td, UserLink } from "./shared";
 
 // ------------------------------------------------------------------------------------------ subscriptions
 const SUB_STATUSES: SubscriptionStatus[] = ["active", "pending", "past_due", "trialing", "cancelled", "expired"];
@@ -28,17 +28,11 @@ function AdminSubscriptionFilters({ status, plan, onStatus, onPlan }: {
       <div>
         <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
         <div className="flex flex-wrap gap-2">
-          <button type="button" aria-pressed={status === ""} onClick={() => onStatus("")}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    status === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-            All
-          </button>
+          <FilterChip active={status === ""} onClick={() => onStatus("")}>All</FilterChip>
           {SUB_STATUSES.map((s) => (
-            <button key={s} type="button" aria-pressed={status === s} onClick={() => onStatus(status === s ? "" : s)}
-                    className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                      status === s ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+            <FilterChipBrand key={s} active={status === s} onClick={() => onStatus(status === s ? "" : s)}>
               {SUB_LABELS[s]}
-            </button>
+            </FilterChipBrand>
           ))}
         </div>
       </div>
@@ -148,16 +142,19 @@ function AdminRunFilters({ value, onChange }: { value: string; onChange: (v: str
     <div>
       <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
       <div className="flex flex-wrap gap-2">
-        {RUN_FILTERS.map((f) => (
-          <button key={f.value || "all"} type="button" aria-pressed={value === f.value}
-                  onClick={() => onChange(f.value === "" ? "" : value === f.value ? "" : f.value)}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    value === f.value
-                      ? f.value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-brand-600 text-white ring-brand-600"
-                      : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-            {f.label}
-          </button>
-        ))}
+        {RUN_FILTERS.map((f) => {
+          const active = value === f.value;
+          const Chip = f.value === "" ? FilterChip : FilterChipBrand;
+          return (
+            <Chip
+              key={f.value || "all"}
+              active={active}
+              onClick={() => onChange(f.value === "" ? "" : value === f.value ? "" : f.value)}
+            >
+              {f.label}
+            </Chip>
+          );
+        })}
       </div>
     </div>
   );
@@ -353,17 +350,11 @@ function AdminStatusFilters({ value, onChange }: { value: ApplicationStatus | ""
     <div>
       <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
       <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={value === ""} onClick={() => onChange("")}
-                className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                  value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-          All
-        </button>
+        <FilterChip active={value === ""} onClick={() => onChange("")}>All</FilterChip>
         {APPLICATION_STATUSES.map((s) => (
-          <button key={s} type="button" aria-pressed={value === s} onClick={() => onChange(value === s ? "" : s)}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    value === s ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+          <FilterChipBrand key={s} active={value === s} onClick={() => onChange(value === s ? "" : s)}>
             {STATUS_LABELS[s]}
-          </button>
+          </FilterChipBrand>
         ))}
       </div>
     </div>
@@ -452,6 +443,77 @@ export function AdminApplicationsPage() {
                   </tr>
                 );
               })}
+            </Table>
+            <Pagination page={data.page} pageSize={data.page_size} total={data.total} onPage={setPage} />
+          </Card>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function AdminCompaniesPage() {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const search = useDebounced(q.trim());
+  const query = { q: search || undefined, page, page_size: PAGE_SIZE };
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ["admin", "companies", query], queryFn: () => admin.companies(query), placeholderData: keepPreviousData,
+  });
+  const hasFilters = Boolean(search);
+
+  return (
+    <>
+      <PageHeader title="Companies" description="Every company users asked to search, and every company a search returned." />
+      <Card>
+        <div className="relative max-w-md">
+          <TextInput label="Search" value={q} onChange={(v) => { setQ(v); setPage(1); }}
+                     placeholder="Company or user email" maxLength={200} className="pl-9" />
+          <Search className="pointer-events-none absolute bottom-2.5 left-3 h-4 w-4 text-slate-400" aria-hidden />
+        </div>
+        {hasFilters && (
+          <p className="mt-3 text-xs text-slate-500">
+            Filtering for “{search}”.{" "}
+            <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setQ(""); setPage(1); }}>
+              Clear
+            </button>
+          </p>
+        )}
+      </Card>
+      <div className="mt-6">
+        {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : data.total === 0 ? (
+          <Card>
+            <EmptyState icon={<Building className="h-10 w-10" />} title="No companies yet">
+              {hasFilters ? "Try a different search." : "Companies appear when users set a company filter or a search finds a job."}
+            </EmptyState>
+          </Card>
+        ) : (
+          <Card className={cx(isFetching && "opacity-70 transition-opacity")}>
+            <p className="mb-4 text-sm text-slate-600">
+              Showing <span className="font-medium text-slate-900">{data.items.length}</span> of{" "}
+              <span className="font-medium text-slate-900">{data.total.toLocaleString()}</span> companies
+            </p>
+            <Table head={["Company", "Users", "Jobs found", "Applied", "In search filters", "Last seen", ""]} dim={isFetching}>
+              {data.items.map((c) => (
+                <tr key={c.company} className="hover:bg-slate-50/80">
+                  <Td className="font-medium text-slate-900">{c.company}</Td>
+                  <Td>
+                    <p>{c.users.toLocaleString()}</p>
+                    {c.user_emails.length > 0 && (
+                      <p className="mt-1 max-w-[16rem] text-xs text-slate-500" title={c.user_emails.join(", ")}>
+                        {c.user_emails.join(", ")}{c.users > c.user_emails.length ? ` +${c.users - c.user_emails.length}` : ""}
+                      </p>
+                    )}
+                  </Td>
+                  <Td>{c.jobs.toLocaleString()}</Td>
+                  <Td>{c.applied.toLocaleString()}</Td>
+                  <Td>{c.search_filters.toLocaleString()}</Td>
+                  <Td className="whitespace-nowrap text-slate-600">{c.last_seen ? formatDateTime(c.last_seen) : "—"}</Td>
+                  <Td className="whitespace-nowrap">
+                    <ButtonLink to={`/admin/companies/${encodeURIComponent(c.company)}`} size="sm" variant="secondary">View</ButtonLink>
+                  </Td>
+                </tr>
+              ))}
             </Table>
             <Pagination page={data.page} pageSize={data.page_size} total={data.total} onPage={setPage} />
           </Card>

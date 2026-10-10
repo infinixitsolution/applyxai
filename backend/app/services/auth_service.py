@@ -46,6 +46,15 @@ class SessionTokens:
     refresh_token: str
 
 
+@dataclass
+class TwoFactorChallenge:
+    user: User
+    challenge_token: str
+
+
+TWO_FACTOR_LIFETIME = timedelta(minutes=5)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -186,26 +195,53 @@ def _start_session(db: Session, user: User) -> SessionTokens:
     return SessionTokens(user, create_access_token(user.id, user.token_version), refresh)
 
 
-def login(db: Session, email: str, password: str) -> SessionTokens:
+def _authenticate_password(db: Session, email: str, password: str) -> User:
     user = db.scalar(select(User).where(User.email == normalize_email(email)))
     if user is None:
         burn_password_check(password)
         raise INVALID_CREDENTIALS()
     if not verify_password(password, user.password_hash):
         raise INVALID_CREDENTIALS()
-    # Only reachable with the correct password, so these don't reveal anything to a guesser.
     if not user.is_active:
         raise AppError("ACCOUNT_DISABLED", "This account has been disabled.", 403)
     auth = ps.get_effective_auth(db)
     if auth.require_verification and not user.is_verified:
         raise AppError("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in.", 403)
-
     if password_needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
+    return user
+
+
+def login(db: Session, email: str, password: str) -> SessionTokens | TwoFactorChallenge:
+    from backend.app.services import two_factor_service as tfa
+
+    user = _authenticate_password(db, email, password)
+    if tfa.totp_enabled(user):
+        challenge = _issue_token(db, user, TokenPurpose.TWO_FACTOR, TWO_FACTOR_LIFETIME)
+        db.commit()
+        return TwoFactorChallenge(user=user, challenge_token=challenge)
     user.last_login_at = _now()
     session = _start_session(db, user)
     db.commit()
     logger.info("login", extra={"user_id": str(user.id), "event": "login"})
+    return session
+
+
+def complete_two_factor_login(db: Session, challenge_token: str, code: str) -> SessionTokens:
+    from backend.app.services import two_factor_service as tfa
+
+    token = _find_token(db, challenge_token, TokenPurpose.TWO_FACTOR)
+    if token is None or _aware(token.expires_at) <= _now() or token.used_at is not None:
+        raise INVALID_TOKEN()
+    user = db.get(User, token.user_id)
+    if user is None or not user.is_active:
+        raise INVALID_TOKEN()
+    tfa.verify_login_code(user, code)
+    token.used_at = _now()
+    user.last_login_at = _now()
+    session = _start_session(db, user)
+    db.commit()
+    logger.info("login_2fa", extra={"user_id": str(user.id), "event": "login_2fa"})
     return session
 
 

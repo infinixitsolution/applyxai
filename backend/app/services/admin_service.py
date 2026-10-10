@@ -8,7 +8,7 @@ import logging
 import uuid
 from datetime import datetime, time, timedelta, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -18,9 +18,11 @@ from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
 from backend.app.core.security import hash_password
 from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
-    Payment, Plan, Resume, Subscription, SubscriptionStatus, User, UsageCounter,
+    MockInterviewFeedbackJob, MockInterviewSession, Payment, Plan, Resume, SearchConfig, Subscription,
+    SubscriptionStatus, User, UsageCounter,
 )
-from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, PlanKind
+from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, MockInterviewSessionStatus, PlanKind
+from backend.app.services.mock_interview_feedback_jobs import JOB_FAILED
 from backend.app.services import (
     agent_service, auth_service, automation_service, billing_service, dashboard_service, email_service,
     notification_service, usage_service,
@@ -118,6 +120,25 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
     devices = db.scalars(select(AgentDevice).where(AgentDevice.token_hash.is_not(None),
                                                    AgentDevice.revoked_at.is_(None))).all()
 
+    mi_by_status = {s.value: 0 for s in MockInterviewSessionStatus}
+    for status, n in db.execute(
+        select(MockInterviewSession.status, func.count()).group_by(MockInterviewSession.status)
+    ):
+        mi_by_status[status.value] = n
+    mi_this_month = db.scalar(
+        select(func.count())
+        .select_from(MockInterviewSession)
+        .where(MockInterviewSession.created_at >= period_start)
+    ) or 0
+    mi_failed_jobs_24h = db.scalar(
+        select(func.count())
+        .select_from(MockInterviewFeedbackJob)
+        .where(
+            MockInterviewFeedbackJob.status == JOB_FAILED,
+            MockInterviewFeedbackJob.created_at >= now - timedelta(hours=24),
+        )
+    ) or 0
+
     return {
         "users": users,
         "subscriptions": {"by_plan": [{"code": c, "name": n, "count": k} for c, n, k in by_plan],
@@ -126,6 +147,12 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
         "applications": {"this_month_by_status": by_status, "daily": [{"date": d, **v} for d, v in daily.items()]},
         "automation": {"active_runs": active_runs, "last_24h_by_status": runs_by_status,
                        "devices": len(devices), "devices_online": sum(agent_service.is_online(d, now) for d in devices)},
+        "mock_interviews": {
+            "total_sessions": sum(mi_by_status.values()),
+            "this_month": mi_this_month,
+            "by_status": mi_by_status,
+            "failed_feedback_jobs_24h": mi_failed_jobs_24h,
+        },
     }
 
 
@@ -406,6 +433,210 @@ def list_applications(db: Session, params: PageParams, *, status: str | None = N
     return page_response(items, total, params)
 
 
+def list_companies(db: Session, params: PageParams, *, q: str | None = None) -> dict:
+    """Every company a user targeted in search, or that a search turned up on a job."""
+    company_key = func.lower(func.trim(Job.company))
+    rows = db.execute(
+        select(
+            company_key,
+            func.max(Job.company),
+            func.count(func.distinct(Job.id)),
+            func.coalesce(func.sum(case((Application.status == ApplicationStatus.APPLIED, 1), else_=0)), 0),
+            func.max(Application.updated_at),
+        )
+        .select_from(Job)
+        .join(Application, Application.job_id == Job.id)
+        .where(func.trim(Job.company) != "")
+        .group_by(company_key)
+    ).all()
+    by_key: dict[str, dict] = {}
+    for key, name, jobs, applied, last_seen in rows:
+        if not key:
+            continue
+        by_key[key] = {
+            "company": (name or "").strip(),
+            "jobs": int(jobs or 0),
+            "applied": int(applied or 0),
+            "last_seen": last_seen,
+            "people": {},
+            "filter_users": set(),
+        }
+
+    for key, user_id, email in db.execute(
+        select(company_key, User.id, User.email)
+        .select_from(Job)
+        .join(Application, Application.job_id == Job.id)
+        .join(User, User.id == Application.user_id)
+        .where(func.trim(Job.company) != "")
+        .distinct()
+    ):
+        entry = by_key.get(key)
+        if entry is not None:
+            entry["people"][str(user_id)] = email
+
+    for user_id, companies, updated_at, email in db.execute(
+        select(SearchConfig.user_id, SearchConfig.companies, SearchConfig.updated_at, User.email)
+        .join(User, User.id == SearchConfig.user_id)
+    ):
+        if not isinstance(companies, list):
+            continue
+        for raw in companies:
+            name = str(raw).strip()
+            if not name:
+                continue
+            key = name.lower()
+            entry = by_key.get(key)
+            if entry is None:
+                entry = {
+                    "company": name,
+                    "jobs": 0,
+                    "applied": 0,
+                    "last_seen": updated_at,
+                    "people": {},
+                    "filter_users": set(),
+                }
+                by_key[key] = entry
+            entry["filter_users"].add(str(user_id))
+            entry["people"][str(user_id)] = email
+            if updated_at and (entry["last_seen"] is None or updated_at > entry["last_seen"]):
+                entry["last_seen"] = updated_at
+
+    needle = (q or "").strip().lower()
+    items = []
+    for entry in by_key.values():
+        emails = sorted(set(entry["people"].values()))
+        if needle and needle not in entry["company"].lower() and not any(needle in email.lower() for email in emails):
+            continue
+        items.append({
+            "company": entry["company"],
+            "users": len(entry["people"]),
+            "user_emails": emails[:8],
+            "jobs": entry["jobs"],
+            "applied": entry["applied"],
+            "search_filters": len(entry["filter_users"]),
+            "last_seen": _iso(entry["last_seen"]),
+        })
+    items.sort(key=lambda item: (-item["users"], -item["jobs"], -item["applied"], item["company"].lower()))
+    start = (params.page - 1) * params.page_size
+    return page_response(items[start:start + params.page_size], len(items), params)
+
+
+def company_detail(db: Session, name: str) -> dict:
+    """Overview, jobs with applied counts, and contacts the postings themselves published."""
+    from automation.company_contacts import contact_key, extract_published_contacts, merge_contacts
+
+    key = name.strip().lower()
+    if not key:
+        raise AppError("NOT_FOUND", "Company not found", 404)
+
+    jobs: dict[str, dict] = {}
+    published: dict[str, dict] = {}
+    display = name.strip()
+    locations: set[str] = set()
+    last_seen = None
+    filter_users: set[str] = set()
+    applicants: set[str] = set()
+
+    def touch(when) -> None:
+        nonlocal last_seen
+        if when and (last_seen is None or when > last_seen):
+            last_seen = when
+
+    rows = db.execute(
+        select(Job, Application)
+        .join(Application, Application.job_id == Job.id)
+        .where(func.lower(func.trim(Job.company)) == key)
+    ).all()
+    for job, application in rows:
+        display = (job.company or display).strip() or display
+        touch(application.updated_at)
+        applicants.add(str(application.user_id))
+        if job.location.strip():
+            locations.add(job.location.strip())
+        bucket = jobs.get(str(job.id))
+        if bucket is None:
+            bucket = {
+                "id": str(job.id),
+                "title": job.title,
+                "location": job.location,
+                "job_url": job.job_url,
+                "applied": 0,
+                "discovered": 0,
+                "users": set(),
+                "last_seen": application.updated_at,
+            }
+            jobs[str(job.id)] = bucket
+            for row in merge_contacts(
+                list(job.published_contacts or []),
+                extract_published_contacts(job.description or ""),
+            ):
+                ident = contact_key(row)
+                if not ident:
+                    continue
+                entry = published.get(ident)
+                if entry is None:
+                    entry = {**row, "jobs": []}
+                    published[ident] = entry
+                if not any(item["title"] == job.title for item in entry["jobs"]):
+                    entry["jobs"].append({"title": job.title, "job_url": job.job_url})
+        bucket["users"].add(str(application.user_id))
+        touch_job = application.updated_at
+        if touch_job and (bucket["last_seen"] is None or touch_job > bucket["last_seen"]):
+            bucket["last_seen"] = touch_job
+        if application.status == ApplicationStatus.APPLIED:
+            bucket["applied"] += 1
+        else:
+            bucket["discovered"] += 1
+
+    for user_id, companies, updated_at in db.execute(
+        select(SearchConfig.user_id, SearchConfig.companies, SearchConfig.updated_at)
+    ):
+        if not isinstance(companies, list):
+            continue
+        if not any(str(raw).strip().lower() == key for raw in companies):
+            continue
+        filter_users.add(str(user_id))
+        touch(updated_at)
+
+    if not jobs and not filter_users:
+        raise AppError("NOT_FOUND", "Company not found", 404)
+
+    applied = sum(job["applied"] for job in jobs.values())
+    job_items = [{
+        "id": job["id"],
+        "title": job["title"],
+        "location": job["location"],
+        "job_url": job["job_url"],
+        "applied": job["applied"],
+        "other": job["discovered"],
+        "users": len(job["users"]),
+        "last_seen": _iso(job["last_seen"]),
+    } for job in jobs.values()]
+    job_items.sort(key=lambda item: (-item["applied"], -item["users"], item["title"].lower()))
+
+    contact_items = [{
+        "name": row["name"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "role": row["role"],
+        "link": row["link"],
+        "jobs": row["jobs"],
+    } for row in published.values()]
+    contact_items.sort(key=lambda item: (-int(bool(item["email"] or item["phone"])), item["name"].lower() or item["email"]))
+
+    return {
+        "company": display,
+        "users": len(applicants),
+        "jobs": len(job_items),
+        "applied": applied,
+        "search_filters": len(filter_users),
+        "locations": sorted(locations),
+        "last_seen": _iso(last_seen),
+        "job_list": job_items,
+        "contacts": contact_items,
+    }
+
+
 def list_logs(db: Session, params: PageParams, *, levels: list[str] | None = None, q: str | None = None) -> dict:
     stmt = (select(AutomationLog, User.email).join(User, User.id == AutomationLog.user_id)
             .order_by(AutomationLog.ts.desc(), AutomationLog.id))
@@ -578,8 +809,14 @@ def _plan_admin_out(db: Session, plan: Plan, now: datetime) -> dict:
     defaults = PLAN_LIMITS.get(plan.code, {})
     limits = {**defaults, **(plan.limits or {})}
     kind = _plan_kind(plan)
-    out_limits = {"applications_per_month": limits.get("applications_per_month", 0),
-                  "resumes": limits.get("resumes", 0)}
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
+    out_limits = {
+        "applications_per_month": limits.get("applications_per_month", 0),
+        "mock_interviews_per_month": limits.get("mock_interviews_per_month", 0),
+        "resumes": RESUMES_UNLIMITED,
+        "resumes_unlimited": True,
+    }
     if kind == PlanKind.INSTITUTE.value:
         out_limits["seats"] = int(limits.get("seats") or 0)
     subscribers = db.scalar(select(func.count()).select_from(Subscription)
@@ -594,25 +831,101 @@ def list_plans(db: Session) -> list[dict]:
     return [_plan_admin_out(db, p, now) for p in db.scalars(select(Plan).order_by(Plan.sort_order, Plan.price_cents))]
 
 
-def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, *, name: str, price_cents: int,
-                applications_per_month: int, resumes: int, is_active: bool, sort_order: int,
-                seats: int | None = None) -> dict:
-    billing_service.seed_plans(db)
-    plan = db.scalar(select(Plan).where(Plan.code == code))
-    if plan is None:
-        raise AppError("PLAN_NOT_FOUND", "That plan doesn't exist.", 404)
+def _validate_plan_pricing(code: str, price_cents: int, *, is_active: bool) -> None:
     if code == FREE_PLAN:
         if price_cents != 0:
             raise AppError("INVALID_PRICE", "The Free plan must stay free.", 422)
         if not is_active:
             raise AppError("CANNOT_DISABLE_FREE", "The Free plan can't be switched off; everyone falls back to it.", 422)
-    elif price_cents < MIN_PAID_PRICE:
+    elif price_cents > 0 and price_cents < MIN_PAID_PRICE:
         raise AppError("INVALID_PRICE", f"A paid plan must cost at least {MIN_PAID_PRICE / 100:.2f}.", 422)
+
+
+def create_plan(db: Session, admin: User, provider: PaymentProvider, *, code: str, name: str, kind: str,
+                price_cents: int, applications_per_month: int, mock_interviews_per_month: int, is_active: bool,
+                sort_order: int, seats: int | None = None) -> dict:
+    from backend.app.models.enums import PlanKind
+
+    billing_service.seed_plans(db)
+    code = code.strip().lower()
+    if code == FREE_PLAN:
+        raise AppError("RESERVED_CODE", "The code 'free' is reserved for the default plan.", 422)
+    if db.scalar(select(Plan).where(Plan.code == code)):
+        raise AppError("PLAN_EXISTS", "A plan with that code already exists.", 409)
+    _validate_plan_pricing(code, price_cents, is_active=is_active)
+    plan_kind = PlanKind.INSTITUTE if kind == PlanKind.INSTITUTE.value else PlanKind.PERSONAL
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
+    limits = {
+        "applications_per_month": applications_per_month,
+        "mock_interviews_per_month": mock_interviews_per_month,
+        "resumes": RESUMES_UNLIMITED,
+    }
+    if plan_kind == PlanKind.INSTITUTE:
+        seat_count = int(seats if seats is not None else 1)
+        if seat_count < 1:
+            raise AppError("VALIDATION_ERROR", "Institute plans need at least one seat.", 422)
+        limits["seats"] = seat_count
+    plan = Plan(
+        code=code,
+        name=name.strip(),
+        kind=plan_kind,
+        price_cents=price_cents,
+        currency="INR",
+        interval="month",
+        limits=limits,
+        is_active=is_active,
+        sort_order=sort_order,
+    )
+    db.add(plan)
+    db.flush()
+    if price_cents > 0 and provider.name != "null":
+        plan.provider_plan_id = provider.create_plan(plan)
+    db.flush()
+    out = _plan_admin_out(db, plan, _now())
+    _audit(db, admin, "plan.create", target_label=f"plan:{code}", code=code, kind=plan_kind.value, price_cents=price_cents)
+    return out
+
+
+def delete_plan(db: Session, admin: User, code: str) -> dict:
+    billing_service.seed_plans(db)
+    if code == FREE_PLAN:
+        raise AppError("CANNOT_DELETE_FREE", "The Free plan can't be deleted.", 422)
+    plan = db.scalar(select(Plan).where(Plan.code == code))
+    if plan is None:
+        raise AppError("PLAN_NOT_FOUND", "That plan doesn't exist.", 404)
+    in_use = db.scalar(select(func.count()).select_from(Subscription).where(Subscription.plan_id == plan.id))
+    if in_use:
+        raise AppError(
+            "PLAN_IN_USE",
+            "This plan has subscription history. Hide it instead of deleting.",
+            409,
+        )
+    db.delete(plan)
+    db.flush()
+    _audit(db, admin, "plan.delete", target_label=f"plan:{code}", code=code)
+    return {"deleted": code}
+
+
+def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, *, name: str, price_cents: int,
+                applications_per_month: int, mock_interviews_per_month: int, is_active: bool, sort_order: int,
+                seats: int | None = None) -> dict:
+    billing_service.seed_plans(db)
+    plan = db.scalar(select(Plan).where(Plan.code == code))
+    if plan is None:
+        raise AppError("PLAN_NOT_FOUND", "That plan doesn't exist.", 404)
+    _validate_plan_pricing(code, price_cents, is_active=is_active)
 
     before = _plan_admin_out(db, plan, _now())
     price_changed = price_cents != plan.price_cents
     plan.name, plan.price_cents, plan.is_active, plan.sort_order = name.strip(), price_cents, is_active, sort_order
-    next_limits = {"applications_per_month": applications_per_month, "resumes": resumes}
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
+    next_limits = {
+        "applications_per_month": applications_per_month,
+        "mock_interviews_per_month": mock_interviews_per_month,
+        "resumes": RESUMES_UNLIMITED,
+    }
     if _plan_kind(plan) == PlanKind.INSTITUTE.value:
         existing = (plan.limits or {}).get("seats") or PLAN_LIMITS.get(code, {}).get("seats") or 1
         next_limits["seats"] = int(seats if seats is not None else existing)

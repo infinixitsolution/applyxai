@@ -56,7 +56,7 @@ describe("AutomationPage", () => {
     renderPage();
     expect(await screen.findByText("Add your phone number.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start run" })).toBeDisabled();
-    expect(screen.getByText(/Connect the ApplyXAI desktop agent/)).toBeInTheDocument();
+    expect(screen.getByText(/Install the ApplyXAI desktop agent/)).toBeInTheDocument();
   });
 
   it("starts a practice run", async () => {
@@ -68,8 +68,11 @@ describe("AutomationPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("checkbox", { name: /Practice run/ }));
-    await user.click(screen.getByRole("button", { name: "Start run" }));
-    expect(body).toEqual({ dry_run: true });
+    await user.click(screen.getAllByRole("button", { name: "Start run" })[0]!);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("radio", { name: /default resume only/i }));
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    expect(body).toEqual({ dry_run: true, resume_mode: "default" });
     expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/automation/start" && (i?.headers as Record<string, string>)["X-CSRF-Token"] !== undefined)).toBe(true);
   });
 
@@ -86,7 +89,7 @@ describe("AutomationPage", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    expect(await screen.findByText("Looking at Python Developer at Acme")).toBeInTheDocument();
+    expect((await screen.findAllByText("Looking at Python Developer at Acme")).length).toBeGreaterThan(0);
     const log = await screen.findByRole("list", { name: "Run activity" });
     expect(within(log).getByText(/Sign in to LinkedIn/)).toBeInTheDocument();
 
@@ -107,6 +110,7 @@ describe("AutomationPage", () => {
     renderPage();
     const [headerButton] = await screen.findAllByRole("button", { name: /Connect a computer/ });
     await user.click(headerButton);
+    await user.click(await screen.findByRole("button", { name: /Show developer pairing/ }));
     expect(await screen.findByTestId("pairing-code")).toHaveTextContent("ABCD-EFGH");
     expect(screen.getByText(`venv/bin/python -m agent pair --server ${window.location.origin} --code ABCD-EFGH`)).toBeInTheDocument();
     expect(screen.getByText("venv/bin/python -m agent run")).toBeInTheDocument();

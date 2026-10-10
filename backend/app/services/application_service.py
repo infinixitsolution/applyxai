@@ -27,7 +27,7 @@ SORTS = {
 DEFAULT_SORT = "-created_at"
 
 _JOB_FIELDS = ("title", "company", "location", "job_url", "description", "salary_min", "salary_max",
-               "employment_type", "work_setting", "experience_level")
+               "employment_type", "work_setting", "experience_level", "published_contacts")
 
 
 def _not_found(what: str) -> AppError:
@@ -123,7 +123,11 @@ def upsert_job(db: Session, *, external_id: str, platform: str = "linkedin", **f
         if job is not None:
             for name, value in fields.items():
                 if value not in (None, ""):          # never erase known details with blanks
-                    setattr(job, name, value)
+                    if name == "published_contacts":
+                        from automation.company_contacts import merge_contacts
+                        job.published_contacts = merge_contacts(job.published_contacts or [], value)
+                    else:
+                        setattr(job, name, value)
             return job
         try:
             with db.begin_nested():

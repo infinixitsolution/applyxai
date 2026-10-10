@@ -28,9 +28,11 @@ type ResumeManagerProps = {
   /** First-time setup: require upload, run intake, hide skip elsewhere. */
   onboarding?: boolean;
   onIntakeDone?: () => void;
+  /** App resumes page: library card layout (hero/stats live in ResumesDashboard). */
+  dashboardShell?: boolean;
 };
 
-export function ResumeManager({ onboarding = false, onIntakeDone }: ResumeManagerProps = {}) {
+export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell = false }: ResumeManagerProps = {}) {
   const client = useQueryClient();
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
@@ -192,43 +194,55 @@ export function ResumeManager({ onboarding = false, onIntakeDone }: ResumeManage
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
   const atLimit = data.resumes.length >= data.limit;
 
+  const templateSection = templates.length > 0 && (
+    <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Resume style</h2>
+          <p className="text-xs text-slate-600">
+            Choose a layout for tailored exports and styled copies. Your default is saved to your profile.
+          </p>
+        </div>
+        {saveTemplatePreference.isPending && <span className="text-xs text-slate-500">Saving…</span>}
+      </div>
+      <ResumeTemplatePicker
+        templates={templates}
+        value={templateId}
+        onUse={onTemplateChange}
+        disabled={saveTemplatePreference.isPending || !profile}
+        displayName={[profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || undefined}
+      />
+    </section>
+  );
+
   return (
     <div className="space-y-4">
-      {templates.length > 0 && (
-        <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5">
-          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Resume style</h2>
-              <p className="text-xs text-slate-600">
-                Choose a layout for tailored exports and styled copies. Your default is saved to your profile.
-              </p>
-            </div>
-            {saveTemplatePreference.isPending && <span className="text-xs text-slate-500">Saving…</span>}
-          </div>
-          <ResumeTemplatePicker
-            templates={templates}
-            value={templateId}
-            onUse={onTemplateChange}
-            disabled={saveTemplatePreference.isPending || !profile}
-            displayName={[profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || undefined}
-          />
-        </section>
-      )}
+      {templateSection}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-600">
-          {data.resumes.length} of {data.limit} resume{data.limit === 1 ? "" : "s"} used · PDF or DOCX, up to 5 MB · scanned PDFs use OCR
-        </p>
-        <input ref={input} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-               className="hidden" onChange={onFile} aria-label="Choose resume file" />
-        <Button
-          onClick={() => input.current?.click()}
-          loading={upload.isPending || intake.isPending}
-          disabled={atLimit}
-        >
-          <Upload className="h-4 w-4" aria-hidden /> Upload resume
-        </Button>
-      </div>
+      <section className={dashboardShell ? "rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5" : undefined}>
+        {dashboardShell && (
+          <header className="mb-4">
+            <h2 className="text-base font-semibold text-slate-900">Resume library</h2>
+            <p className="mt-0.5 text-sm text-slate-500">PDF or DOCX, up to 5 MB · scanned PDFs use OCR</p>
+          </header>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {!dashboardShell && (
+            <p className="text-sm text-slate-600">
+              {data.resumes.length} of {data.limit} resume{data.limit === 1 ? "" : "s"} used · PDF or DOCX, up to 5 MB · scanned PDFs use OCR
+            </p>
+          )}
+          <input ref={input} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                 className="hidden" onChange={onFile} aria-label="Choose resume file" />
+          <Button
+            onClick={() => input.current?.click()}
+            loading={upload.isPending || intake.isPending}
+            disabled={atLimit}
+            className={dashboardShell ? "w-full sm:ml-auto sm:w-auto" : undefined}
+          >
+            <Upload className="h-4 w-4" aria-hidden /> Upload resume
+          </Button>
+        </div>
       {atLimit && (
         <Alert kind="info">You've reached your plan's resume limit. Delete one, or <Link to="/app/billing" className="font-medium underline">upgrade your plan</Link>.</Alert>
       )}
@@ -246,6 +260,65 @@ export function ResumeManager({ onboarding = false, onIntakeDone }: ResumeManage
             ? "Choose a PDF or DOCX file to continue setup."
             : "Upload the resume you want the automation to attach to applications."}
         </EmptyState>
+      ) : dashboardShell ? (
+        <ul className="mt-4 grid gap-4">
+          {data.resumes.map((r) => (
+            <li
+              key={r.id}
+              className={`rounded-xl p-4 ring-1 ${r.is_default ? "bg-brand-50/40 ring-brand-200" : "bg-slate-50/50 ring-slate-200/80"}`}
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex min-w-0 gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200/80">
+                    <FileText className="h-5 w-5 text-slate-500" aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
+                      <span className="truncate">{r.name}</span>
+                      {r.is_default && <Badge tone="brand">Default</Badge>}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {r.filename} · {r.file_type.toUpperCase()} · {formatBytes(r.file_size)} · {formatDate(r.created_at)}
+                    </p>
+                    {typeof r.ai_metadata?.template_name === "string" && (
+                      <p className="mt-1 text-xs text-slate-600">Style: {String(r.ai_metadata.template_name)}</p>
+                    )}
+                    {r.master_skills && r.master_skills.length > 0 && (
+                      <p className="mt-1 line-clamp-2 text-xs text-slate-600">
+                        Master skills: {r.master_skills.slice(0, 10).join(", ")}
+                        {r.master_skills.length > 10 ? "…" : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1 lg:max-w-md lg:justify-end">
+                  <Button variant="secondary" size="sm" loading={analyze.isPending && analyze.variables === r.id}
+                          onClick={() => analyze.mutate(r.id)}>Analyze skills</Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setStyling(r); }}>
+                    <Palette className="h-4 w-4" aria-hidden /> Style
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setTailoring(r); setPreview(null); setJd(""); setLinkApplicationId(""); }}>
+                    Tailor
+                  </Button>
+                  {!r.is_default && (
+                    <Button variant="ghost" size="sm" onClick={() => makeDefault.mutate(r.id)}>
+                      <Star className="h-4 w-4" aria-hidden /> Default
+                    </Button>
+                  )}
+                  <a href={resumesApi.downloadUrl(r.id)} className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50">
+                    <Download className="h-4 w-4" aria-hidden /> Download
+                  </a>
+                  <Button variant="ghost" size="sm" aria-label={`Rename ${r.name}`} onClick={() => { setRenaming(r); setNewName(r.name); }}>
+                    <Pencil className="h-4 w-4" aria-hidden />
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-label={`Delete ${r.name}`} onClick={() => setDeleting(r)}>
+                    <Trash2 className="h-4 w-4 text-red-600" aria-hidden />
+                  </Button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
           {data.resumes.map((r) => (
@@ -297,6 +370,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone }: ResumeManage
           ))}
         </ul>
       )}
+      </section>
 
       <Modal open={!!renaming} onClose={() => setRenaming(null)} title="Rename resume" footer={
         <>

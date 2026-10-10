@@ -1,8 +1,28 @@
 import Markdown from "react-markdown";
 import type { ReactNode } from "react";
 import { Alert } from "../components/ui";
-import { usePublicSite } from "../lib/usePublicSite";
 import { APP_NAME, CONTACT_EMAIL } from "../lib/config";
+import { looksLikeHtml, sanitizeLegalHtml } from "../lib/htmlContent";
+import { usePublicSite } from "../lib/usePublicSite";
+
+const LEGAL_BODY =
+  "space-y-4 text-sm leading-6 text-slate-700 [&_a]:text-brand-700 [&_h2]:mt-8 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-slate-900 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6";
+
+function LegalBody({ content }: { content: string }) {
+  if (looksLikeHtml(content)) {
+    return (
+      <div
+        className={LEGAL_BODY}
+        dangerouslySetInnerHTML={{ __html: sanitizeLegalHtml(content) }}
+      />
+    );
+  }
+  return (
+    <div className={LEGAL_BODY}>
+      <Markdown>{content}</Markdown>
+    </div>
+  );
+}
 
 function LegalPage({ title, markdown, fallback }: { title: string; markdown?: string; fallback: ReactNode }) {
   return (
@@ -11,8 +31,8 @@ function LegalPage({ title, markdown, fallback }: { title: string; markdown?: st
       <div className="mt-6">
         <Alert kind="info">Template text. Have it reviewed by a qualified lawyer for your jurisdiction before launch.</Alert>
       </div>
-      <div className="mt-8 space-y-4 text-sm leading-6 text-slate-700 [&_h2]:mt-8 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-slate-900 [&_ul]:list-disc [&_ul]:pl-6">
-        {markdown ? <Markdown>{markdown}</Markdown> : fallback}
+      <div className="mt-8">
+        {markdown?.trim() ? <LegalBody content={markdown} /> : fallback}
       </div>
     </article>
   );

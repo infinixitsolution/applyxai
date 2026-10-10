@@ -152,6 +152,17 @@ current_ctc_lakhs = str(round(current_ctc / 100000, 2))
 current_ctc_monthly = str(round(current_ctc/12, 2))
 current_ctc = str(current_ctc)
 
+
+def append_salary_currency(label: str, answer: str) -> str:
+    cur = (currency or "").strip()
+    if not cur or not answer:
+        return answer
+    if cur.upper() in answer.upper():
+        return answer
+    if label_has(label, "month", "months", "monthly", "lakh", "lakhs"):
+        return answer
+    return f"{answer} {cur}".strip()
+
 notice_period_months = str(notice_period//30)
 notice_period_weeks = str(notice_period//7)
 notice_period = str(notice_period)
@@ -1252,6 +1263,7 @@ def answer_questions(
                             answer = desired_salary_lakhs
                         else:
                             answer = desired_salary
+                    answer = append_salary_currency(label, answer)
                 elif label_has(label, 'linkedin'): answer = linkedIn
                 elif label_has(label, 'website', 'blog', 'portfolio', 'link', 'links'): answer = website
                 elif label_has(label, 'scale of 1-10'): answer = confidence_level
@@ -1470,13 +1482,36 @@ def follow_company(modal: WebDriver = driver) -> None:
 
 
 #< Failed attempts logging
-def failed_job(job_id: str, job_link: str, resume: str, date_listed, error: str, exception: Exception, application_link: str, screenshot_name: str) -> None:
+def _published_job_contacts(description: str, hr_name: str, hr_link: str) -> list:
+    '''Name, email, or phone the posting shows. The applicant is never included.'''
+    from automation.company_contacts import extract_published_contacts
+    chunks = []
+    if description and description != "Unknown":
+        chunks.append(description)
+    try:
+        about = find_by_class(driver, "jobs-company__box", 1).text
+        if about:
+            chunks.append(about)
+    except Exception:
+        pass
+    return extract_published_contacts(
+        "\n".join(chunks),
+        name="" if not hr_name or hr_name == "Unknown" else hr_name,
+        link="" if not hr_link or hr_link == "Unknown" else hr_link,
+    )
+
+
+def failed_job(job_id: str, job_link: str, resume: str, date_listed, error: str, exception: Exception, application_link: str, screenshot_name: str, description: str = "", contacts: list | None = None) -> None:
     '''
     Function to update failed jobs list in excel
     '''
-    run_hooks.emit("skipped" if application_link == "Skipped" else "failed",
-                   job_id=job_id, job_link=job_link, date_listed=date_listed, reason=error,
+    payload = dict(job_id=job_id, job_link=job_link, date_listed=date_listed, reason=error,
                    detail=str(exception)[:1000], application_link=application_link)
+    if description and description != "Unknown":
+        payload["description"] = description
+    if contacts:
+        payload["contacts"] = contacts
+    run_hooks.emit("skipped" if application_link == "Skipped" else "failed", **payload)
     try:
         with open(failed_file_name, 'a', newline='', encoding='utf-8') as file:
             fieldnames = ['Job ID', 'Job Link', 'Resume Tried', 'Date listed', 'Date Tried', 'Assumed Reason', 'Stack Trace', 'External Job link', 'Screenshot Name']
@@ -1513,7 +1548,7 @@ def screenshot(driver: WebDriver, job_id: str, failedAt: str) -> str:
 def submitted_jobs(job_id: str, title: str, company: str, work_location: str, work_style: str, description: str, experience_required: int | Literal['Unknown', 'Error in extraction'], 
                    skills: list[str] | Literal['In Development'], hr_name: str | Literal['Unknown'], hr_link: str | Literal['Unknown'], resume: str, 
                    reposted: bool, date_listed: datetime | Literal['Unknown'], date_applied:  datetime | Literal['Pending'], job_link: str, application_link: str, 
-                   questions_list: set | None, connect_request: Literal['In Development'], resume_id: str | None = None) -> None:
+                   questions_list: set | None, connect_request: Literal['In Development'], resume_id: str | None = None, contacts: list | None = None) -> None:
     '''
     Function to create or update the Applied jobs CSV file, once the application is submitted successfully
     '''
@@ -1525,6 +1560,12 @@ def submitted_jobs(job_id: str, title: str, company: str, work_location: str, wo
     )
     if resume_id:
         applied_payload["resume_id"] = resume_id
+    if hr_name and hr_name != "Unknown":
+        applied_payload["hr_name"] = hr_name
+    if hr_link and hr_link != "Unknown":
+        applied_payload["hr_link"] = hr_link
+    if contacts:
+        applied_payload["contacts"] = contacts
     run_hooks.emit("applied" if application_link == "Easy Applied" else "external", **applied_payload)
     try:
         with open(file_name, mode='a', newline='', encoding='utf-8') as csv_file:
@@ -1647,8 +1688,9 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     job_link = "https://www.linkedin.com/jobs/view/"+job_id
                     application_link = "Easy Applied"
                     date_applied = "Pending"
-                    hr_link = "Unknown"
-                    hr_name = "Unknown"
+    hr_link = "Unknown"
+    hr_name = "Unknown"
+    published_contacts = []
                     connect_request = "In Development" # Still in development
                     date_listed = "Unknown"
                     skills = "Needs an AI" # Still in development
@@ -1711,9 +1753,11 @@ def apply_to_jobs(search_terms: list[str]) -> None:
 
 
                     description, experience_required, skip, reason, message = get_job_description()
+                    published_contacts = _published_job_contacts(description, hr_name, hr_link)
                     if skip:
                         print_lg(message)
-                        failed_job(job_id, job_link, resume, date_listed, reason, message, "Skipped", screenshot_name)
+                        failed_job(job_id, job_link, resume, date_listed, reason, message, "Skipped", screenshot_name,
+                                   description=description, contacts=published_contacts)
                         rejected_jobs.add(job_id)
                         skip_count += 1
                         continue
@@ -1919,7 +1963,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             return
                         if skip: continue
 
-                    submitted_jobs(job_id, title, company, work_location, work_style, description, experience_required, skills, hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link, questions_list, connect_request, resume_id=applied_resume_id if uploaded else None)
+                    submitted_jobs(job_id, title, company, work_location, work_style, description, experience_required, skills, hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link, questions_list, connect_request, resume_id=applied_resume_id if uploaded else None, contacts=published_contacts)
 
                     print_lg(f'Successfully saved "{title} | {company}" job. Job ID: {job_id} info')
                     current_count += 1

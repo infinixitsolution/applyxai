@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RequireAdmin } from "../../auth/session";
 import { ToastProvider } from "../../components/Toast";
 import type { AdminInstituteDetail, AdminPartnerDetail, AdminPlan, AdminPlatformSettings, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
-import { AdminRunsPage } from "./Lists";
+import { AdminCompanyPage } from "./Company";
+import { AdminCompaniesPage, AdminRunsPage } from "./Lists";
 import { AdminInstitutePage, AdminInstitutesPage, AdminPartnerPage, AdminPartnersPage } from "./Orgs";
 import { AdminPlansPage } from "./Plans";
 import { AdminSystemPage } from "./System";
@@ -33,8 +34,14 @@ const detail = (over: Partial<AdminUserDetail> = {}): AdminUserDetail => ({
   applications_by_status: noStatuses, resumes: 1, ...over,
 });
 const plans = [
-  { code: "free", name: "Free", price_cents: 0, currency: "INR", interval: "month", limits: { applications_per_month: 10, resumes: 1 } },
-  { code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month", limits: { applications_per_month: 100, resumes: 3 } },
+  {
+    code: "free", name: "Free", price_cents: 0, currency: "INR", interval: "month",
+    limits: { applications_per_month: 10, resumes: 999_999, mock_interviews_per_month: 3 },
+  },
+  {
+    code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month",
+    limits: { applications_per_month: 100, resumes: 999_999, mock_interviews_per_month: 10 },
+  },
 ];
 
 const adminSettings: AdminPlatformSettings = {
@@ -92,7 +99,7 @@ const adminSettings: AdminPlatformSettings = {
   ai: {
     enabled: false, provider: "openai", base_url: "https://api.openai.com/v1", api_key_configured: false,
     models: { fast: "gpt-4o-mini", strong: "gpt-4o", embedding: "text-embedding-3-small" },
-    features: { applications: true, resume: true }, ready: false,
+    features: { applications: true, resume: true, mock_interview: true }, ready: false,
   },
   payments: {
     provider: "null", key_id: "", key_secret_configured: false, webhook_secret_configured: false,
@@ -212,8 +219,8 @@ describe("admin area", () => {
     renderAt("/admin/plans", <Route path="/admin/plans" element={<AdminPlansPage />} />);
     expect(await screen.findByRole("heading", { name: "Candidate plans" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Training institute plans" })).toBeInTheDocument();
-    const card = (await screen.findByText("Starter")).closest("article")!;
-    await userEvent.click(within(card).getByRole("button", { name: "Edit" }));
+    const row = (await screen.findByText("Starter")).closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("individual candidates");
     const price = within(dialog).getByLabelText(/Price per month/);
@@ -223,35 +230,35 @@ describe("admin area", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await vi.waitFor(() => expect(calls.some((c) => c.key === "PUT /api/admin/plans/starter")).toBe(true));
     expect(calls.find((c) => c.key === "PUT /api/admin/plans/starter")?.body).toEqual({
-      name: "Starter", price_cents: 59900, applications_per_month: 100, resumes: 3, is_active: true, sort_order: 1,
+      name: "Starter", price_cents: 59900, applications_per_month: 100, mock_interviews_per_month: 10,
+      is_active: true, sort_order: 1,
     });
   });
 
   it("lists campus plans under training institutes and can edit seats", async () => {
     const adminPlans: AdminPlan[] = [
       { code: "free", name: "Free", kind: "personal", price_cents: 0, currency: "INR", interval: "month",
-        limits: { applications_per_month: 10, resumes: 1 }, is_active: true, sort_order: 0, provider_plan_id: "", subscribers: 0 },
+        limits: { applications_per_month: 10, resumes: 999_999, mock_interviews_per_month: 3 },
+        is_active: true, sort_order: 0, provider_plan_id: "", subscribers: 0 },
       { code: "campus", name: "Campus", kind: "institute", price_cents: 49900, currency: "INR", interval: "month",
-        limits: { applications_per_month: 100, resumes: 3, seats: 10 }, is_active: true, sort_order: 4, provider_plan_id: "", subscribers: 0 },
+        limits: { applications_per_month: 100, resumes: 999_999, mock_interviews_per_month: 3, seats: 10 },
+        is_active: true, sort_order: 4, provider_plan_id: "", subscribers: 0 },
     ];
     const calls = mockApi({
       "GET /api/admin/plans": { plans: adminPlans },
       "PUT /api/admin/plans/campus": (init?: RequestInit) => ({ ...adminPlans[1], ...JSON.parse(String(init?.body)) }),
     });
     renderAt("/admin/plans", <Route path="/admin/plans" element={<AdminPlansPage />} />);
-    const card = (await screen.findByText("Campus")).closest("article")!;
-    expect(card).toHaveTextContent("10");
-    expect(card).toHaveTextContent("minimum students");
-    expect(card).toHaveTextContent("Amount =");
-    expect(card).toHaveTextContent("4,990");
-    expect(card).toHaveTextContent("Per student");
-    expect(card).toHaveTextContent("1,000 applications / month");
-    expect(card).toHaveTextContent("30 resumes");
-    await userEvent.click(within(card).getByRole("button", { name: "Edit" }));
+    const row = (await screen.findByText("Campus")).closest("tr")!;
+    expect(row).toHaveTextContent("10");
+    expect(row).toHaveTextContent("4,990");
+    expect(row).toHaveTextContent("1,000 apps");
+    expect(row).toHaveTextContent("30 mock interviews");
+    await userEvent.click(within(row).getByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("per student");
     expect(dialog).toHaveTextContent("Amount =");
-    expect(dialog).toHaveTextContent("Package: 1,000 applications / month and 30 resumes");
+    expect(dialog).toHaveTextContent("Package: 1,000 applications / month and 30 mock interviews / month");
     const seats = within(dialog).getByLabelText("Minimum students");
     await userEvent.clear(seats);
     await userEvent.type(seats, "25");
@@ -307,6 +314,43 @@ describe("admin area", () => {
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Stop run" }));
     expect(await screen.findByText("Stopped by ApplyXAI support")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+
+  it("lists companies users searched and companies searches returned", async () => {
+    mockApi({
+      "GET /api/admin/companies": {
+        items: [{
+          company: "Acme", users: 2, user_emails: ["alice@example.com", "bob@example.com"],
+          jobs: 4, applied: 1, search_filters: 1, last_seen: "2026-10-10T08:00:00+00:00",
+        }],
+        total: 1, page: 1, page_size: 25,
+      },
+    });
+    renderAt("/admin/companies", <Route path="/admin/companies" element={<AdminCompaniesPage />} />);
+    expect(await screen.findByRole("heading", { name: "Companies" })).toBeInTheDocument();
+    expect(await screen.findByText("Acme")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View" })).toHaveAttribute("href", "/admin/companies/Acme");
+    expect(screen.getByText("alice@example.com, bob@example.com")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+  });
+
+  it("opens a company dashboard with jobs and a contact directory", async () => {
+    mockApi({
+      "GET /api/admin/companies/detail": {
+        company: "Acme", users: 1, jobs: 2, applied: 3, search_filters: 1, locations: ["India"],
+        last_seen: "2026-10-10T08:00:00+00:00",
+        job_list: [{ id: "j1", title: "Backend Engineer", location: "India", job_url: "https://www.linkedin.com/jobs/view/1", applied: 3, other: 1, users: 1, last_seen: "2026-10-10T08:00:00+00:00" }],
+        contacts: [{ name: "Priya Shah", email: "hiring@acme.com", phone: "+91 98450 11223", role: "Recruiter", link: "", jobs: [{ title: "Backend Engineer", job_url: "" }] }],
+      },
+    });
+    renderAt("/admin/companies/Acme", <Route path="/admin/companies/:company" element={<AdminCompanyPage />} />);
+    expect(await screen.findByRole("heading", { name: "Acme" })).toBeInTheDocument();
+    expect(screen.getByText("Company overview")).toBeInTheDocument();
+    expect(screen.getAllByText("Backend Engineer").length).toBeGreaterThan(0);
+    expect(screen.getByText("Priya Shah")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "hiring@acme.com" })).toHaveAttribute("href", "mailto:hiring@acme.com");
+    expect(screen.getByText("+91 98450 11223")).toBeInTheDocument();
+    expect(screen.getAllByText("Contact directory").length).toBeGreaterThan(0);
   });
 
   it("creates an institute from the list page", async () => {

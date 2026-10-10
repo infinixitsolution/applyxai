@@ -32,6 +32,17 @@ def read_all(user: User = Depends(get_current_user), db: Session = Depends(get_d
     return ok({"marked": notification_service.mark_all_read(db, user.id)})
 
 
+@router.get("/preferences", summary="Your email notification preferences")
+def get_preferences(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ok(preferences_service.get_notification_preferences(db, user))
+
+
+@router.patch("/preferences", summary="Update which events may email you")
+def patch_preferences(body: NotificationPreferencesIn, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    return ok(preferences_service.update_notification_preferences(db, user, body))
+
+
 @router.post("/{notification_id}/read", summary="Mark one notification as read")
 def read_one(notification_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ok(_out(notification_service.mark_read(db, user.id, notification_id)))

@@ -3,8 +3,8 @@
 from backend.app.models.base import Base
 from backend.app.models.enums import (
     OPEN_ASSIGNMENT_STATUSES, ApplicationStatus, AssignmentStatus, AutomationStatus, CommissionStatus,
-    InstituteMemberRole, InstituteStatus, KycStatus, PartnerCommissionMode, PartnerStatus, PayoutStatus, PlanKind,
-    SeatStatus,
+    InstituteMemberRole, InstituteStatus, InterviewType, KycStatus, MockInterviewMessageRole,
+    MockInterviewSessionStatus, PartnerCommissionMode, PartnerStatus, PayoutStatus, PlanKind, SeatStatus,
     SubscriptionStatus, TokenPurpose,
 )
 from backend.app.models.user import User, UserProfile
@@ -24,13 +24,15 @@ from backend.app.models.admin import AdminAction
 from backend.app.models.platform_settings import PlatformSettings
 from backend.app.models.partner import Partner, PartnerAttribution, PartnerCampaign, PartnerCommission, PartnerPayout
 from backend.app.models.institute import Institute, InstituteAssignment, InstituteInvite, InstituteMember, InstituteSeat
+from backend.app.models.mock_interview import MockInterviewMessage, MockInterviewSession
+from backend.app.models.mock_interview_feedback_job import MockInterviewFeedbackJob
 
 __all__ = [
     "Base",
     "OPEN_ASSIGNMENT_STATUSES",
     "ApplicationStatus", "AssignmentStatus", "AutomationStatus", "CommissionStatus", "InstituteMemberRole",
     "InstituteStatus", "KycStatus", "PartnerCommissionMode", "PartnerStatus", "PayoutStatus", "PlanKind", "SeatStatus",
-    "SubscriptionStatus", "TokenPurpose",
+    "SubscriptionStatus", "TokenPurpose", "InterviewType", "MockInterviewMessageRole", "MockInterviewSessionStatus",
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
     "AgentConnectSession",
     "AutomationJob",
@@ -38,4 +40,5 @@ __all__ = [
     "AdminAction", "PlatformSettings",
     "Partner", "PartnerAttribution", "PartnerCampaign", "PartnerCommission", "PartnerPayout",
     "Institute", "InstituteAssignment", "InstituteInvite", "InstituteMember", "InstituteSeat",
+    "MockInterviewSession", "MockInterviewMessage", "MockInterviewFeedbackJob",
 ]

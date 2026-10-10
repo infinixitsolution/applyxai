@@ -5,18 +5,27 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-# Brand palette (aligned with web app)
-BG = "#f1f5f9"
+# Brand palette (aligned with web app + dashboard mock)
+BG = "#f4f7fb"
+PAGE = "#f8fafc"
 SURFACE = "#ffffff"
 BORDER = "#e2e8f0"
 TEXT = "#0f172a"
 MUTED = "#64748b"
+TEXT_SOFT = "#475569"
 BRAND = "#2563eb"
 BRAND_HOVER = "#1d4ed8"
 BRAND_LIGHT = "#dbeafe"
+BRAND_SOFT = "#eff6ff"
+SIDEBAR = "#ffffff"
 SUCCESS = "#16a34a"
+SUCCESS_BG = "#dcfce7"
+SUCCESS_FG = "#15803d"
 DANGER = "#dc2626"
+DANGER_SOFT = "#fef2f2"
 WARN = "#d97706"
+LOG_BG = "#f0f9ff"
+SHADOW = "#cbd5e1"
 
 FONT = "Segoe UI"
 MONO = "Consolas"
@@ -32,13 +41,15 @@ def setup(root: tk.Tk) -> ttk.Style:
 
     style.configure(".", background=BG, foreground=TEXT, font=(FONT, 10))
     style.configure("TFrame", background=BG)
+    style.configure("Page.TFrame", background=PAGE)
     style.configure("Card.TFrame", background=SURFACE)
     style.configure("TLabel", background=BG, foreground=TEXT, font=(FONT, 10))
     style.configure("Card.TLabel", background=SURFACE, foreground=TEXT, font=(FONT, 10))
     style.configure("Muted.TLabel", background=BG, foreground=MUTED, font=(FONT, 9))
     style.configure("CardMuted.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 9))
-    style.configure("Title.TLabel", background=SURFACE, foreground=TEXT, font=(FONT, 18, "bold"))
-    style.configure("Version.TLabel", background=SURFACE, foreground=MUTED, font=(FONT, 9))
+    style.configure("Title.TLabel", background=PAGE, foreground=TEXT, font=(FONT, 20, "bold"))
+    style.configure("Subtitle.TLabel", background=PAGE, foreground=MUTED, font=(FONT, 10))
+    style.configure("Version.TLabel", background=PAGE, foreground=MUTED, font=(FONT, 9))
     style.configure("Hero.TLabel", background=BRAND_LIGHT, foreground=TEXT, font=(FONT, 10))
 
     style.configure(
@@ -57,11 +68,7 @@ def setup(root: tk.Tk) -> ttk.Style:
     style.configure("Card.TLabelframe", background=SURFACE)
     style.configure("Card.TLabelframe.Label", background=SURFACE, font=(FONT, 10, "bold"))
 
-    style.configure(
-        "TButton",
-        padding=(14, 8),
-        font=(FONT, 10, "bold"),
-    )
+    style.configure("TButton", padding=(14, 8), font=(FONT, 10, "bold"))
     style.configure("Primary.TButton", background=BRAND, foreground="#ffffff")
     style.map(
         "Primary.TButton",
@@ -71,7 +78,7 @@ def setup(root: tk.Tk) -> ttk.Style:
     style.configure("Secondary.TButton", background=SURFACE, foreground=TEXT)
     style.map("Secondary.TButton", background=[("active", BORDER)])
 
-    style.configure("Danger.TButton", background="#fef2f2", foreground=DANGER)
+    style.configure("Danger.TButton", background=DANGER_SOFT, foreground=DANGER)
     style.map("Danger.TButton", background=[("active", "#fee2e2")])
 
     style.configure("TEntry", padding=8, fieldbackground=SURFACE)

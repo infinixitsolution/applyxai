@@ -3,23 +3,30 @@ import { Bell } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatRelative } from "../lib/format";
+import { notificationLink } from "../lib/notificationLink";
+import { formatNotificationType } from "../lib/notificationLabel";
 import { notifications } from "../services/endpoints";
 import { cx } from "./ui";
 
-/** Backend links are in-app paths such as "/automation"; app pages live under /app. */
+/** @deprecated Use notificationLink from ../lib/notificationLink */
 export function appLink(link: string): string {
-  if (!link || !link.startsWith("/") || link.startsWith("//")) return "/app/notifications";
-  return link.startsWith("/app") ? link : `/app${link}`;
+  return notificationLink(link);
 }
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const client = useQueryClient();
+  const { data: prefs } = useQuery({
+    queryKey: ["notifications", "preferences"],
+    queryFn: notifications.preferences,
+    staleTime: 5 * 60_000,
+  });
   const { data } = useQuery({
     queryKey: ["notifications", "bell"],
     queryFn: () => notifications.list({ page_size: 6 }),
-    refetchInterval: 60_000,
+    refetchInterval: open ? 15_000 : 60_000,
+    refetchOnWindowFocus: true,
   });
   const readAll = useMutation({
     mutationFn: notifications.readAll,
@@ -39,7 +46,9 @@ export function NotificationBell() {
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [open]);
 
+  const typeLabel = (type: string) => prefs?.types[type]?.label ?? formatNotificationType(type);
   const unread = data?.unread_count ?? 0;
+
   return (
     <div className="relative" ref={ref}>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -63,16 +72,23 @@ export function NotificationBell() {
             )}
           </div>
           <ul className="max-h-96 divide-y divide-slate-100 overflow-y-auto">
-            {data?.items.length ? data.items.map((n) => (
-              <li key={n.id} className={cx("px-4 py-3 text-sm", !n.read_at && "bg-brand-50/50")}>
-                <Link to={appLink(n.link)} onClick={() => { if (!n.read_at) readOne.mutate(n.id); setOpen(false); }}
-                      className="block">
-                  <p className="font-medium text-slate-900">{n.title}</p>
-                  {n.body && <p className="mt-0.5 text-slate-600">{n.body}</p>}
-                  <p className="mt-1 text-xs text-slate-400">{formatRelative(n.created_at)}</p>
-                </Link>
-              </li>
-            )) : <li className="px-4 py-8 text-center text-sm text-slate-500">You're all caught up.</li>}
+            {data?.items.length ? data.items.map((n) => {
+              const href = n.link ? notificationLink(n.link) : "/app/notifications";
+              return (
+                <li key={n.id} className={cx("px-4 py-3 text-sm", !n.read_at && "bg-brand-50/50")}>
+                  <Link
+                    to={href}
+                    onClick={() => { if (!n.read_at) readOne.mutate(n.id); setOpen(false); }}
+                    className="block"
+                  >
+                    <p className="text-xs font-medium text-slate-500">{typeLabel(n.type)}</p>
+                    <p className="font-medium text-slate-900">{n.title}</p>
+                    {n.body && <p className="mt-0.5 text-slate-600">{n.body}</p>}
+                    <p className="mt-1 text-xs text-slate-400">{formatRelative(n.created_at)}</p>
+                  </Link>
+                </li>
+              );
+            }) : <li className="px-4 py-8 text-center text-sm text-slate-500">You're all caught up.</li>}
           </ul>
           <Link to="/app/notifications" onClick={() => setOpen(false)}
                 className="block border-t border-slate-100 px-4 py-2.5 text-center text-sm font-medium text-brand-600 hover:bg-slate-50">

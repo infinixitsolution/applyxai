@@ -29,15 +29,29 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resent, setResent] = useState(false);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+
+  const finishLogin = (user: import("../types").User) => {
+    const next = params.get("next") ?? consumeNext();
+    consumeNext();
+    setSession(user);
+    navigate(safeNext(next, homeFor(user)), { replace: true });
+  };
 
   const login = useMutation({
     mutationFn: () => auth.login(email, password),
-    onSuccess: (user) => {
-      const next = params.get("next") ?? consumeNext();
-      consumeNext();
-      setSession(user);
-      navigate(safeNext(next, homeFor(user)), { replace: true });
+    onSuccess: (result) => {
+      if (result.kind === "2fa") {
+        setChallengeToken(result.challengeToken);
+        return;
+      }
+      finishLogin(result.user);
     },
+  });
+  const login2fa = useMutation({
+    mutationFn: () => auth.loginTwoFactor(challengeToken!, totpCode),
+    onSuccess: (user) => finishLogin(user),
   });
   const resend = useMutation({ mutationFn: () => auth.resendVerification(email), onSuccess: () => setResent(true) });
   const notVerified = login.error instanceof ApiError && login.error.code === "EMAIL_NOT_VERIFIED";
@@ -45,7 +59,8 @@ export function LoginPage() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setResent(false);
-    login.mutate();
+    if (challengeToken) login2fa.mutate();
+    else login.mutate();
   };
 
   const registerTo = withNext("/register", params.get("next"));
@@ -57,12 +72,17 @@ export function LoginPage() {
       password={password}
       onPasswordChange={setPassword}
       onSubmit={submit}
-      loading={login.isPending}
+      loading={login.isPending || login2fa.isPending}
+      twoFactorStep={Boolean(challengeToken)}
+      totpCode={totpCode}
+      onTotpCodeChange={setTotpCode}
+      onBackFromTwoFactor={() => { setChallengeToken(null); setTotpCode(""); }}
+      twoFactorError={login2fa.error ? errorMessage(login2fa.error) : null}
       registerTo={registerTo}
       showResetSuccess={params.get("reset") === "1"}
       showVerifiedSuccess={params.get("verified") === "1"}
       showRegisteredSuccess={params.get("registered") === "1"}
-      errorMessage={login.error && !notVerified ? errorMessage(login.error) : null}
+      errorMessage={login.error && !notVerified && !challengeToken ? errorMessage(login.error) : null}
       notVerified={notVerified}
       resent={resent}
       onResendVerification={() => resend.mutate()}

@@ -1,8 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Alert, Button, Card, PageHeader } from "../../components/ui";
+import { useSearchParams } from "react-router-dom";
+import { Alert, Button, ButtonLink, Card, PageHeader } from "../../components/ui";
 import { errorMessage } from "../../services/api";
 import { automation } from "../../services/endpoints";
 
@@ -51,7 +51,7 @@ export function AgentConnectPage() {
               <CheckCircle2 className="h-5 w-5" aria-hidden /> Connected
             </p>
             <p className="text-sm text-slate-600">{detail}</p>
-            <ButtonLink to="/app/automation" />
+            <ButtonLink to="/app/automation">Open Automation</ButtonLink>
           </div>
         ) : (
           <div className="space-y-3">
@@ -66,13 +66,5 @@ export function AgentConnectPage() {
         )}
       </Card>
     </>
-  );
-}
-
-function ButtonLink({ to }: { to: string }) {
-  return (
-    <Link to={to} className="inline-flex text-sm font-medium text-brand-600 hover:underline">
-      Open Automation
-    </Link>
   );
 }

@@ -12,7 +12,7 @@ const CSRF_COOKIE = "applyxai_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // Endpoints where a 401 means "wrong credentials / no session", not "access token expired".
-const NO_REFRESH = ["/auth/login", "/auth/refresh", "/auth/register", "/auth/logout"];
+const NO_REFRESH = ["/auth/login", "/auth/login/2fa", "/auth/refresh", "/auth/register", "/auth/logout"];
 
 export interface FieldError {
   field: string;
@@ -128,12 +128,15 @@ export function refreshSession(): Promise<boolean> {
   return refreshing;
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function requestResponse(path: string, options: RequestOptions = {}): Promise<Response> {
   let response: Response;
   try {
     response = await send(path, options);
   } catch {
-    throw new ApiError("NETWORK_ERROR", "Can't reach ApplyXAI. Check your connection.", 0);
+    const message = import.meta.env.DEV
+      ? "Can't reach ApplyXAI. Start the API on port 8000 and open the app at http://localhost:5173 (npm run dev)."
+      : "Can't reach ApplyXAI. Check your connection.";
+    throw new ApiError("NETWORK_ERROR", message, 0);
   }
   if (response.status === 401 && !NO_REFRESH.some((p) => path.startsWith(p))) {
     if (await refreshSession()) {
@@ -143,6 +146,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       sessionExpiredHandler?.();
     }
   }
+  return response;
+}
+
+export async function requestFull<T>(path: string, options: RequestOptions = {}): Promise<{ status: number; data: T }> {
+  const response = await requestResponse(path, options);
+  const data = await parse<T>(response);
+  return { status: response.status, data };
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await requestResponse(path, options);
   return parse<T>(response);
 }
 

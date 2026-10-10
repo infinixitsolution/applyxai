@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Download, ExternalLink, FileText, MapPin } from "lucide-react";
+import { Building2, Download, ExternalLink, FileText, Mail, MapPin, Phone } from "lucide-react";
 import { Modal } from "../components/Modal";
 import { Alert, Badge, Button, Spinner } from "../components/ui";
 import { formatDateTime, safeExternalUrl, STATUS_LABELS, STATUS_TONES } from "../lib/format";
@@ -63,7 +63,7 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
     }>
       {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : (
         <div className="space-y-5">
-          <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+          <div className="rounded-xl bg-brand-50/40 p-4 ring-1 ring-slate-200/80">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-base font-semibold text-slate-900">{data.job.title}</p>
@@ -104,6 +104,34 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
               </div>
             )}
           </dl>
+
+          {(data.job.published_contacts?.length ?? 0) > 0 && (
+            <section>
+              <h3 className="mb-1 font-medium text-slate-900">Company contact on posting</h3>
+              <p className="mb-2 text-xs text-slate-500">
+                Details the employer published on LinkedIn — not your account information.
+              </p>
+              <ul className="space-y-2">
+                {data.job.published_contacts!.map((c, i) => (
+                  <li key={i} className="rounded-lg bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-200">
+                    {c.name && <p className="font-medium text-slate-900">{c.name}{c.role ? ` · ${c.role}` : ""}</p>}
+                    {c.email && (
+                      <p className="mt-1 flex items-center gap-1.5 text-slate-700">
+                        <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        <a href={`mailto:${c.email}`} className="text-brand-600 hover:underline">{c.email}</a>
+                      </p>
+                    )}
+                    {c.phone && (
+                      <p className="mt-0.5 flex items-center gap-1.5 text-slate-700">
+                        <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        {c.phone}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section>
             <h3 className="mb-2 font-medium text-slate-900">Resume added</h3>

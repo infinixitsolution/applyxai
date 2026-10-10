@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, utcnow
+from backend.app.models.base import Base, JSONType, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, utcnow
 
 
 class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -21,6 +21,8 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     location: Mapped[str] = mapped_column(String(255), default="")
     job_url: Mapped[str] = mapped_column(String(1024), default="")
     description: Mapped[str] = mapped_column(Text, default="")
+    # Name, email, or phone the posting itself published. Not the applicant.
+    published_contacts: Mapped[list] = mapped_column(JSONType, default=list)
     salary_min: Mapped[int | None] = mapped_column(Integer)
     salary_max: Mapped[int | None] = mapped_column(Integer)
     employment_type: Mapped[str] = mapped_column(String(32), default="")

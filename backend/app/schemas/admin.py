@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-from backend.app.models.enums import KycStatus, PartnerCommissionMode, PartnerStatus
+from backend.app.models.enums import KycStatus, PartnerCommissionMode, PartnerStatus, PlanKind
 from backend.app.schemas.auth import _check_password
 
 
@@ -144,11 +144,28 @@ class PartnerUpdateIn(BaseModel):
         return self
 
 
+class PlanCreateIn(BaseModel):
+    code: str = Field(min_length=2, max_length=32, pattern=r"^[a-z][a-z0-9_]*$")
+    name: str = Field(min_length=1, max_length=100)
+    kind: PlanKind = PlanKind.PERSONAL
+    price_cents: int = Field(ge=0, le=100_000_000)
+    applications_per_month: int = Field(ge=0, le=1_000_000)
+    mock_interviews_per_month: int = Field(ge=0, le=1_000_000)
+    seats: int | None = Field(default=None, ge=1, le=10_000)
+    is_active: bool = True
+    sort_order: int = Field(default=100, ge=0, le=1000)
+
+    @field_validator("code")
+    @classmethod
+    def _code(cls, value: str) -> str:
+        return value.strip().lower()
+
+
 class PlanUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     price_cents: int = Field(ge=0, le=100_000_000)
     applications_per_month: int = Field(ge=0, le=1_000_000)
-    resumes: int = Field(ge=0, le=100)
+    mock_interviews_per_month: int = Field(ge=0, le=1_000_000)
     seats: int | None = Field(default=None, ge=1, le=10_000)
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0, le=1000)

@@ -164,6 +164,16 @@ class EmailTemplatesIn(BaseModel):
 class AiFeaturesIn(BaseModel):
     applications: bool = True
     resume: bool = True
+    mock_interview: bool = True
+
+
+class MockInterviewPresenterIn(BaseModel):
+    mode: Literal["digital_human_3d", "static_photo", "live_stream"] = "digital_human_3d"
+    image_url: str = Field(default="/mock-interviewer-host.jpg", max_length=512)
+    glb_url: str = Field(default="/portrait", max_length=512)
+    live_stream_url: str = Field(default="", max_length=1024)
+    supports_barge_in: bool = True
+    supports_replay: bool = True
 
 
 class AiModelsIn(BaseModel):
@@ -173,7 +183,7 @@ class AiModelsIn(BaseModel):
 
 
 class PaymentsIn(BaseModel):
-    provider: Literal["null", "razorpay"] = "null"
+    provider: Literal["null", "razorpay", "stripe"] = "null"
     key_id: str = Field(default="", max_length=64)
     key_secret: str = ""  # empty = keep existing
     webhook_secret: str = ""  # empty = keep existing
@@ -186,6 +196,7 @@ class AiIn(BaseModel):
     api_key: str = ""  # empty = keep existing
     models: AiModelsIn = Field(default_factory=AiModelsIn)
     features: AiFeaturesIn = Field(default_factory=AiFeaturesIn)
+    mock_interview_presenter: MockInterviewPresenterIn | None = None
 
     @field_validator("base_url")
     @classmethod

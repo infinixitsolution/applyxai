@@ -5,7 +5,7 @@ Last updated: 2026-10-09. Use after deploy to verify production.
 ## Automated on deploy (`scripts/update_server.sh`)
 
 - Nginx site + security header snippet (robots/sitemap → API, HSTS on all responses)
-- Celery worker + beat (`applyxai-celery.service`)
+- Celery worker + beat (`applyxai-celery.service`) — beat must run for hourly mock interview `abandon-stale-mock-interviews`
 - Backend restart + Alembic migrations
 
 ## Manual verification

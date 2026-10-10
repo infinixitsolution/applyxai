@@ -1,14 +1,5 @@
 """
-Simple Windows GUI for ApplyXAI Agent.
-
-Uses tkinter (built into Python) to provide a user-friendly interface for:
-- Pairing with ApplyXAI server
-- Viewing connection status
-- Starting/stopping the agent
-- Viewing logs
-- Settings
-
-The GUI calls the existing agent CLI commands rather than duplicating logic.
+Windows GUI for ApplyXAI Agent — dashboard layout with sidebar navigation.
 """
 
 import os
@@ -33,100 +24,66 @@ from agent.gui_theme import (
     BG,
     BORDER,
     BRAND,
+    BRAND_HOVER,
     BRAND_LIGHT,
+    BRAND_SOFT,
     DANGER,
+    DANGER_SOFT,
+    LOG_BG,
     MUTED,
+    PAGE,
+    SIDEBAR,
     SUCCESS,
+    SUCCESS_BG,
+    SUCCESS_FG,
     SURFACE,
+    TEXT,
+    TEXT_SOFT,
     setup as setup_theme,
 )
 
-
-class _ButtonRow(tk.Frame):
-    """Lays buttons in a row and wraps them when the window gets narrow."""
-
-    def __init__(self, parent, bg=SURFACE):
-        super().__init__(parent, bg=bg, height=36)
-        self._items: list[tk.Widget] = []
-        self.bind("<Configure>", self._reflow)
-
-    def add(self, widget: tk.Widget) -> tk.Widget:
-        self._items.append(widget)
-        widget.place(x=0, y=0)
-        return widget
-
-    def _reflow(self, event):
-        width = event.width
-        if width < 40:
-            return
-        x = y = 0
-        row_h = 0
-        gap = 8
-        for widget in self._items:
-            widget.update_idletasks()
-            ww = max(widget.winfo_reqwidth(), 1)
-            hh = max(widget.winfo_reqheight(), 1)
-            if x and x + ww > width:
-                x = 0
-                y += row_h + gap
-                row_h = 0
-            widget.place(x=x, y=y)
-            x += ww + gap
-            row_h = max(row_h, hh)
-        self.configure(height=max(y + row_h, 36))
-
-# Try to import agent modules (works when running from source)
 try:
     from agent import config
     from agent.client import ApiClient, ApiError, NetworkError
     from agent import AGENT_VERSION
     AGENT_MODULES_AVAILABLE = True
 except ImportError:
-    # When packaged, we'll use subprocess to call the EXE
     AGENT_MODULES_AVAILABLE = False
-    AGENT_VERSION = "1.1.4"
+    AGENT_VERSION = "1.1.5"
 
 
 class AgentGUI:
     def __init__(self, root):
         self.root = root
         self.root.title(f"ApplyXAI Agent v{AGENT_VERSION}")
-        self.root.minsize(460, 560)
+        self.root.minsize(1024, 720)
         self.root.resizable(True, True)
         self._fit_window()
         setup_theme(self.root)
         self._mascot_img = None
+        self._sidebar_mascot = None
         self._apply_window_icon()
 
-        # Agent process
         self.agent_process = None
         self.agent_running = False
-
-        # Command queue for thread-safe UI updates
         self.command_queue = queue.Queue()
-
-        # Configuration
         self.home = self._get_home()
+        self._log_has_content = False
+        self._connect_preset = "live" if getattr(sys, "frozen", False) else "local"
+        self._nav_buttons: dict[str, tk.Frame] = {}
+        self._views: dict[str, tk.Frame] = {}
 
-        # Build UI
         self._build_ui()
-
-        # Start queue processor
         self._process_queue()
-
-        # Load initial status. LinkedIn fields stay empty — nothing is prefilled.
         self._refresh_status()
 
     def _get_home(self):
-        """Get the agent home directory."""
         if AGENT_MODULES_AVAILABLE:
             return str(config.default_home())
-        else:
-            # Fallback for packaged builds
-            localappdata = os.environ.get("LOCALAPPDATA", "")
-            if localappdata:
-                return str(Path(localappdata) / "ApplyXAI" / "agent")
-            return str(Path.home() / ".applyxai" / "agent")
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        if localappdata:
+            return str(Path(localappdata) / "ApplyXAI" / "agent")
+        return str(Path.home() / ".applyxai" / "agent")
 
     def _apply_window_icon(self) -> None:
         ico = branding_paths.window_icon_ico()
@@ -142,7 +99,7 @@ class AgentGUI:
             except tk.TclError:
                 pass
 
-    def _load_mascot_photo(self, max_side: int = 96) -> tk.PhotoImage | None:
+    def _load_mascot_photo(self, max_side: int = 96, attr: str = "_mascot_img") -> tk.PhotoImage | None:
         path = branding_paths.mascot_png()
         if not path.is_file():
             return None
@@ -152,306 +109,444 @@ class AgentGUI:
             scale = max(max(w, h) // max_side, 1)
             if scale > 1:
                 img = img.subsample(scale, scale)
-            self._mascot_img = img
+            setattr(self, attr, img)
             return img
         except tk.TclError:
             return None
 
     def _fit_window(self) -> None:
         self.root.update_idletasks()
-        screen_w = max(self.root.winfo_screenwidth(), 800)
-        screen_h = max(self.root.winfo_screenheight(), 600)
-        width = min(1120, max(520, int(screen_w * 0.72)))
-        height = min(900, max(640, int(screen_h * 0.78)))
+        screen_w = max(self.root.winfo_screenwidth(), 1024)
+        screen_h = max(self.root.winfo_screenheight(), 720)
+        width = min(1320, max(1024, int(screen_w * 0.82)))
+        height = min(920, max(720, int(screen_h * 0.85)))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 8)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    def _surface_card(self, parent, row: int, *, padding=(16, 14), expand: bool = False, role: str = "") -> ttk.Frame:
-        sticky = (tk.W, tk.E, tk.N, tk.S) if expand else (tk.W, tk.E)
-        outer = ttk.Frame(parent)
-        outer.grid(row=row, column=0, sticky=sticky, pady=(0, 12))
-        outer.columnconfigure(0, weight=1)
-        if expand:
-            outer.rowconfigure(0, weight=1)
-        inner = tk.Frame(outer, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        inner.grid(row=0, column=0, sticky=sticky)
-        inner.columnconfigure(0, weight=1)
-        if expand:
-            inner.rowconfigure(0, weight=1)
-        body = ttk.Frame(inner, style="Card.TFrame", padding=padding)
-        body.grid(row=0, column=0, sticky=sticky)
-        body.columnconfigure(0, weight=1)
-        outer.card_role = role
-        self._card_hosts.append(outer)
-        return body
-
-    def _muted(self, parent, text: str) -> ttk.Label:
-        label = ttk.Label(parent, text=text, style="CardMuted.TLabel", wraplength=480, justify=tk.LEFT)
-        self._wrap_labels.append(label)
-        return label
-
-    def _section_title(self, parent, text: str) -> None:
-        ttk.Label(parent, text=text, style="Card.TLabel", font=("Segoe UI", 12, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
-        )
-
+    # ------------------------------------------------------------------ UI shell
     def _build_ui(self):
-        """Dashboard that fills the window: side-by-side when wide, stacked when narrow."""
-        self._wrap_labels: list[ttk.Label] = []
-        self._status_tiles: list[tk.Frame] = []
-        self._status_value_labels: dict[str, tk.Label] = {}
-        self._status_cols = 3
-        self._card_hosts: list[ttk.Frame] = []
-        self._layout_mode = ""
-
-        shell = ttk.Frame(self.root)
-        shell.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        shell.columnconfigure(0, weight=1)
-        shell.rowconfigure(1, weight=1)
 
-        header = tk.Frame(shell, bg=BRAND)
-        header.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        header.columnconfigure(1, weight=1)
-        mascot = self._load_mascot_photo(max_side=48)
+        shell = tk.Frame(self.root, bg=BG)
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        self._build_sidebar(shell)
+        main = tk.Frame(shell, bg=PAGE)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+
+        self._build_top_bar(main)
+        self._build_views(main)
+        self._build_footer(main)
+        self._set_nav("home")
+
+    def _build_sidebar(self, parent):
+        side = tk.Frame(parent, bg=SIDEBAR, width=248, highlightbackground=BORDER, highlightthickness=1)
+        side.grid(row=0, column=0, sticky="ns")
+        side.grid_propagate(False)
+
+        brand = tk.Frame(side, bg=SIDEBAR)
+        brand.pack(fill=tk.X, padx=20, pady=(22, 18))
+        mascot = self._load_mascot_photo(max_side=36, attr="_sidebar_mascot")
         if mascot:
-            tk.Label(header, image=mascot, bg=BRAND, borderwidth=0).grid(row=0, column=0, rowspan=2, padx=(16, 10), pady=12)
+            tk.Label(brand, image=mascot, bg=SIDEBAR, borderwidth=0).pack(side=tk.LEFT, padx=(0, 10))
         tk.Label(
-            header, text="ApplyXAI Agent", bg=BRAND, fg="#ffffff", font=("Segoe UI", 18, "bold"),
-        ).grid(row=0, column=1, sticky=tk.W, pady=(12, 0))
-        self._header_sub = tk.Label(
-            header,
-            text="Easy Apply runs on this PC. Passwords stay on this computer.",
-            bg=BRAND, fg="#dbeafe", font=("Segoe UI", 10), anchor=tk.W, justify=tk.LEFT,
-        )
-        self._header_sub.grid(row=1, column=1, sticky=tk.W, pady=(0, 12))
-        self._wrap_labels.append(self._header_sub)
+            brand, text="ApplyXAI Agent", bg=SIDEBAR, fg=TEXT,
+            font=("Segoe UI", 13, "bold"), justify=tk.LEFT,
+        ).pack(side=tk.LEFT)
+
+        nav = tk.Frame(side, bg=SIDEBAR)
+        nav.pack(fill=tk.X, padx=12, pady=(8, 0))
+        for key, label, icon in (
+            ("home", "Home", "⌂"),
+            ("automation", "Automation", "⚡"),
+            ("log", "Activity Log", "☰"),
+            ("linkedin", "LinkedIn (Optional)", "in"),
+            ("settings", "Settings", "⚙"),
+        ):
+            self._nav_buttons[key] = self._nav_item(nav, icon, label, lambda k=key: self._set_nav(k))
+
+        promo = tk.Frame(side, bg=BRAND_SOFT, highlightbackground=BRAND_LIGHT, highlightthickness=1)
+        promo.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=16)
+        mini = self._load_mascot_photo(max_side=56, attr="_promo_mascot")
+        if mini:
+            tk.Label(promo, image=mini, bg=BRAND_SOFT).pack(pady=(14, 6))
         tk.Label(
-            header, text=f"  v{AGENT_VERSION}  ", bg="#1d4ed8", fg="#ffffff",
-            font=("Segoe UI", 9, "bold"), padx=8, pady=3,
-        ).grid(row=0, column=2, sticky=tk.NE, padx=16, pady=14)
+            promo, text="Let AI find your next opportunity",
+            bg=BRAND_SOFT, fg=TEXT, font=("Segoe UI", 10, "bold"), wraplength=200, justify=tk.CENTER,
+        ).pack(padx=12)
+        tk.Label(
+            promo, text="Automate. Apply. Grow.",
+            bg=BRAND_SOFT, fg=MUTED, font=("Segoe UI", 9), wraplength=200, justify=tk.CENTER,
+        ).pack(padx=12, pady=(4, 14))
 
-        self._canvas = tk.Canvas(shell, bg=BG, highlightthickness=0, borderwidth=0)
-        scrollbar = ttk.Scrollbar(shell, orient=tk.VERTICAL, command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=scrollbar.set)
-        self._canvas.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.E, tk.W), padx=(16, 0), pady=(12, 0))
-        scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S), pady=(12, 0), padx=(0, 4))
+    def _nav_item(self, parent, icon: str, label: str, command) -> tk.Frame:
+        row = tk.Frame(parent, bg=SIDEBAR, cursor="hand2")
+        row.pack(fill=tk.X, pady=2)
+        bar = tk.Frame(row, bg=SIDEBAR, width=4)
+        bar.pack(side=tk.LEFT, fill=tk.Y)
+        inner = tk.Frame(row, bg=SIDEBAR)
+        inner.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), pady=8)
+        tk.Label(inner, text=icon, bg=SIDEBAR, fg=BRAND, font=("Segoe UI", 11, "bold"), width=2).pack(side=tk.LEFT)
+        lbl = tk.Label(inner, text=label, bg=SIDEBAR, fg=TEXT_SOFT, font=("Segoe UI", 10))
+        lbl.pack(side=tk.LEFT, padx=(6, 0))
 
-        content = ttk.Frame(self._canvas)
-        self._content = content
-        content.columnconfigure(0, weight=1)
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(0, weight=1)
-        self._canvas_window = self._canvas.create_window((0, 0), window=content, anchor=tk.NW)
-        content.bind("<Configure>", self._on_content_configure)
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
-        self._canvas.bind("<Enter>", lambda _e: self._canvas.bind_all("<MouseWheel>", self._on_mousewheel))
-        self._canvas.bind("<Leave>", lambda _e: self._canvas.unbind_all("<MouseWheel>"))
+        def activate(_e=None):
+            command()
 
-        status = self._surface_card(content, 0, role="main")
-        self._status_host = status
-        ttk.Label(status, text="Connection", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10),
+        for w in (row, inner, lbl):
+            w.bind("<Button-1>", activate)
+        row._nav_bar = bar
+        row._nav_inner = inner
+        row._nav_lbl = lbl
+        return row
+
+    def _set_nav(self, key: str):
+        for nav_key, row in self._nav_buttons.items():
+            active = nav_key == key
+            bg = BRAND_SOFT if active else SIDEBAR
+            fg = BRAND if active else TEXT_SOFT
+            weight = "bold" if active else "normal"
+            row._nav_bar.configure(bg=BRAND if active else SIDEBAR)
+            row._nav_inner.configure(bg=bg)
+            row._nav_lbl.configure(bg=bg, fg=fg, font=("Segoe UI", 10, weight))
+            for child in row._nav_inner.winfo_children():
+                if isinstance(child, tk.Label) and child is not row._nav_lbl:
+                    child.configure(bg=bg, fg=BRAND if active else TEXT_SOFT)
+        for frame in self._views.values():
+            frame.grid_remove()
+        target = {"automation": "home", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(key, "home")
+        self._views[target].grid(row=0, column=0, sticky="nsew")
+        self._place_linkedin_card(key == "linkedin")
+
+    def _build_top_bar(self, parent):
+        bar = tk.Frame(parent, bg=PAGE)
+        bar.grid(row=0, column=0, sticky="ew", padx=28, pady=(22, 8))
+        bar.columnconfigure(0, weight=1)
+
+        left = tk.Frame(bar, bg=PAGE)
+        left.grid(row=0, column=0, sticky="w")
+        tk.Label(
+            left, text="Welcome to ApplyXAI Agent 👋", bg=PAGE, fg=TEXT,
+            font=("Segoe UI", 22, "bold"),
+        ).pack(anchor=tk.W)
+        tk.Label(
+            left,
+            text="Your personal AI job application assistant. Sit back and let us do the work.",
+            bg=PAGE, fg=MUTED, font=("Segoe UI", 10),
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        right = tk.Frame(bar, bg=PAGE)
+        right.grid(row=0, column=1, sticky="e")
+        self._pill_connected = tk.Label(
+            right, text="● Disconnected", bg="#fee2e2", fg=DANGER,
+            font=("Segoe UI", 9, "bold"), padx=12, pady=6,
         )
-        self._status_tile("Server", "server")
-        self._status_tile("Device", "device")
-        self._status_tile("Status", "status")
-
-        connect = self._surface_card(content, 1, role="main")
-        ttk.Label(connect, text="Connect to ApplyXAI", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
+        self._pill_connected.pack(side=tk.LEFT, padx=(0, 12))
+        tk.Label(right, text="🔔", bg=PAGE, fg=MUTED, font=("Segoe UI", 14)).pack(side=tk.LEFT, padx=4)
+        self._avatar = tk.Label(
+            right, text="AX", bg=BRAND, fg="#ffffff",
+            font=("Segoe UI", 10, "bold"), width=3, height=1,
         )
-        self._muted(
-            connect,
-            "Choose Local for this PC or Live for applyxai.com. Your browser opens so you can sign in and approve this computer.",
-        ).grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(6, 12))
-        connect_row = _ButtonRow(connect, bg=SURFACE)
-        connect_row.grid(row=2, column=0, sticky=(tk.W, tk.E))
-        self.connect_local_btn = connect_row.add(ttk.Button(
-            connect_row, text="Connect — Local", style="Secondary.TButton", command=lambda: self._on_connect("local"),
-        ))
-        self.connect_live_btn = connect_row.add(ttk.Button(
-            connect_row, text="Connect — Live", style="Primary.TButton", command=lambda: self._on_connect("live"),
-        ))
+        self._avatar.pack(side=tk.LEFT, padx=(8, 0))
+
+    def _build_views(self, parent):
+        stack = tk.Frame(parent, bg=PAGE)
+        stack.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 8))
+        stack.columnconfigure(0, weight=1)
+        stack.rowconfigure(0, weight=1)
+
+        home = tk.Frame(stack, bg=PAGE)
+        home.columnconfigure(0, weight=3)
+        home.columnconfigure(1, weight=2)
+        home.rowconfigure(0, weight=1)
+        self._views["home"] = home
+        self._build_dashboard(home)
+
+        log_view = tk.Frame(stack, bg=PAGE)
+        log_view.columnconfigure(0, weight=1)
+        log_view.rowconfigure(0, weight=1)
+        self._views["log"] = log_view
+        log_view_body = self._card(
+            log_view, "Activity Log", "📄", "Real-time logs of the agent's activity.", expand=True,
+        )
+        log_view_body.master.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self._attach_log_panel(log_view_body, secondary=True)
+
+        linkedin_view = tk.Frame(stack, bg=PAGE)
+        linkedin_view.columnconfigure(0, weight=1)
+        linkedin_view.rowconfigure(0, weight=1)
+        self._views["linkedin"] = linkedin_view
+        self._linkedin_nav_host = tk.Frame(linkedin_view, bg=PAGE)
+        self._linkedin_nav_host.grid(row=0, column=0, sticky="n", padx=24, pady=24)
+
+        settings_view = tk.Frame(stack, bg=PAGE)
+        settings_view.columnconfigure(0, weight=1)
+        self._views["settings"] = settings_view
+        scard = self._card(settings_view, "Settings", "⚙", "Agent data and connection on this PC.")
+        scard.master.grid(row=0, column=0, sticky="new", padx=8, pady=8)
+        ttk.Button(scard, text="Open data folder", style="Secondary.TButton", command=self._open_logs_folder).grid(
+            row=2, column=0, sticky=tk.W, pady=(12, 8),
+        )
+        ttk.Button(scard, text="Disconnect from ApplyXAI", style="Danger.TButton", command=self._on_unpair).grid(
+            row=3, column=0, sticky=tk.W,
+        )
+        tk.Label(
+            scard, text=f"Version {AGENT_VERSION}", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9),
+        ).grid(row=4, column=0, sticky=tk.W, pady=(16, 0))
+
+    def _build_dashboard(self, parent):
+        left = tk.Frame(parent, bg=PAGE)
+        left.grid(row=0, column=0, sticky="nsew", padx=(8, 10), pady=8)
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(3, weight=1)
+
+        status_row = tk.Frame(left, bg=PAGE)
+        status_row.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        status_row.columnconfigure(0, weight=1)
+        status_row.columnconfigure(1, weight=1)
+        self._server_card = self._metric_card(status_row, 0, "Server", "🌐", "—")
+        self._device_card = self._metric_card(status_row, 1, "Device", "💻", "—")
+        self.server_label = self._server_card["value"]
+        self.device_label = self._device_card["value"]
+        self._server_badge = self._server_card["badge"]
+        self._device_badge = self._device_card["badge"]
+
+        connect = self._card(left, "Connect to ApplyXAI", "🔗", "Your browser will open so you can sign in and approve this computer.")
+        connect.master.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        seg = tk.Frame(connect, bg=BORDER)
+        seg.grid(row=2, column=0, sticky=tk.W, pady=(12, 0))
+        self.connect_local_btn = tk.Button(
+            seg, text="  Connect — Local  ", relief=tk.FLAT, bg=BRAND, fg="#ffffff",
+            activebackground=BRAND_HOVER, activeforeground="#ffffff",
+            font=("Segoe UI", 10, "bold"), padx=14, pady=10, cursor="hand2",
+            command=lambda: self._on_connect("local"),
+        )
+        self.connect_local_btn.pack(side=tk.LEFT)
+        self.connect_live_btn = tk.Button(
+            seg, text="  Connect — Live  ", relief=tk.FLAT, bg=SURFACE, fg=BRAND,
+            activebackground=BRAND_SOFT, font=("Segoe UI", 10, "bold"), padx=14, pady=10, cursor="hand2",
+            command=lambda: self._on_connect("live"),
+        )
+        self.connect_live_btn.pack(side=tk.LEFT)
         self.pair_button = self.connect_live_btn
+        self._style_connect_buttons()
 
-        control = self._surface_card(content, 2, role="main")
-        ttk.Label(control, text="Automation", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, sticky=tk.W, pady=(0, 10),
+        control = self._card(left, "Automation", "⚙", "Control the agent and manage your automation session.")
+        control.master.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        ctrl = tk.Frame(control, bg=SURFACE)
+        ctrl.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        self.start_button = ttk.Button(ctrl, text="▶  Start Agent", style="Primary.TButton", command=self._on_start)
+        self.start_button.pack(side=tk.LEFT, padx=(0, 8))
+        self.stop_button = ttk.Button(
+            ctrl, text="■  Stop", style="Danger.TButton", command=self._on_stop, state=tk.DISABLED,
         )
-        ctrl_row = _ButtonRow(control, bg=SURFACE)
-        ctrl_row.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        self.start_button = ctrl_row.add(ttk.Button(
-            ctrl_row, text="Start agent", style="Primary.TButton", command=self._on_start,
-        ))
-        self.stop_button = ctrl_row.add(ttk.Button(
-            ctrl_row, text="Stop", style="Danger.TButton", command=self._on_stop, state=tk.DISABLED,
-        ))
-        ctrl_row.add(ttk.Button(ctrl_row, text="Refresh", style="Secondary.TButton", command=self._refresh_status))
-        ctrl_row.add(ttk.Button(ctrl_row, text="Disconnect", style="Secondary.TButton", command=self._on_unpair))
+        self.stop_button.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(ctrl, text="↻  Refresh", style="Secondary.TButton", command=self._refresh_status).pack(
+            side=tk.LEFT, padx=(0, 8),
+        )
+        ttk.Button(ctrl, text="⎋  Disconnect", style="Secondary.TButton", command=self._on_unpair).pack(side=tk.LEFT)
 
-        logs_outer = self._surface_card(content, 3, padding=(12, 12), expand=True, role="log")
-        logs_outer.rowconfigure(1, weight=1)
-        ttk.Label(logs_outer, text="Activity log", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, sticky=tk.W, pady=(0, 8),
+        log_card = self._card(
+            left, "Activity Log", "📄",
+            "Real-time logs of the agent's activity will appear here.",
+            expand=True,
         )
-        log_wrap = tk.Frame(logs_outer, bg="#f8fafc", highlightbackground=BORDER, highlightthickness=1)
-        log_wrap.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        log_wrap.columnconfigure(0, weight=1)
-        log_wrap.rowconfigure(0, weight=1)
-        self.log_text = scrolledtext.ScrolledText(
-            log_wrap, height=8, state=tk.DISABLED, wrap=tk.WORD, bg="#f8fafc", fg="#0f172a",
-            font=("Consolas", 10), relief=tk.FLAT, borderwidth=0, padx=8, pady=8,
-        )
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        log_card.master.grid(row=3, column=0, sticky="nsew")
+        log_card.rowconfigure(2, weight=1)
+        self._attach_log_panel(log_card)
 
-        linkedin = self._surface_card(content, 4, role="main")
-        linkedin.columnconfigure(0, weight=1)
-        ttk.Label(linkedin, text="LinkedIn (optional)", style="Card.TLabel", font=("Segoe UI", 12, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
-        )
-        self._muted(
-            linkedin,
-            "Optional. Leave both fields empty to sign in yourself in Chrome. Nothing is filled in for you.",
-        ).grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
-        ttk.Label(linkedin, text="Email", style="Card.TLabel").grid(row=2, column=0, sticky=tk.W)
-        self.linkedin_email = ttk.Entry(linkedin)
-        self.linkedin_email.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
-        ttk.Label(linkedin, text="Password", style="Card.TLabel").grid(row=4, column=0, sticky=tk.W)
-        self.linkedin_password = ttk.Entry(linkedin, show="•")
-        self.linkedin_password.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
-        ttk.Button(
-            linkedin, text="Save on this PC only", style="Secondary.TButton", command=self._save_linkedin_credentials,
-        ).grid(row=6, column=0, sticky=tk.W)
-        self._muted(
-            linkedin,
-            "Saved only in user_config.json on this computer. It is never sent to ApplyXAI.",
-        ).grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(8, 0))
+        right = tk.Frame(parent, bg=PAGE)
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 8), pady=8)
+        right.columnconfigure(0, weight=1)
+        self._linkedin_dashboard_host = right
 
-        foot = ttk.Frame(content)
-        self._foot = foot
-        foot.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(4, 16), padx=(0, 8))
-        foot.columnconfigure(0, weight=1)
-        hint = ttk.Label(
-            foot,
-            text="1) Connect    2) Start agent    3) Start a run on the Automation page",
-            style="Muted.TLabel",
-            wraplength=420,
-            justify=tk.LEFT,
-        )
-        self._wrap_labels.append(hint)
-        hint.grid(row=0, column=0, sticky=tk.W)
-        ttk.Button(foot, text="Open data folder", style="Secondary.TButton", command=self._open_logs_folder).grid(
-            row=0, column=1, sticky=tk.E, padx=(12, 0),
+        qa = self._card(right, "Quick Actions", "⚡")
+        qa.master.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        grid = tk.Frame(qa, bg=SURFACE)
+        grid.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        self._quick_start = self._quick_tile(grid, 0, 0, "▶", "Start Agent", "Begin job search & apply", self._on_start, BRAND)
+        self._quick_refresh = self._quick_tile(grid, 0, 1, "↻", "Refresh", "Reload connection", self._refresh_status, BRAND)
+        self._quick_stop = self._quick_tile(grid, 1, 0, "■", "Stop Agent", "Halt current session", self._on_stop, DANGER)
+        self._quick_disconnect = self._quick_tile(
+            grid, 1, 1, "⎋", "Disconnect", "End session", self._on_unpair, DANGER,
         )
 
-        self.server_label = self._status_value_labels["server"]
-        self.device_label = self._status_value_labels["device"]
-        self.status_label = self._status_value_labels["status"]
+        self._build_linkedin_card(right)
 
-    def _on_content_configure(self, _event=None):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self.status_label = self._device_badge
 
-    def _on_canvas_configure(self, event):
-        width = max(event.width, 1)
-        self._canvas.itemconfigure(self._canvas_window, width=width)
-        self._apply_responsive(width)
-        needed = self._content.winfo_reqheight()
-        self._canvas.itemconfigure(self._canvas_window, height=max(needed, event.height))
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+    def _card(self, parent, title: str, icon: str = "", subtitle: str = "", *, expand: bool = False) -> tk.Frame:
+        outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        if expand:
+            outer.rowconfigure(0, weight=1)
+        body = tk.Frame(outer, bg=SURFACE, padx=18, pady=16)
+        body.pack(fill=tk.BOTH, expand=expand)
+        body.columnconfigure(0, weight=1)
+        if expand:
+            body.rowconfigure(2, weight=1)
+        head = tk.Frame(body, bg=SURFACE)
+        head.grid(row=0, column=0, sticky="ew")
+        if icon:
+            tk.Label(head, text=icon, bg=SURFACE, fg=BRAND, font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(head, text=title, bg=SURFACE, fg=TEXT, font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
+        if subtitle:
+            tk.Label(
+                body, text=subtitle, bg=SURFACE, fg=MUTED, font=("Segoe UI", 9),
+                wraplength=520, justify=tk.LEFT,
+            ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        outer._card_body = body  # noqa: SLF001 — tk parent/child wiring
+        return body
 
-    def _on_mousewheel(self, event):
-        self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _metric_card(self, parent, column: int, title: str, icon: str, value: str) -> dict:
+        tile = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        tile.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 6 if column == 0 else 0))
+        inner = tk.Frame(tile, bg=SURFACE, padx=16, pady=14)
+        inner.pack(fill=tk.BOTH, expand=True)
+        top = tk.Frame(inner, bg=SURFACE)
+        top.pack(fill=tk.X)
+        tk.Label(top, text=icon, bg=SURFACE, font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(top, text=title, bg=SURFACE, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        val = tk.Label(inner, text=value, bg=SURFACE, fg=TEXT, font=("Segoe UI", 11, "bold"), anchor=tk.W, justify=tk.LEFT)
+        val.pack(fill=tk.X, pady=(10, 0))
+        badge = tk.Label(
+            inner, text="Offline", bg="#f1f5f9", fg=MUTED, font=("Segoe UI", 8, "bold"), padx=8, pady=3,
+        )
+        badge.pack(anchor=tk.W, pady=(8, 0))
+        return {"value": val, "badge": badge}
 
-    def _apply_responsive(self, width: int) -> None:
-        wrap = max(220, width - 56)
-        for label in self._wrap_labels:
-            try:
-                label.configure(wraplength=wrap)
-            except tk.TclError:
-                pass
-        cols = 1 if width < 720 else 3
-        tile_wrap = max(140, (width // cols) - 48)
-        for val in self._status_value_labels.values():
-            val.configure(wraplength=tile_wrap)
-        if cols != self._status_cols:
-            self._status_cols = cols
-            self._place_status_tiles()
-        self._reflow_cards(width)
+    def _quick_tile(self, parent, row, col, icon, title, subtitle, command, accent):
+        tile = tk.Frame(
+            parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1, cursor="hand2",
+        )
+        tile.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+        inner = tk.Frame(tile, bg=SURFACE, padx=12, pady=12)
+        inner.pack(fill=tk.BOTH, expand=True)
+        tk.Label(inner, text=icon, bg=SURFACE, fg=accent, font=("Segoe UI", 14, "bold")).pack(anchor=tk.W)
+        tk.Label(inner, text=title, bg=SURFACE, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, pady=(6, 0))
+        tk.Label(inner, text=subtitle, bg=SURFACE, fg=MUTED, font=("Segoe UI", 8), wraplength=140, justify=tk.LEFT).pack(
+            anchor=tk.W,
+        )
 
-    def _place_status_tiles(self) -> None:
-        cols = self._status_cols
-        for index, tile in enumerate(self._status_tiles):
-            row, col = (index, 0) if cols == 1 else (0, index)
-            tile.grid_configure(
-                row=row + 1,
-                column=col,
-                columnspan=1,
-                sticky=(tk.W, tk.E, tk.N, tk.S),
-                padx=(0 if col == 0 else 8, 0),
-                pady=(8 if cols == 1 and index else 0, 0),
-            )
-        for col in range(3):
-            self._status_host.columnconfigure(col, weight=1 if cols == 3 or col == 0 else 0)
+        def activate(_e=None):
+            command()
 
-    def _reflow_cards(self, width: int) -> None:
-        """Wide windows keep the log beside the controls. Narrow windows stack every card."""
-        mode = "split" if width >= 860 else "stack"
-        if mode == self._layout_mode:
+        for w in (tile, inner):
+            w.bind("<Button-1>", activate)
+        return tile
+
+    def _place_linkedin_card(self, on_linkedin_view: bool) -> None:
+        outer = getattr(self, "_linkedin_card_outer", None)
+        if outer is None:
             return
-        self._layout_mode = mode
-        main = [host for host in self._card_hosts if getattr(host, "card_role", "") == "main"]
-        logs = [host for host in self._card_hosts if getattr(host, "card_role", "") == "log"]
-        log = logs[0] if logs else None
-        if mode == "split" and log is not None:
-            self._content.columnconfigure(0, weight=3)
-            self._content.columnconfigure(1, weight=2)
-            for index, host in enumerate(main):
-                host.grid(
-                    row=index, column=0, rowspan=1, columnspan=1,
-                    sticky=(tk.W, tk.E, tk.N), padx=(0, 8), pady=(0, 12),
-                )
-                self._content.rowconfigure(index, weight=0)
-            log.grid(
-                row=0, column=1, rowspan=max(len(main), 1), columnspan=1,
-                sticky=(tk.N, tk.S, tk.E, tk.W), padx=(8, 8), pady=(0, 12),
-            )
-            self._content.rowconfigure(0, weight=1)
+        outer.grid_forget()
+        host = self._linkedin_nav_host if on_linkedin_view else self._linkedin_dashboard_host
+        row = 0 if on_linkedin_view else 1
+        outer.grid(row=row, column=0, sticky="ew", in_=host)
+
+    def _build_linkedin_card(self, parent):
+        card = self._card(
+            parent,
+            "LinkedIn (Optional)",
+            "in",
+            "Add your LinkedIn credentials for better results.",
+        )
+        self._linkedin_card_outer = card.master
+        card.master.grid(row=1, column=0, sticky="ew")
+
+        email_row = tk.Frame(card, bg=SURFACE)
+        email_row.grid(row=2, column=0, sticky="ew", pady=(12, 8))
+        email_row.columnconfigure(1, weight=1)
+        tk.Label(email_row, text="✉", bg=SURFACE, fg=MUTED).grid(row=0, column=0, padx=(0, 8))
+        self.linkedin_email = ttk.Entry(email_row)
+        self.linkedin_email.grid(row=0, column=1, sticky="ew")
+
+        pw_row = tk.Frame(card, bg=SURFACE)
+        pw_row.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        pw_row.columnconfigure(1, weight=1)
+        tk.Label(pw_row, text="🔒", bg=SURFACE, fg=MUTED).grid(row=0, column=0, padx=(0, 8))
+        self.linkedin_password = ttk.Entry(pw_row, show="•")
+        self.linkedin_password.grid(row=0, column=1, sticky="ew")
+        self._pw_visible = tk.BooleanVar(value=False)
+        tk.Button(
+            pw_row, text="👁", relief=tk.FLAT, bg=SURFACE, fg=MUTED, command=self._toggle_password,
+        ).grid(row=0, column=2, padx=(6, 0))
+
+        ttk.Button(
+            card, text="🔒  Save Credentials", style="Primary.TButton", command=self._save_linkedin_credentials,
+        ).grid(row=4, column=0, sticky="ew")
+
+        notice = tk.Frame(card, bg=BRAND_SOFT, highlightbackground=BRAND_LIGHT, highlightthickness=1)
+        notice.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+        tk.Label(
+            notice,
+            text="🛡  Your credentials are secure. We never store your password on ApplyXAI servers.",
+            bg=BRAND_SOFT, fg=TEXT_SOFT, font=("Segoe UI", 8), wraplength=320, justify=tk.LEFT, padx=10, pady=10,
+        ).pack(anchor=tk.W)
+
+    def _toggle_password(self):
+        self._pw_visible.set(not self._pw_visible.get())
+        self.linkedin_password.configure(show="" if self._pw_visible.get() else "•")
+
+    def _attach_log_panel(self, card: tk.Frame, *, secondary: bool = False):
+        wrap = tk.Frame(card, bg=LOG_BG, highlightbackground=BORDER, highlightthickness=1)
+        wrap.grid(row=2, column=0, sticky="nsew", pady=(12, 0))
+        wrap.columnconfigure(0, weight=1)
+        wrap.rowconfigure(0, weight=1)
+        log = scrolledtext.ScrolledText(
+            wrap, height=10 if not secondary else 24, state=tk.DISABLED, wrap=tk.WORD, bg=LOG_BG, fg=TEXT,
+            font=("Consolas", 10), relief=tk.FLAT, borderwidth=0, padx=10, pady=10,
+        )
+        log.grid(row=0, column=0, sticky="nsew")
+        if not hasattr(self, "_log_widgets"):
+            self._log_widgets = []
+            self._log_empty_frames = []
+            self.log_text = log
+        self._log_widgets.append(log)
+        empty = tk.Frame(wrap, bg=LOG_BG)
+        empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        tk.Label(empty, text="📄", bg=LOG_BG, fg=BRAND, font=("Segoe UI", 28)).pack()
+        tk.Label(
+            empty, text="No activity yet", bg=LOG_BG, fg=TEXT, font=("Segoe UI", 11, "bold"),
+        ).pack(pady=(8, 4))
+        tk.Label(
+            empty, text="Start the agent to see live logs here.", bg=LOG_BG, fg=MUTED, font=("Segoe UI", 9),
+        ).pack()
+        self._log_empty_frames.append(empty)
+
+    def _build_footer(self, parent):
+        foot = tk.Frame(parent, bg=PAGE)
+        foot.grid(row=2, column=0, sticky="ew", padx=28, pady=(0, 16))
+        foot.columnconfigure(0, weight=1)
+        tk.Label(
+            foot, text=f"ApplyXAI Agent v{AGENT_VERSION}", bg=PAGE, fg=MUTED, font=("Segoe UI", 9),
+        ).grid(row=0, column=0, sticky=tk.W)
+        tk.Label(
+            foot, text="Smarter Applications • Better Opportunities", bg=PAGE, fg=MUTED, font=("Segoe UI", 9),
+        ).grid(row=0, column=1, sticky=tk.E)
+
+    def _style_connect_buttons(self):
+        if self._connect_preset == "local":
+            self.connect_local_btn.configure(bg=BRAND, fg="#ffffff")
+            self.connect_live_btn.configure(bg=SURFACE, fg=BRAND)
         else:
-            self._content.columnconfigure(0, weight=1)
-            self._content.columnconfigure(1, weight=0)
-            ordered = main[:3] + ([log] if log is not None else []) + main[3:]
-            for index, host in enumerate(ordered):
-                if host is None:
-                    continue
-                sticky = (tk.N, tk.S, tk.E, tk.W) if host is log else (tk.W, tk.E)
-                host.grid(
-                    row=index, column=0, rowspan=1, columnspan=2,
-                    sticky=sticky, padx=(0, 8), pady=(0, 12),
-                )
-                self._content.rowconfigure(index, weight=1 if host is log else 0)
-        if getattr(self, "_foot", None) is not None:
-            last = len(main) + (1 if log is not None else 0)
-            self._foot.grid(row=last, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 16), padx=(0, 8))
+            self.connect_live_btn.configure(bg=BRAND, fg="#ffffff")
+            self.connect_local_btn.configure(bg=SURFACE, fg=BRAND)
 
-    def _status_tile(self, title: str, key: str) -> None:
-        tile = tk.Frame(self._status_host, bg=BRAND_LIGHT, highlightbackground=BORDER, highlightthickness=1)
-        self._status_tiles.append(tile)
-        tk.Label(tile, text=title.upper(), bg=BRAND_LIGHT, fg=MUTED, font=("Segoe UI", 8, "bold")).pack(
-            anchor=tk.W, padx=12, pady=(10, 0),
-        )
-        val = tk.Label(
-            tile, text="—", bg=BRAND_LIGHT, fg=MUTED, font=("Segoe UI", 11),
-            wraplength=180, justify=tk.LEFT, anchor=tk.W,
-        )
-        val.pack(anchor=tk.W, fill=tk.X, padx=12, pady=(2, 12))
-        self._status_value_labels[key] = val
-        self._place_status_tiles()
+    def _update_avatar(self, device_name: str):
+        parts = (device_name or "AX").replace("_", " ").split()
+        initials = "".join(p[0].upper() for p in parts[:2]) or "AX"
+        self._avatar.configure(text=initials[:2])
 
+    # ------------------------------------------------------------------ queue / status
     def _process_queue(self):
-        """Process commands from the queue to update UI safely."""
         try:
             while True:
                 command = self.command_queue.get_nowait()
@@ -478,47 +573,56 @@ class AgentGUI:
         self.root.after(100, self._process_queue)
 
     def _append_log(self, message):
-        """Append a message to the log window."""
-        self.log_text.config(state=tk.NORMAL)
+        if not self._log_has_content:
+            self._log_has_content = True
+            for frame in getattr(self, "_log_empty_frames", []):
+                frame.place_forget()
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        line = f"[{timestamp}] {message}\n"
+        for log in getattr(self, "_log_widgets", [self.log_text]):
+            log.config(state=tk.NORMAL)
+            log.insert(tk.END, line)
+            log.see(tk.END)
+            log.config(state=tk.DISABLED)
 
     def _update_status_display(self, server, device, connected):
-        """Update the status display."""
         if connected:
-            self.server_label.config(text=server or "—", fg="#0f172a")
-            self.device_label.config(text=device or "—", fg="#0f172a")
-            self.status_label.config(text="Connected", fg=SUCCESS)
+            self.server_label.config(text=server or "—", fg=TEXT)
+            self.device_label.config(text=device or "—", fg=TEXT)
+            self._server_badge.config(text="● Online", bg=SUCCESS_BG, fg=SUCCESS_FG)
+            self._device_badge.config(text="● Connected", bg=SUCCESS_BG, fg=SUCCESS_FG)
+            self._pill_connected.config(text="● Connected", bg=SUCCESS_BG, fg=SUCCESS_FG)
             self.connect_local_btn.config(state=tk.DISABLED)
             self.connect_live_btn.config(state=tk.DISABLED)
+            self._update_avatar(device or "")
         else:
             self.server_label.config(text="Not connected", fg=MUTED)
             self.device_label.config(text="—", fg=MUTED)
-            self.status_label.config(text="Disconnected", fg=DANGER)
+            self._server_badge.config(text="Offline", bg="#f1f5f9", fg=MUTED)
+            self._device_badge.config(text="Disconnected", bg="#fee2e2", fg=DANGER)
+            self._pill_connected.config(text="● Disconnected", bg="#fee2e2", fg=DANGER)
             self.connect_local_btn.config(state=tk.NORMAL)
             self.connect_live_btn.config(state=tk.NORMAL)
+            self._update_avatar("AX")
 
     def _set_agent_running(self, running):
-        """Set the agent running state."""
         self.agent_running = running
+        state_start = tk.DISABLED if running else tk.NORMAL
+        state_stop = tk.NORMAL if running else tk.DISABLED
+        self.start_button.config(state=state_start)
+        self.stop_button.config(state=state_stop)
         if running:
-            self.start_button.config(state=tk.DISABLED)
-            self.stop_button.config(state=tk.NORMAL)
-            self._append_log("Agent started - waiting for jobs from ApplyXAI...")
-            self._append_log("Start a job from the Automation page to begin automation")
+            self._append_log("Agent started — waiting for jobs from ApplyXAI...")
+            self._append_log("Start a run from the Automation page in your dashboard.")
         else:
-            self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED)
             self._append_log("Agent stopped")
 
     def _log(self, message):
-        """Thread-safe log message."""
         self.command_queue.put(("log", message))
 
     def _on_connect(self, preset_name: str):
-        """One-click connect using a built-in server preset."""
+        self._connect_preset = preset_name
+        self._style_connect_buttons()
         self.connect_local_btn.config(state=tk.DISABLED)
         self.connect_live_btn.config(state=tk.DISABLED)
         threading.Thread(target=self._do_connect, args=(preset_name,), daemon=True).start()
@@ -537,7 +641,7 @@ class AgentGUI:
                     log=self._log,
                 )
                 self.command_queue.put(("status", cfg.server, cfg.name, True))
-                self.command_queue.put(("info", f"Connected as \"{cfg.name}\""))
+                self.command_queue.put(("info", f'Connected as "{cfg.name}"'))
             else:
                 exe = self._cli_exe()
                 cmd = [str(exe), "connect", "--preset", preset_name] if exe else [
@@ -567,17 +671,12 @@ class AgentGUI:
         return None
 
     def _on_start(self):
-        """Handle the start button click."""
         if self.agent_running:
             return
-
-        # Run agent in a thread
         threading.Thread(target=self._run_agent, daemon=True).start()
 
     def _run_agent(self):
-        """Run the agent."""
         self._log("Starting agent...")
-
         try:
             inline = AGENT_MODULES_AVAILABLE or getattr(sys, "frozen", False)
             if inline:
@@ -592,7 +691,7 @@ class AgentGUI:
 
                 self.command_queue.put(("running", True))
                 self._log(f"Connected to {cfg.server}")
-                self._log("Polling for jobs... (Start a job from the Automation page)")
+                self._log("Polling for jobs... (Start a run from the Automation page)")
                 supervisor = Supervisor(ApiClient(cfg.server, cfg.token), Path(self.home), cfg.user_id)
                 supervisor.run_forever()
             else:
@@ -603,8 +702,10 @@ class AgentGUI:
                     cmd = ["python", "-m", "agent", "run"]
 
                 self.command_queue.put(("running", True))
-                popen_kw = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT,
-                            "text": True, "bufsize": 1, "creationflags": background_creationflags()}
+                popen_kw = {
+                    "stdout": subprocess.PIPE, "stderr": subprocess.STDOUT,
+                    "text": True, "bufsize": 1, "creationflags": background_creationflags(),
+                }
                 self.agent_process = subprocess.Popen(cmd, **popen_kw)
 
                 for line in self.agent_process.stdout:
@@ -617,12 +718,9 @@ class AgentGUI:
             self.command_queue.put(("running", False))
 
     def _on_stop(self):
-        """Handle the stop button click."""
         if not self.agent_running:
             return
-
         self._log("Stopping agent...")
-
         if self.agent_process:
             self.agent_process.terminate()
             try:
@@ -630,34 +728,28 @@ class AgentGUI:
             except subprocess.TimeoutExpired:
                 self.agent_process.kill()
             self.agent_process = None
-
         self.command_queue.put(("running", False))
 
     def _on_unpair(self):
-        """Handle the unpair button click."""
         if not messagebox.askyesno("Confirm", "Disconnect this computer from ApplyXAI?"):
             return
-
         try:
             if AGENT_MODULES_AVAILABLE:
                 from agent import config
                 config.forget(Path(self.home))
             else:
-                exe_path = sys.executable if getattr(sys, 'frozen', False) else "python"
+                exe_path = sys.executable if getattr(sys, "frozen", False) else "python"
                 cmd = [exe_path, "-m", "agent", "unpair"]
                 subprocess.run(cmd, capture_output=True, text=True, creationflags=background_creationflags())
-
             self._refresh_status()
             self._log("Disconnected from ApplyXAI")
         except Exception as e:
             self.command_queue.put(("error", f"Disconnect failed: {str(e)}"))
 
     def _refresh_status(self):
-        """Refresh the connection status."""
         threading.Thread(target=self._do_refresh_status, daemon=True).start()
 
     def _do_refresh_status(self):
-        """Perform the status refresh."""
         try:
             if AGENT_MODULES_AVAILABLE:
                 from agent import config
@@ -667,72 +759,55 @@ class AgentGUI:
                 else:
                     self.command_queue.put(("status", "", "", False))
             else:
-                exe_path = sys.executable if getattr(sys, 'frozen', False) else "python"
+                exe_path = sys.executable if getattr(sys, "frozen", False) else "python"
                 cmd = [exe_path, "-m", "agent", "status"]
                 result = subprocess.run(
                     cmd, capture_output=True, text=True, creationflags=background_creationflags(),
                 )
-                if result.returncode == 0:
-                    # Parse output - simple check for "Connected to"
-                    if "Connected to" in result.stdout:
-                        self.command_queue.put(("status", "Connected", "Device", True))
-                    else:
-                        self.command_queue.put(("status", "", "", False))
+                if result.returncode == 0 and "Connected to" in result.stdout:
+                    self.command_queue.put(("status", "Connected", "Device", True))
+                else:
+                    self.command_queue.put(("status", "", "", False))
         except Exception as e:
             self._log(f"Status check failed: {str(e)}")
 
     def _save_linkedin_credentials(self):
-        """Save LinkedIn credentials to the secrets file."""
         email = self.linkedin_email.get().strip()
         password = self.linkedin_password.get().strip()
-        
         if not email or not password:
             messagebox.showerror("Error", "Please enter both LinkedIn email and password")
             return
-        
         try:
-            # Save to user_config.json in the agent home directory
-            # This is where the automation will look for it
             agent_home = Path(self.home)
             user_config_path = agent_home / "user_config.json"
             user_config = {}
-            
             if user_config_path.exists():
-                with open(user_config_path, 'r') as f:
+                with open(user_config_path, "r") as f:
                     user_config = json.load(f)
-            
-            # Add LinkedIn credentials to the "secrets" section
             if "secrets" not in user_config:
                 user_config["secrets"] = {}
             user_config["secrets"]["username"] = email
             user_config["secrets"]["password"] = password
-            
-            # Ensure directory exists
             agent_home.mkdir(parents=True, exist_ok=True)
-            
-            with open(user_config_path, 'w') as f:
+            with open(user_config_path, "w") as f:
                 json.dump(user_config, f, indent=2)
-            
-            messagebox.showinfo("Success", "LinkedIn credentials saved successfully!")
+            messagebox.showinfo("Success", "LinkedIn credentials saved on this PC.")
             self._log("LinkedIn credentials saved to user_config.json")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save credentials: {e}")
             self._log(f"Failed to save credentials: {e}")
 
     def _open_logs_folder(self):
-        """Open the logs folder in the file explorer."""
-        import subprocess
         path = Path(self.home)
         if path.exists():
             subprocess.Popen(["explorer", str(path)])
         else:
-            messagebox.showinfo("Info", f"Logs folder does not exist yet: {path}")
+            messagebox.showinfo("Info", f"Data folder does not exist yet: {path}")
 
 
 def main():
-    """Main entry point for the GUI."""
     root = tk.Tk()
-    app = AgentGUI(root)
+    AgentGUI(root)
     root.mainloop()
 
 

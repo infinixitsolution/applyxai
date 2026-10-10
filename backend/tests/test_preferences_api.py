@@ -142,6 +142,24 @@ def test_application_preferences_reject_invalid(alice, body, field):
     assert alice.get("/api/preferences/application").json()["data"]["answers"] == {}
 
 
+def test_form_question_creates_in_app_notification_once(db, alice):
+    from backend.app.models import Notification, User
+    from backend.app.services import preferences_service
+
+    user = db.query(User).filter_by(email="alice@example.com").one()
+    event = {"label": "Visa sponsorship?", "question_type": "text", "needs_answer": True}
+    preferences_service.capture_form_question(db, user.id, event, {"title": "Engineer", "company": "Acme"})
+    db.commit()
+    assert db.query(Notification).filter_by(user_id=user.id, type="form_question").count() == 1
+    note = db.query(Notification).filter_by(user_id=user.id, type="form_question").one()
+    assert "Visa" in note.title
+    assert note.link == "/app/automation?pending=1"
+
+    preferences_service.capture_form_question(db, user.id, event, {"title": "Engineer", "company": "Acme"})
+    db.commit()
+    assert db.query(Notification).filter_by(user_id=user.id, type="form_question").count() == 1
+
+
 def test_resolve_pending_saves_human_questions(alice, db):
     from backend.app.models import User
     from backend.app.services import preferences_service

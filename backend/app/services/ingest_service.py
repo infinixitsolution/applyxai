@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from automation import events as ev
+from automation.company_contacts import extract_published_contacts, merge_contacts
 from backend.app.models import Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus
 from backend.app.services import application_service, notification_service, preferences_service
 
@@ -40,6 +41,18 @@ def _text(value, limit: int) -> str:
     return "" if value is None else str(value).strip()[:limit]
 
 
+def _published_contacts(details: dict) -> list:
+    """Hiring-team name plus any email or phone written on the posting. Not the applicant."""
+    description = _text(details.get("description"), 100_000)
+    supplied = details.get("contacts") if isinstance(details.get("contacts"), list) else []
+    named = extract_published_contacts(
+        "",
+        name=_text(details.get("hr_name"), 120),
+        link=_text(details.get("hr_link"), 500),
+    )
+    return merge_contacts(extract_published_contacts(description), named, supplied)
+
+
 def _job_label(details: dict) -> str:
     title, company = _text(details.get("title"), 200), _text(details.get("company"), 200)
     return f"{title} at {company}" if title and company else title or f"job {details.get('job_id')}"
@@ -59,6 +72,7 @@ def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
         work_setting=_text(details.get("work_style"), 32),
         job_url=job_url,
         description=_text(details.get("description"), 100_000),
+        published_contacts=_published_contacts(details) or None,
     )
     status = _STATUS_FOR_OUTCOME[event["event"]]
     reason = ""

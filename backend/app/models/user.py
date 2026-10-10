@@ -18,6 +18,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    totp_secret_encrypted: Mapped[str] = mapped_column(Text, default="", server_default="")
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Embedded in access tokens; bumping it invalidates every outstanding session at once.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

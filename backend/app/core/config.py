@@ -36,9 +36,15 @@ class Settings(BaseSettings):
 
     STORAGE_DIR: Path = DEFAULT_STORAGE_DIR
     MAX_RESUME_BYTES: int = 5 * 1024 * 1024
+    # Optional ClamAV (clamd) INSTREAM scan on resume upload; leave empty to disable.
+    CLAMAV_HOST: str = ""
+    CLAMAV_PORT: int = 3310
+    CLAMAV_SCAN_TIMEOUT_SEC: float = 30.0
     # Desktop agent download: prefer single Setup.exe, else GUI-only fallback.
     DESKTOP_AGENT_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Setup.exe"
     DESKTOP_AGENT_GUI_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-GUI.exe"
+    AGENT_LATEST_VERSION: str = "1.1.5"
+    AGENT_DOWNLOAD_URL: str = ""
 
     # Where the SPA lives; used to build links in verification / reset emails.
     FRONTEND_URL: str = "http://localhost:5173"
@@ -60,7 +66,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "ApplyXAI <no-reply@localhost>"
 
-    PAYMENT_PROVIDER: Literal["null", "razorpay"] = "null"
+    PAYMENT_PROVIDER: Literal["null", "razorpay", "stripe"] = "null"
     PAYMENT_KEY_ID: str = ""
     PAYMENT_SECRET: str = ""
     PAYMENT_WEBHOOK_SECRET: str = ""
@@ -120,6 +126,8 @@ class Settings(BaseSettings):
             problems.append("DATABASE_URL must point at PostgreSQL")
         if self.PAYMENT_PROVIDER == "null":
             problems.append("PAYMENT_PROVIDER 'null' grants plans for free and is not allowed")
+        elif self.PAYMENT_PROVIDER not in ("razorpay", "stripe"):
+            problems.append("PAYMENT_PROVIDER must be razorpay or stripe in production")
         elif not (self.PAYMENT_KEY_ID and self.PAYMENT_SECRET and self.PAYMENT_WEBHOOK_SECRET):
             problems.append("PAYMENT_KEY_ID, PAYMENT_SECRET, and PAYMENT_WEBHOOK_SECRET must be set")
         # SMTP may be configured in the admin settings table after deploy.

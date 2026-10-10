@@ -3,26 +3,24 @@ import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../../auth/session";
-import { appLink } from "../../components/NotificationBell";
+import { FilterChip, FilterChipBrand } from "../admin/shared";
+import { notificationLink } from "../../lib/notificationLink";
+import { formatNotificationType } from "../../lib/notificationLabel";
 import { ConfirmDialog } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Button, ButtonLink, Card, cx, EmptyState, PageHeader, Spinner } from "../../components/ui";
+import { Alert, Button, ButtonLink, Card, cx, EmptyState, PageHeader, Spinner, Tabs } from "../../components/ui";
 import { ApplicationPreferencesForm } from "../../features/ApplicationPreferencesForm";
 import { ProfileForm } from "../../features/ProfileForm";
-import { ResumeManager } from "../../features/ResumeManager";
+import { TwoFactorSettings } from "../../features/TwoFactorSettings";
+import { ResumesDashboard } from "../../features/ResumesDashboard";
 import { SearchPreferencesForm } from "../../features/SearchPreferencesForm";
 import { formatDate, formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
 import { auth, notifications } from "../../services/endpoints";
 
 export function ResumesPage() {
-  return (
-    <>
-      <PageHeader title="Resumes" description="Your default resume is attached to applications unless a run says otherwise." />
-      <ResumeManager />
-    </>
-  );
+  return <ResumesDashboard />;
 }
 
 export function PreferencesPage() {
@@ -34,15 +32,7 @@ export function PreferencesPage() {
   return (
     <>
       <PageHeader title="Preferences" description="What to search for, and how to answer application questions." />
-      <div role="tablist" className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1 sm:inline-flex">
-        {tabs.map((t) => (
-          <button key={t.id} role="tab" type="button" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
-                  className={cx("flex-1 rounded-md px-4 py-1.5 text-sm font-medium sm:flex-none",
-                    tab === t.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900")}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === "search" ? <Card><SearchPreferencesForm /></Card> : <ApplicationPreferencesForm />}
     </>
   );
@@ -129,6 +119,9 @@ export function SettingsPage() {
           <p className="mb-4 text-sm text-slate-600">We'll email you a secure link to choose a new password.</p>
           <Button variant="secondary" onClick={() => reset.mutate()} loading={reset.isPending}>Email me a reset link</Button>
         </Card>
+        <Card title="Two-factor authentication">
+          <TwoFactorSettings />
+        </Card>
         <Card title="Sessions">
           <p className="mb-4 text-sm text-slate-600">Signed in somewhere you don't recognise? Sign out everywhere, including this browser.</p>
           <Button variant="danger" onClick={() => setConfirmAll(true)}>Log out of all devices</Button>
@@ -144,31 +137,59 @@ export function SettingsPage() {
 
 export function NotificationsPage() {
   const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState<"all" | "unread">("all");
   const client = useQueryClient();
   const navigate = useNavigate();
+  const { data: prefs } = useQuery({
+    queryKey: ["notifications", "preferences"],
+    queryFn: notifications.preferences,
+    staleTime: 5 * 60_000,
+  });
   const { data, isLoading, error } = useQuery({
-    queryKey: ["notifications", "page", page], queryFn: () => notifications.list({ page, page_size: 20 }),
+    queryKey: ["notifications", "page", filter, page],
+    queryFn: () => notifications.list({ page, page_size: 20, unread_only: filter === "unread" }),
   });
   const invalidate = () => client.invalidateQueries({ queryKey: ["notifications"] });
   const readAll = useMutation({ mutationFn: notifications.readAll, onSuccess: invalidate });
   const readOne = useMutation({ mutationFn: notifications.read, onSuccess: invalidate });
+
+  const typeLabel = (type: string) => prefs?.types[type]?.label ?? formatNotificationType(type);
 
   return (
     <>
       <PageHeader title="Notifications" actions={data && data.unread_count > 0 && (
         <Button variant="secondary" onClick={() => readAll.mutate()} loading={readAll.isPending}>Mark all as read</Button>
       )} />
+      <Card className="mb-6">
+        <div className="flex flex-wrap gap-2">
+          <FilterChip active={filter === "all"} onClick={() => { setFilter("all"); setPage(1); }}>All</FilterChip>
+          <FilterChipBrand active={filter === "unread"} onClick={() => { setFilter("unread"); setPage(1); }}>Unread</FilterChipBrand>
+        </div>
+      </Card>
       {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : data.total === 0 ? (
-        <Card><EmptyState icon={<Bell className="h-10 w-10" />} title="No notifications">We'll let you know when a run finishes or something needs your attention.</EmptyState></Card>
+        <Card>
+          <EmptyState icon={<Bell className="h-10 w-10" />} title={filter === "unread" ? "No unread notifications" : "No notifications"}>
+            {filter === "unread"
+              ? "You're all caught up."
+              : "We'll let you know when a run finishes or something needs your attention."}
+          </EmptyState>
+        </Card>
       ) : (
         <Card>
           <ul className="-my-2 divide-y divide-slate-100">
             {data.items.map((n) => (
               <li key={n.id}>
-                <button type="button" className="flex w-full gap-3 py-3 text-left"
-                        onClick={() => { if (!n.read_at) readOne.mutate(n.id); if (n.link) navigate(appLink(n.link)); }}>
+                <button
+                  type="button"
+                  className="flex w-full gap-3 py-3 text-left"
+                  onClick={() => {
+                    if (!n.read_at) readOne.mutate(n.id);
+                    if (n.link) navigate(notificationLink(n.link));
+                  }}
+                >
                   <span className={cx("mt-1.5 h-2 w-2 shrink-0 rounded-full", n.read_at ? "bg-transparent" : "bg-brand-600")} aria-hidden />
                   <span className="flex-1">
+                    <span className="block text-xs font-medium text-slate-500">{typeLabel(n.type)}</span>
                     <span className="block font-medium text-slate-900">{n.title}</span>
                     {n.body && <span className="block text-sm text-slate-600">{n.body}</span>}
                     <span className="block text-xs text-slate-400">{formatRelative(n.created_at)}</span>

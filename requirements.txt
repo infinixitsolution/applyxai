@@ -20,3 +20,4 @@ flask
 
 # ApplyXAI desktop agent (python -m agent)
 requests
+keyring>=25,<26

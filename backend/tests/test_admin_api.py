@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
-    Plan, Subscription, SubscriptionStatus, User,
+    Plan, SearchConfig, Subscription, SubscriptionStatus, User, UserProfile,
 )
 from backend.app.services import admin_service, dashboard_service
 from backend.app.services.payments import get_payment_provider
@@ -63,7 +63,7 @@ def add_run(db, user, status=AutomationStatus.RUNNING, **kw):
 
 
 # ----------------------------------------------------------------------------- access
-ADMIN_GETS = ["/analytics", "/users", "/subscriptions", "/automation-jobs", "/applications", "/logs",
+ADMIN_GETS = ["/analytics", "/users", "/subscriptions", "/automation-jobs", "/applications", "/companies", "/logs",
               "/audit-log", "/workers", "/plans", "/email"]
 
 
@@ -83,6 +83,16 @@ def test_regular_users_cannot_change_anything(alice, db):
 
 
 # ----------------------------------------------------------------------------- analytics
+def test_analytics_includes_mock_interviews(admin, db):
+    out = data(get(admin, "/analytics"))
+    mi = out.get("mock_interviews")
+    assert mi is not None
+    assert "total_sessions" in mi
+    assert "this_month" in mi
+    assert "by_status" in mi
+    assert "failed_feedback_jobs_24h" in mi
+
+
 def test_analytics_counts_users_plans_and_runs(admin, alice, db):
     add_run(db, alice.user)
     out = data(get(admin, "/analytics"))
@@ -289,6 +299,38 @@ def test_lists_across_users(admin, alice, db):
     assert data(get(admin, "/logs", level="info", q="linkedin"))["total"] == 1
 
 
+def test_companies_from_searches_and_jobs(admin, alice, db):
+    job = Job(external_id="42", title="Backend Engineer", company="Acme")
+    db.add(job)
+    db.flush()
+    db.add(Application(user_id=alice.user.id, job_id=job.id, status=ApplicationStatus.APPLIED,
+                       applied_at=datetime.now(timezone.utc)))
+    db.add(SearchConfig(user_id=alice.user.id, companies=["Globex", "Acme"]))
+    db.commit()
+
+    listed = data(get(admin, "/companies"))
+    by_name = {item["company"]: item for item in listed["items"]}
+    assert set(by_name) == {"Acme", "Globex"}
+    assert by_name["Acme"]["jobs"] == 1 and by_name["Acme"]["applied"] == 1
+    assert by_name["Acme"]["search_filters"] == 1 and by_name["Acme"]["user_emails"] == ["alice@example.com"]
+    assert by_name["Globex"]["jobs"] == 0 and by_name["Globex"]["search_filters"] == 1
+    assert data(get(admin, "/companies", q="globex"))["items"][0]["company"] == "Globex"
+
+    alice.user.first_name = "Ada"
+    job.description = "Send your CV to hiring@acme.com or call +91 98450 11223."
+    db.add(UserProfile(user_id=alice.user.id, phone="+91 99999 00000", headline="Engineer", current_company="Acme"))
+    db.commit()
+    detail = data(get(admin, "/companies/detail", name="acme"))
+    assert detail["company"] == "Acme" and detail["applied"] == 1 and detail["jobs"] == 1
+    assert detail["job_list"][0]["title"] == "Backend Engineer" and detail["job_list"][0]["applied"] == 1
+    assert detail["users"] == 1
+    contact = detail["contacts"][0]
+    assert contact["email"] == "hiring@acme.com" and "+91 98450 11223" in contact["phone"]
+    assert contact["email"] != "alice@example.com"
+    assert all(row["email"] != "alice@example.com" for row in detail["contacts"])
+    assert get(admin, "/companies/detail", name="nobody").status_code == 404
+
+
 def test_subscriptions_list(admin, alice):
     data(send(admin, "POST", f"/users/{alice.user.id}/grant-plan", {"plan": "pro", "months": 1}))
     subs = data(get(admin, "/subscriptions"))["items"]
@@ -404,40 +446,56 @@ def test_admin_verifies_or_resends_verification(admin, app, outbox, db):
 
 # ----------------------------------------------------------------------------- plans
 def plan_body(**kw):
-    return {"name": "Starter", "price_cents": 49900, "applications_per_month": 100, "resumes": 3,
+    return {"name": "Starter", "price_cents": 49900, "applications_per_month": 100, "mock_interviews_per_month": 10,
             "is_active": True, "sort_order": 1, **kw}
 
 
 def test_plans_list_includes_limits_and_subscribers(admin):
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
     plans = data(get(admin, "/plans"))["plans"]
-    assert [p["code"] for p in plans] == ["free", "starter", "pro", "premium", "campus", "campus_pro"]
+    assert [p["code"] for p in plans] == ["free", "starter", "pro", "premium", "unlimited", "campus", "campus_pro"]
     starter = plans[1]
     assert starter["kind"] == "personal"
-    assert starter["limits"] == {"applications_per_month": 100, "resumes": 3} and starter["subscribers"] == 0
+    assert starter["limits"] == {
+        "applications_per_month": 100,
+        "mock_interviews_per_month": 10,
+        "resumes": RESUMES_UNLIMITED,
+        "resumes_unlimited": True,
+    } and starter["subscribers"] == 0
     campus = next(p for p in plans if p["code"] == "campus")
     assert campus["kind"] == "institute" and campus["limits"]["seats"] == 10
 
 
 def test_editing_an_institute_plan_updates_seats(admin):
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
     out = data(send(admin, "PUT", "/plans/campus", {
-        "name": "Campus", "price_cents": 49900, "applications_per_month": 100, "resumes": 3,
-        "seats": 25, "is_active": True, "sort_order": 4,
+        "name": "Campus", "price_cents": 49900, "applications_per_month": 100, "mock_interviews_per_month": 10,
+        "seats": 25, "is_active": True, "sort_order": 5,
     }))
     assert out["kind"] == "institute" and out["limits"] == {
-        "applications_per_month": 100, "resumes": 3, "seats": 25,
+        "applications_per_month": 100,
+        "mock_interviews_per_month": 10,
+        "resumes": RESUMES_UNLIMITED,
+        "resumes_unlimited": True,
+        "seats": 25,
     }
 
 
 def test_editing_a_plan_changes_limits_for_everyone_on_it(admin, alice, db):
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
     out = data(send(admin, "PUT", "/plans/free", {"name": "Free", "price_cents": 0, "applications_per_month": 25,
-                                                 "resumes": 2, "is_active": True, "sort_order": 0}))
-    assert out["limits"] == {"applications_per_month": 25, "resumes": 2}
+                                                 "mock_interviews_per_month": 3, "is_active": True, "sort_order": 0}))
+    assert out["limits"]["applications_per_month"] == 25
+    assert out["limits"]["resumes"] == RESUMES_UNLIMITED
     assert alice.get("/api/usage").json()["data"]["applications"]["limit"] == 25
     public = {p["code"]: p for p in alice.get("/api/plans").json()["data"]["plans"]}
     assert public["free"]["limits"]["applications_per_month"] == 25
     action = db.scalar(select(AdminAction).where(AdminAction.action == "plan.update"))
     assert action.target == "plan:free"
-    assert action.details["limits"][1] == {"applications_per_month": 25, "resumes": 2}
+    assert action.details["limits"][1]["applications_per_month"] == 25
 
 
 def test_hiding_a_plan_stops_new_purchases(admin, alice):
@@ -448,8 +506,8 @@ def test_hiding_a_plan_stops_new_purchases(admin, alice):
 
 
 @pytest.mark.parametrize("code,body,error", [
-    ("free", {"name": "Free", "price_cents": 100, "applications_per_month": 10, "resumes": 1}, "INVALID_PRICE"),
-    ("free", {"name": "Free", "price_cents": 0, "applications_per_month": 10, "resumes": 1, "is_active": False},
+    ("free", {"name": "Free", "price_cents": 100, "applications_per_month": 10, "mock_interviews_per_month": 3}, "INVALID_PRICE"),
+    ("free", {"name": "Free", "price_cents": 0, "applications_per_month": 10, "mock_interviews_per_month": 3, "is_active": False},
      "CANNOT_DISABLE_FREE"),
     ("starter", plan_body(price_cents=50), "INVALID_PRICE"),
     ("gold", plan_body(), "PLAN_NOT_FOUND"),
@@ -459,6 +517,21 @@ def test_hiding_a_plan_stops_new_purchases(admin, alice):
 def test_plan_validation(admin, code, body, error):
     resp = send(admin, "PUT", f"/plans/{code}", body)
     assert resp.status_code in (404, 422) and resp.json()["error"]["code"] == error
+
+
+def test_admin_can_create_and_delete_unused_plan(admin, db):
+    body = plan_body(name="Growth", price_cents=79900, applications_per_month=200, mock_interviews_per_month=20, sort_order=50)
+    out = data(send(admin, "POST", "/plans", {"code": "growth", "kind": "personal", **body}))
+    assert out["code"] == "growth" and out["limits"]["applications_per_month"] == 200
+    assert db.scalar(select(Plan).where(Plan.code == "growth")) is not None
+    deleted = data(send(admin, "DELETE", "/plans/growth"))
+    assert deleted["deleted"] == "growth"
+    assert db.scalar(select(Plan).where(Plan.code == "growth")) is None
+
+
+def test_admin_cannot_delete_free_or_subscribed_plan(admin, db):
+    resp = send(admin, "DELETE", "/plans/free")
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "CANNOT_DELETE_FREE"
 
 
 def test_price_change_creates_a_new_provider_plan(admin, app, db):

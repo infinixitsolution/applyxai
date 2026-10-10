@@ -110,14 +110,11 @@ def test_rejects_oversized_file(alice, storage_dir, monkeypatch):
     assert not list(storage_dir.rglob("*.*"))
 
 
-def test_free_plan_resume_limit_is_enforced_server_side(alice, db):
+def test_free_plan_allows_unlimited_resume_uploads(alice):
     assert upload(alice).status_code == 201
-    resp = upload(alice)
-    assert resp.status_code == 403 and resp.json()["error"]["code"] == "PLAN_LIMIT_REACHED"
-
-    give_plan(db, "alice@example.com", "starter", resumes=3)
     assert upload(alice).status_code == 201
-    assert alice.get("/api/resumes").json()["data"]["limit"] == 3
+    body = alice.get("/api/resumes").json()["data"]
+    assert body["limit"] >= 999_000
 
 
 def test_intake_fills_profile_and_cover_letter(alice, db):

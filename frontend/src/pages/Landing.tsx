@@ -132,7 +132,11 @@ function MarketingPricing() {
                 {plan.limits.applications_per_month.toLocaleString()} LinkedIn applications / month
               </p>
               <ul className="plan-points">
-                <li>{plan.limits.resumes} master resume{plan.limits.resumes === 1 ? "" : "s"}</li>
+                <li>
+                  {(plan.limits.mock_interviews_per_month ?? 0).toLocaleString()} mock interview
+                  {(plan.limits.mock_interviews_per_month ?? 0) === 1 ? "" : "s"} / month
+                </li>
+                <li>Unlimited resume building & uploads</li>
                 <li>AI tailor per job (optional)</li>
                 <li>Desktop agent + CSV export</li>
               </ul>
@@ -306,7 +310,7 @@ export function LandingPage() {
         <div className="home-wrap">
           <h2>Interview prep</h2>
           <p className="home-lead">Practice for roles you discovered on LinkedIn</p>
-          <p><Link className="home-cta" to="/register">Explore interview tools</Link></p>
+          <p><Link className="home-cta" to="/register">Sign up to practice mock interviews</Link></p>
           <div className="interview-blocks">
             <article className="interview-card">
               <FeatureIcon kind="bot" />

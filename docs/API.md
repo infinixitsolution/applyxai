@@ -173,7 +173,7 @@ Usage resets on the first of each month (UTC). Only the first successful submiss
 
 Notification object: `{id, type, title, body, link, read_at, created_at}`. `link` is always an in-app path (for example `/automation`).
 
-Known `type` values include `run_finished`, `limit_reached`, `job_applied`, `daily_report`, billing events (`plan_active`, `payment_failed`, `plan_ended`, `plan_cancelled`, `plan_granted`), `admin_broadcast`, `institute_invite`, `institute_invite_accepted`, and `partner_commission`. Copy for in-app and email channels is editable in admin **Templates** settings. The `daily_report` event is emitted once per UTC day by the Celery beat task when Redis/worker are running.
+Known `type` values include `run_finished`, `limit_reached`, `form_question`, `job_applied`, `daily_report`, billing events (`plan_active`, `payment_failed`, `plan_ended`, `plan_cancelled`, `plan_granted`), `admin_broadcast`, `institute_invite`, `institute_invite_accepted`, and `partner_commission`. Copy for in-app and email channels is editable in admin **Templates** settings. The `daily_report` event is emitted once per UTC day by the Celery beat task when Redis/worker are running.
 
 ## Automation
 
@@ -189,7 +189,7 @@ For the logged-in user (cookie session, CSRF on POST/DELETE). How runs execute i
 | POST | `/automation/{id}/resume` | |
 | POST | `/automation/{id}/stop` | A run no computer has picked up yet is cancelled at once; otherwise it stops after the current job |
 | GET | `/automation/devices` | Connected computers: `[{id, name, platform, agent_version, paired_at, last_seen_at, online}]` |
-| POST | `/automation/devices/pairing-code` | `{code: "ABCD-2345", expires_at}`. Valid 10 minutes, single use; a new code voids the previous one. `DEVICE_LIMIT_REACHED` 409 at 5 computers. 10/hour |
+| POST | `/automation/devices/pairing-code` | `{code: "ABCD-2345", expires_at}`. Valid 10 minutes, single use; a new code voids the previous one. Pairing or approving a connect session replaces any other active computer (one per account). 10/hour |
 | DELETE | `/automation/devices/{id}` | Disconnects the computer immediately |
 
 Run object: `{id, status, control, dry_run, created_at, started_at, finished_at, current_job, total_jobs, successful_count, failed_count, skipped_count, error_message, stop_reason, claimed}`. `status` ∈ queued, running, paused, completed, failed, cancelled; `control` ∈ run, pause, stop; `stop_reason` ∈ "", user, plan_limit.
@@ -225,6 +225,39 @@ Subscription object: `{id, plan: {code, name, price_cents, currency, interval}, 
 Switching to another paid plan starts a new subscription; when it activates, the previous one is cancelled at Razorpay immediately, with no refund for unused days. A failed renewal (`past_due`) drops the user to Free limits until a payment succeeds.
 
 **Webhook.** Configure it in the Razorpay Dashboard for the `subscription.*` events (at least activated, charged, pending, halted, cancelled, completed). The `X-Razorpay-Signature` header must be the HMAC-SHA256 of the raw body with `PAYMENT_WEBHOOK_SECRET`, or the request is refused with 400 `INVALID_SIGNATURE`. Each `X-Razorpay-Event-Id` is processed once (`{"duplicate": true}` on redelivery). The payload only signals that something changed: the subscription's current state is always re-read from Razorpay's API, so events arriving out of order can't move it backwards. If Razorpay can't be reached, the webhook answers 502 and nothing is recorded, so Razorpay retries it.
+
+## Mock interviews
+
+Candidate auth. Requires platform AI enabled with `features.mock_interview`. TTS/transcribe need an OpenAI-compatible provider.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mock-interviews/sessions` | Paginated session history |
+| POST | `/mock-interviews/sessions` | Body: `{ application_id, interview_types[] }` — `mixed` overrides other types |
+| GET | `/mock-interviews/sessions/{id}` | Session + message transcript |
+| POST | `/mock-interviews/sessions/{id}/opening` | First interviewer line + optional MP3 (base64 in JSON) |
+| POST | `/mock-interviews/sessions/{id}/turns` | Body: `{ content, client_turn_id? }` — candidate answer; returns next interviewer turn |
+| POST | `/mock-interviews/sessions/{id}/messages/{message_id}/tts` | TTS for a saved interviewer line (session-scoped) |
+| POST | `/mock-interviews/sessions/{id}/complete` | End session; enqueues feedback (202 + job, or 200 when inline) |
+| POST | `/mock-interviews/sessions/{id}/regenerate-feedback` | Re-run feedback on saved transcript |
+| GET | `/mock-interviews/feedback-jobs/{job_id}` | Poll async feedback job status |
+| POST | `/mock-interviews/transcribe` | Multipart `file` — Whisper fallback STT |
+
+**Feedback object** (on `complete` and `session.feedback` when completed):
+
+```json
+{
+  "overall_score": 72,
+  "dimensions": [
+    { "key": "communication", "label": "Communication", "score": 75, "notes": "…" }
+  ],
+  "strengths": ["…"],
+  "improvements": ["…"],
+  "sample_answers": [{ "question": "…", "suggestion": "…" }]
+}
+```
+
+See [MOCK_INTERVIEW.md](./MOCK_INTERVIEW.md) for UX and browser notes.
 
 ## Other endpoints
 
@@ -266,7 +299,7 @@ Every route under `/admin` needs a session whose user has `is_admin`; anyone els
 | PUT | `/admin/settings/payments` | `{provider: null\|razorpay, key_id, key_secret?, webhook_secret?}`. Secrets encrypted; never returned. Overrides `.env` when `key_id` is saved here |
 | POST | `/admin/settings/payments/test` | Validates Razorpay Key ID + secret against the API |
 | POST | `/admin/settings/payments/sync-plans` | Creates paid plans at Razorpay (same as `python -m backend.app.cli sync-plans`) |
-| PUT | `/admin/settings/ai` | `{enabled, provider, base_url, api_key?, models: {fast, strong, embedding}, features: {applications, resume}}`. API key encrypted; never returned. Configure before enabling user AI toggles in production |
+| PUT | `/admin/settings/ai` | `{enabled, provider, base_url, api_key?, models: {fast, strong, embedding}, features: {applications, resume, mock_interview}}`. API key encrypted; never returned. Configure before enabling user AI toggles in production |
 | POST | `/admin/settings/ai/test` | Smoke-test chat with the configured provider |
 | GET | `/admin/email` | Legacy summary; prefer `/admin/settings`. `{mode, host, port, …, unverified_users}` |
 | POST | `/admin/email/test` | Body `{to?}` (defaults to the admin's address). Sends right away and returns `{delivered, mode, error}`; `error` is the mail server's reason when it refuses. 10/hour per admin |

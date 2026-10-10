@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
+  Building2,
   CreditCard,
   IndianRupee,
   Laptop,
   ListChecks,
+  Mic,
   Package,
   Receipt,
   ServerCog,
@@ -23,7 +25,7 @@ const RUN_STATUSES: RunStatus[] = ["queued", "running", "paused", "completed", "
 
 const QUICK_LINKS = [
   { to: "/admin/users", label: "Users", icon: Users },
-  { to: "/admin/institutes", label: "Institutes", icon: Users },
+  { to: "/admin/institutes", label: "Institutes", icon: Building2 },
   { to: "/admin/partners", label: "Partners", icon: CreditCard },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
@@ -52,7 +54,7 @@ export function AdminOverviewPage() {
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
 
-  const { users, subscriptions: subs, applications: apps, automation } = data;
+  const { users, subscriptions: subs, applications: apps, automation, mock_interviews: mi } = data;
   const paying = subs.by_plan.reduce((n, p) => n + p.count, 0);
   const unverified = Math.max(0, users.total - users.verified);
   const appsThisMonth = APPLICATION_STATUSES.reduce((n, s) => n + apps.this_month_by_status[s], 0);
@@ -126,7 +128,19 @@ export function AdminOverviewPage() {
         />
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="!py-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mock interviews</p>
+          <p className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-900">
+            <Mic className="h-4 w-4 text-brand-600" aria-hidden />
+            {mi.this_month.toLocaleString()}
+            <span className="text-sm font-normal text-slate-500">this month</span>
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {mi.by_status.completed ?? 0} completed · {mi.by_status.active ?? 0} active
+            {mi.failed_feedback_jobs_24h > 0 ? ` · ${mi.failed_feedback_jobs_24h} failed jobs (24h)` : ""}
+          </p>
+        </Card>
         <Card className="!py-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Sign-ups</p>
           <p className="mt-1 text-lg font-semibold text-slate-900">{users.new_30d.toLocaleString()} <span className="text-sm font-normal text-slate-500">last 30 days</span></p>

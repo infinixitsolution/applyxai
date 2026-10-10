@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, Copy, Laptop, Pause, Play, ShieldCheck, Square, Trash2 } from "lucide-react";
+import { Bot, CheckCircle2, Copy, Laptop, Monitor, Pause, Play, ShieldCheck, Square, Trash2, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AgentDownloadPanel } from "../../components/AgentDownloadPanel";
 import { PendingQuestionsModal } from "../../components/PendingQuestionsModal";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
+import { RunStatusBadge } from "../../components/RunStatusBadge";
 import { Alert, Badge, Button, ButtonLink, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
 import { agentServerUrl } from "../../lib/config";
 import { formatDateTime, formatRelative } from "../../lib/format";
@@ -18,7 +19,6 @@ import type {
   PendingFormQuestion,
   ResumeRunMode,
   RunLogLine,
-  RunStatus,
 } from "../../types";
 
 const LIVE_POLL_MS = 3000;
@@ -26,20 +26,6 @@ const IDLE_POLL_MS = 15000;
 const LOG_POLL_MS = 2500;
 const LOG_PAGE = 200;
 const MAX_LOG_LINES = 1000;
-
-const RUN_STATUS: Record<RunStatus, { label: string; tone: "blue" | "amber" | "green" | "red" | "slate" }> = {
-  queued: { label: "Waiting", tone: "blue" },
-  running: { label: "Running", tone: "blue" },
-  paused: { label: "Paused", tone: "amber" },
-  completed: { label: "Finished", tone: "green" },
-  failed: { label: "Failed", tone: "red" },
-  cancelled: { label: "Stopped", tone: "slate" },
-};
-
-export function RunStatusBadge({ status }: { status: RunStatus }) {
-  const { label, tone } = RUN_STATUS[status];
-  return <Badge tone={tone}>{label}</Badge>;
-}
 
 export function AutomationPage() {
   const client = useQueryClient();
@@ -94,9 +80,10 @@ export function AutomationPage() {
       <PageHeader title="Automation" description="Start, pause, and watch your job applications as they happen."
                   actions={
                     <Button variant="secondary" className="w-full sm:w-auto" onClick={() => setConnectOpen(true)}>
-                      <Laptop className="h-4 w-4" aria-hidden /> Connect a computer
+                      <Laptop className="h-4 w-4" aria-hidden /> {data.devices.length ? "Switch computer" : "Connect a computer"}
                     </Button>
                   } />
+      <AutomationStatusStrip overview={data} onConnect={() => setConnectOpen(true)} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {data.active
@@ -495,10 +482,51 @@ function RunLog({ run, live }: { run: AutomationRun; live: boolean }) {
 }
 
 // ------------------------------------------------------------------------------------------ devices
+function AutomationStatusStrip({ overview, onConnect }: { overview: AutomationOverview; onConnect: () => void }) {
+  const { devices, agent_online, active, readiness } = overview;
+  const computer = devices[0] ?? null;
+  let headline = "Connect your computer to run applications";
+  let detail = "Install the desktop agent, approve the connection in your browser, then start a run.";
+  if (computer) {
+    headline = computer.online ? `${computer.name} is online` : `${computer.name} is offline`;
+    detail = computer.online
+      ? "The agent is ready. Start or resume a run from the panel on the left."
+      : "Open the desktop agent and click Start Agent, or connect a different computer.";
+  } else if (!readiness.ready) {
+    detail = "Finish profile, preferences, and resume setup, then connect one computer.";
+  }
+  if (active) {
+    headline = active.control === "pause" ? "Run paused" : "Run in progress";
+    detail = active.current_job || "Your agent is working through saved job preferences.";
+  }
+
+  return (
+    <section className="mb-6 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 p-4 text-white shadow-sm ring-1 ring-slate-700/50 sm:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10">
+            {active ? <Bot className="h-5 w-5" aria-hidden /> : agent_online ? <Wifi className="h-5 w-5 text-emerald-300" aria-hidden /> : <WifiOff className="h-5 w-5 text-slate-400" aria-hidden />}
+          </span>
+          <div className="min-w-0">
+            <p className="font-semibold tracking-tight">{headline}</p>
+            <p className="mt-0.5 text-sm text-slate-300">{detail}</p>
+          </div>
+        </div>
+        {!computer && (
+          <Button variant="secondary" size="sm" className="shrink-0 border-white/20 bg-white/10 text-white hover:bg-white/20" onClick={onConnect}>
+            Connect computer
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect: () => void }) {
   const client = useQueryClient();
   const toast = useToast();
   const [removing, setRemoving] = useState<AgentDevice | null>(null);
+  const active = devices[0] ?? null;
   const remove = useMutation({
     mutationFn: (id: string) => automation.removeDevice(id),
     onSuccess: () => {
@@ -510,39 +538,52 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
   });
 
   return (
-    <Card title="Your computers">
-      {devices.length === 0 ? (
-        <div className="text-sm text-slate-600">
-          <p>No computers connected yet.</p>
+    <section className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Active computer</h2>
+          <p className="mt-0.5 text-xs text-slate-500">One computer per account. Connecting a new one replaces the previous.</p>
+        </div>
+        {active && (
+          <button type="button" onClick={onConnect} className="shrink-0 text-xs font-medium text-brand-600 hover:underline">
+            Replace
+          </button>
+        )}
+      </div>
+      {active ? (
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+          <span className={cx("flex h-11 w-11 shrink-0 items-center justify-center rounded-lg",
+            active.online ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600")}>
+            <Monitor className="h-5 w-5" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate text-sm font-medium text-slate-900">{active.name}</p>
+              <Badge tone={active.online ? "green" : "slate"}>{active.online ? "Online" : "Offline"}</Badge>
+            </div>
+            <p className="text-xs text-slate-500">
+              {active.online ? "Agent is polling" : active.last_seen_at ? `Last seen ${formatRelative(active.last_seen_at)}` : "Not seen yet"}
+              {active.platform && ` · ${active.platform}`}
+            </p>
+          </div>
+          <button type="button" aria-label={`Disconnect ${active.name}`} onClick={() => setRemoving(active)}
+                  className="rounded p-1.5 text-slate-400 hover:bg-white hover:text-red-600">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 text-sm text-slate-600">
+          <p>No computer linked yet.</p>
           <div className="mt-3">
             <AgentDownloadPanel />
           </div>
-          <Button className="mt-3" size="sm" variant="secondary" onClick={onConnect}>Connect a computer</Button>
+          <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={onConnect}>Connect a computer</Button>
         </div>
-      ) : (
-        <ul className="-my-2 divide-y divide-slate-100">
-          {devices.map((d) => (
-            <li key={d.id} className="flex items-center gap-3 py-2">
-              <span className={cx("h-2.5 w-2.5 shrink-0 rounded-full", d.online ? "bg-emerald-500" : "bg-slate-300")} aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-900">{d.name}</p>
-                <p className="text-xs text-slate-500">
-                  {d.online ? "Online" : d.last_seen_at ? `Last seen ${formatRelative(d.last_seen_at)}` : "Not seen yet"}
-                  {d.platform && ` \u00b7 ${d.platform}`}
-                </p>
-              </div>
-              <button type="button" aria-label={`Disconnect ${d.name}`} onClick={() => setRemoving(d)}
-                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
       <ConfirmDialog open={removing !== null} onClose={() => setRemoving(null)} title="Disconnect this computer?" danger
                      confirmLabel="Disconnect" loading={remove.isPending} onConfirm={() => removing && remove.mutate(removing.id)}
                      message={`${removing?.name ?? "This computer"} won't be able to run automations until you connect it again.`} />
-    </Card>
+    </section>
   );
 }
 
@@ -587,16 +628,21 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
   const server = agentServerUrl();
 
   return (
-    <Modal open={open} onClose={onClose} title="Connect a computer" wide
+    <Modal open={open} onClose={onClose} title={knownIds.length ? "Switch active computer" : "Connect a computer"} wide
            footer={<Button variant={connected ? "primary" : "secondary"} onClick={onClose}>{connected ? "Done" : "Close"}</Button>}>
       {connected ? (
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-500" aria-hidden />
-          <p className="font-medium text-slate-900">{connected.name} is connected</p>
-          <p>Click <strong>Start Agent</strong> in the desktop app, then start a run from this page.</p>
+          <p className="font-medium text-slate-900">{connected.name} is now your active computer</p>
+          <p>Any previous computer was disconnected. Click <strong>Start Agent</strong> in the desktop app, then start a run from this page.</p>
         </div>
       ) : (
         <ol className="space-y-5">
+          {knownIds.length > 0 && (
+            <Alert kind="info">
+              Approving a new connection replaces your current computer. Only one machine can run automation at a time.
+            </Alert>
+          )}
           <li>
             <p className="font-medium text-slate-900">1. Install and open the ApplyXAI desktop agent on this computer.</p>
             <div className="mt-2">

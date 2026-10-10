@@ -80,6 +80,13 @@ def _run(args) -> int:
     cfg = _load(args)
     if cfg is None:
         return 2
+    from agent import update_check
+
+    release = update_check.newer_available(cfg.server, AGENT_VERSION)
+    if release:
+        logging.getLogger("applyxai.agent").warning(
+            "A newer agent is available (%s). Download: %s", release["version"], release["download_url"] or "(see applyxai.com)",
+        )
     # Disable SSL verification for self-signed certificates in development
     supervisor = Supervisor(ApiClient(cfg.server, cfg.token, verify_ssl=False), _home(args), cfg.user_id)
     logging.getLogger("applyxai.agent").info(

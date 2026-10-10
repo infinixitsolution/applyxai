@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger("applyxai")
 
 from backend.app.api import (
-    admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, notifications,
-    partner, plans, profile, referrals, resumes, site,
+    admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, mock_interviews,
+    notifications, partner, plans, profile, referrals, resumes, site,
 )
 from backend.app.core.config import settings
 from backend.app.core.csrf import CSRFMiddleware
@@ -35,6 +35,14 @@ async def _lifespan(_app: FastAPI):
                 logger.info("Synced platform notification and email template defaults")
     except Exception:
         logger.exception("Platform template default sync failed")
+    if settings.APP_ENV == "production":
+        logger.info(
+            "Production runtime: db_postgres=%s rate_limit_redis=%s payment_provider=%s clamav=%s",
+            not settings.is_sqlite,
+            not settings.RATE_LIMIT_STORAGE_URL.startswith("memory"),
+            settings.PAYMENT_PROVIDER,
+            bool((settings.CLAMAV_HOST or "").strip()),
+        )
     yield
 
 
@@ -64,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(resumes.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(applications.router, prefix="/api")
+    app.include_router(mock_interviews.router, prefix="/api")
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(notifications.router, prefix="/api")
     app.include_router(plans.router, prefix="/api")

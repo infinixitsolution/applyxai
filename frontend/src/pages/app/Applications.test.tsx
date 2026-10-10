@@ -7,6 +7,36 @@ import { ApplicationsPage } from "./Applications";
 
 const ok = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200 });
 
+const dashboardStats = {
+  applications_by_status: {
+    discovered: 0, queued: 0, running: 0, applied: 1, failed: 0, skipped: 0, external: 0, cancelled: 0,
+  },
+  total_applied: 1,
+  applied_today: 1,
+  success_rate: 1,
+  daily: [{ date: "2026-10-10", applied: 1, failed: 0 }],
+  top_companies: [{ company: "Hired", applied: 1 }],
+  recent_applications: [],
+  automation: { active: null, last: null },
+  usage: {
+    plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+    applications: { used: 1, limit: 10, remaining: 9 }, resumes: { used: 0, limit: 1, remaining: 1 },
+    jobs_discovered: 1, runtime_seconds: 0, limit_reached: false,
+  },
+};
+
+function mockFetch(routes: Record<string, unknown>) {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+    const url = String(input).split("?")[0]!;
+    if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+    if (url.includes("/applications/app1")) {
+      return ok({ ...listItem, job: { ...listItem.job, description: "Build models." } });
+    }
+    if (url.includes("/applications")) return ok(routes.list ?? { items: [listItem], total: 1, page: 1, page_size: 20 });
+    throw new Error(`unexpected fetch: ${url}`);
+  }));
+}
+
 const listItem = {
   id: "app1",
   status: "applied",
@@ -34,13 +64,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("application view", () => {
   it("opens a popup that shows the resume added for the job", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
-      const url = String(input);
-      if (url.includes("/applications/app1")) {
-        return ok({ ...listItem, job: { ...listItem.job, description: "Build models." } });
-      }
-      return ok({ items: [listItem], total: 1, page: 1, page_size: 20 });
-    }));
+    mockFetch({});
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
@@ -60,7 +84,7 @@ describe("application view", () => {
   });
 
   it("opens a resume popup from the attachment icon next to the date", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ok({ items: [listItem], total: 1, page: 1, page_size: 20 })));
+    mockFetch({});
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>

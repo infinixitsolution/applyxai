@@ -77,17 +77,29 @@ def config_path(home: Path) -> Path:
 
 def load(home: Path) -> AgentConfig | None:
     try:
+        from agent import credentials
+
         data = json.loads(config_path(home).read_text(encoding="utf-8"))
-        return AgentConfig(**{k: data[k] for k in ("server", "token", "device_id", "user_id")}, name=data.get("name", ""))
+        token = credentials.load_token() or data.get("token") or ""
+        return AgentConfig(
+            **{k: data[k] for k in ("server", "device_id", "user_id")},
+            token=token,
+            name=data.get("name", ""),
+        )
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
 def save(home: Path, config: AgentConfig) -> Path:
+    from agent import credentials
+
     home.mkdir(parents=True, exist_ok=True)
     path = config_path(home)
+    payload = asdict(config)
+    if credentials.store_token(config.token):
+        payload["token"] = ""
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if os.name != "nt":
         os.chmod(tmp, 0o600)                         # %LOCALAPPDATA% is already private to the user
     os.replace(tmp, path)
@@ -95,6 +107,9 @@ def save(home: Path, config: AgentConfig) -> Path:
 
 
 def forget(home: Path) -> None:
+    from agent import credentials
+
+    credentials.clear_token()
     try:
         config_path(home).unlink()
     except FileNotFoundError:

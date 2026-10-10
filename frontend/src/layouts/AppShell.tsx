@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
-  ArrowLeft, Bot, Briefcase, Building2, CreditCard, FileText, Handshake, LayoutDashboard, Link2, ListChecks, LogOut,
+  Bot, Briefcase, Building, Building2, CreditCard, FileText, Handshake, LayoutDashboard, Link2, ListChecks, LogOut, Mic,
   Megaphone, Menu, Package, Receipt, ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -10,13 +10,14 @@ import { Logo } from "../components/Logo";
 import { AgentDownloadButton } from "../components/AgentDownloadButton";
 import { CandidateWelcomeModal } from "../features/CandidateWelcomeModal";
 import { NotificationBell } from "../components/NotificationBell";
-import { cx } from "../components/ui";
+import { cx, UserAvatar } from "../components/ui";
 import { auth } from "../services/endpoints";
 
 const APP_NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/app/jobs", label: "Jobs", icon: Briefcase },
   { to: "/app/applications", label: "Applications", icon: ListChecks },
+  { to: "/app/mock-interview", label: "Mock interview", icon: Mic },
   { to: "/app/automation", label: "Automation", icon: Bot },
   { to: "/app/resumes", label: "Resumes", icon: FileText },
   { to: "/app/preferences", label: "Preferences", icon: SlidersHorizontal },
@@ -33,6 +34,7 @@ const ADMIN_NAV = [
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
+  { to: "/admin/companies", label: "Companies", icon: Building },
   { to: "/admin/plans", label: "Plans", icon: Package },
   { to: "/admin/system", label: "Settings", icon: ServerCog },
 ];
@@ -73,19 +75,35 @@ function navFor(variant: Variant) {
 }
 
 function SidebarNav({ variant, onNavigate }: { variant: Variant; onNavigate?: () => void }) {
+  const candidate = variant === "app";
+  const adminNav = variant === "admin";
   return (
-    <nav className="flex flex-1 flex-col gap-1 px-3 py-4" aria-label="Main">
+    <nav className="flex flex-1 flex-col gap-0.5 px-3 py-4" aria-label="Main">
       {navFor(variant).map(({ to, label, icon: Icon, end }) => (
         <NavLink key={to} to={to} end={end} onClick={onNavigate}
                  className={({ isActive }) => cx(
-                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                   isActive ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                   "relative flex items-center gap-3 rounded-lg py-2.5 pl-3 pr-3 text-sm font-medium transition-colors",
+                   isActive && candidate && "bg-brand-50 pl-4 text-brand-700 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-brand-600",
+                   isActive && adminNav && "bg-slate-100 pl-4 text-slate-900 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-slate-900",
+                   isActive && !candidate && !adminNav && "bg-brand-50 text-brand-700",
+                   !isActive && "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                  )}>
           <Icon className="h-5 w-5 shrink-0" aria-hidden />
           {label}
         </NavLink>
       ))}
     </nav>
+  );
+}
+
+function CandidateSidebarFooter() {
+  return (
+    <div className="mx-3 mb-4 rounded-xl bg-gradient-to-br from-brand-50 to-white p-4 ring-1 ring-brand-100">
+      <p className="text-sm font-semibold text-slate-900">Your PC, your login</p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+        Automation runs in Chrome on your computer. ApplyXAI never receives your LinkedIn password.
+      </p>
+    </div>
   );
 }
 
@@ -129,11 +147,12 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
   const switchLink = "hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 sm:inline-flex";
 
   return (
-    <div className="min-h-screen bg-[#f4f7ff] font-sans text-slate-900">
+    <div className="min-h-screen bg-app-page font-sans text-slate-900">
       {variant === "app" && <CandidateWelcomeModal />}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white/95 backdrop-blur md:flex">
-        <div className="flex h-16 items-center px-6"><Brand variant={variant} /></div>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white md:flex">
+        <div className="flex h-16 items-center border-b border-slate-100 px-6"><Brand variant={variant} /></div>
         <SidebarNav variant={variant} />
+        {variant === "app" && <CandidateSidebarFooter />}
       </aside>
 
       {drawer && (
@@ -147,20 +166,19 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
               </button>
             </div>
             <SidebarNav variant={variant} onNavigate={() => setDrawer(false)} />
+            {variant === "app" && <CandidateSidebarFooter />}
           </aside>
         </div>
       )}
 
       <div className="md:pl-64">
-        <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-2 border-b border-slate-200/80 bg-white/95 px-3 py-2 backdrop-blur sm:gap-3 sm:px-6 sm:py-0">
+        <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-2 border-b border-slate-200/80 bg-white/95 px-3 py-2 shadow-sm shadow-slate-200/40 backdrop-blur sm:gap-3 sm:px-6 sm:py-0">
           <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
                   className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 md:hidden">
             <Menu className="h-5 w-5" />
           </button>
           <div className="flex-1" />
-          {variant === "admin" ? (
-            <Link to="/app" className={switchLink}><ArrowLeft className="h-4 w-4" aria-hidden /> Back to app</Link>
-          ) : user?.is_admin ? (
+          {variant !== "admin" && user?.is_admin ? (
             <Link to="/admin" className={switchLink}><Shield className="h-4 w-4" aria-hidden /> Admin</Link>
           ) : null}
           {variant === "app" && (
@@ -168,6 +186,9 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
               <AgentDownloadButton />
               <NotificationBell />
             </>
+          )}
+          {(variant === "app" || variant === "admin") && user && (
+            <UserAvatar name={name} email={user.email} />
           )}
           <div className="hidden text-right text-sm sm:block">
             <p className="font-medium text-slate-900">{name}</p>
@@ -178,7 +199,7 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
             <LogOut className="h-5 w-5" />
           </button>
         </header>
-        <main className={cx("mx-auto px-4 py-8 sm:px-6", variant === "admin" ? "max-w-7xl" : "max-w-6xl")}><Outlet /></main>
+        <main className={cx("mx-auto px-4 py-8 sm:px-6", variant === "app" || variant === "admin" ? "max-w-7xl" : "max-w-6xl")}><Outlet /></main>
       </div>
     </div>
   );

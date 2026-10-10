@@ -20,6 +20,7 @@ from backend.app.schemas.admin import (
     InstituteUpdateIn,
     PartnerCreateIn,
     PartnerUpdateIn,
+    PlanCreateIn,
     PlanUpdateIn,
     TestEmailIn,
     TestTemplateIn,
@@ -127,6 +128,17 @@ def stop_run(run_id: uuid.UUID, admin: User = Depends(require_admin), db: Sessio
 def applications(status: ApplicationStatus | None = None, q: str | None = Query(None, max_length=200),
                  params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
     return ok(admin_service.list_applications(db, params, status=status.value if status else None, q=q))
+
+
+@router.get("/companies", summary="Companies users searched for or that searches returned")
+def companies(q: str | None = Query(None, max_length=200),
+              params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
+    return ok(admin_service.list_companies(db, params, q=q))
+
+
+@router.get("/companies/detail", summary="One company's jobs, applications, and contacts")
+def company_detail(name: str = Query(min_length=1, max_length=255), db: Session = Depends(get_db)):
+    return ok(admin_service.company_detail(db, name))
 
 
 @router.get("/logs", summary="Automation log lines across all runs")
@@ -278,12 +290,22 @@ def post_settings_ai_test(admin: User = Depends(require_admin), db: Session = De
                           limiter: RateLimiter = Depends(get_rate_limiter)):
     limiter.hit("20/hour", "admin-ai-test", str(admin.id))
     try:
+        eff = ps.get_effective_ai(db)
+        feature = (
+            "mock_interview"
+            if eff.feature_on("mock_interview")
+            else "applications"
+            if eff.feature_on("applications")
+            else "resume"
+            if eff.feature_on("resume")
+            else "applications"
+        )
         reply = ai_service.complete(
             db,
             AiTask.TEST,
             system="You are a connectivity check. Reply with exactly OK.",
             user="Ping",
-            feature="applications",
+            feature=feature,
             max_tokens=16,
         )
         ok_reply = reply.strip().upper().startswith("OK")
@@ -333,10 +355,29 @@ def plans(db: Session = Depends(get_db)):
     return ok({"plans": admin_service.list_plans(db)})
 
 
+@router.post("/plans", summary="Add a new plan to the catalogue")
+def create_plan(body: PlanCreateIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+                provider: PaymentProvider = Depends(get_payment_provider)):
+    payload = body.model_dump()
+    kind = payload.pop("kind")
+    if hasattr(kind, "value"):
+        kind = kind.value
+    result = admin_service.create_plan(db, admin, provider, kind=kind, **payload)
+    db.commit()
+    return ok(result)
+
+
 @router.put("/plans/{code}", summary="Edit a plan's name, price, limits, and visibility")
 def update_plan(code: str, body: PlanUpdateIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
                 provider: PaymentProvider = Depends(get_payment_provider)):
     result = admin_service.update_plan(db, admin, provider, code, **body.model_dump())
+    db.commit()
+    return ok(result)
+
+
+@router.delete("/plans/{code}", summary="Remove a plan that has never been subscribed to")
+def delete_plan(code: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    result = admin_service.delete_plan(db, admin, code)
     db.commit()
     return ok(result)
 

@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Spinner } from "./components/ui";
 import { GuestOnly, RequireAdmin, RequireAuth, RequireInstitute, RequireOnboarded, RequirePartner } from "./auth/session";
 import { AppShell } from "./layouts/AppShell";
 import { PublicLayout } from "./layouts/PublicLayout";
-import { AdminApplicationsPage, AdminRunsPage, AdminSubscriptionsPage } from "./pages/admin/Lists";
+import { AdminCompanyPage } from "./pages/admin/Company";
+import { AdminApplicationsPage, AdminCompaniesPage, AdminRunsPage, AdminSubscriptionsPage } from "./pages/admin/Lists";
 import { AdminOverviewPage } from "./pages/admin/Overview";
 import { AdminPlansPage } from "./pages/admin/Plans";
 import { AdminSystemPage } from "./pages/admin/System";
@@ -27,6 +29,29 @@ import { AutomationPage } from "./pages/app/Automation";
 import { BillingPage } from "./pages/app/Billing";
 import { DashboardPage } from "./pages/app/Dashboard";
 import { JobsPage } from "./pages/app/Jobs";
+const MockInterviewSetupPage = lazy(() =>
+  import("./pages/app/MockInterview").then((m) => ({ default: m.MockInterviewSetupPage })),
+);
+const MockInterviewLivePage = lazy(() =>
+  import("./pages/app/MockInterview").then((m) => ({ default: m.MockInterviewLivePage })),
+);
+const MockInterviewReportPage = lazy(() =>
+  import("./pages/app/MockInterview").then((m) => ({ default: m.MockInterviewReportPage })),
+);
+
+function MockInterviewRoute({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <Spinner />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 import {
   NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
 } from "./pages/app/Pages";
@@ -80,6 +105,30 @@ export function App() {
         <Route index element={<DashboardPage />} />
         <Route path="jobs" element={<JobsPage />} />
         <Route path="applications" element={<ApplicationsPage />} />
+        <Route
+          path="mock-interview"
+          element={
+            <MockInterviewRoute>
+              <MockInterviewSetupPage />
+            </MockInterviewRoute>
+          }
+        />
+        <Route
+          path="mock-interview/:sessionId"
+          element={
+            <MockInterviewRoute>
+              <MockInterviewLivePage />
+            </MockInterviewRoute>
+          }
+        />
+        <Route
+          path="mock-interview/:sessionId/report"
+          element={
+            <MockInterviewRoute>
+              <MockInterviewReportPage />
+            </MockInterviewRoute>
+          }
+        />
         <Route path="automation" element={<AutomationPage />} />
         <Route path="automation/connect" element={<AgentConnectPage />} />
         <Route path="resumes" element={<ResumesPage />} />
@@ -102,6 +151,8 @@ export function App() {
         <Route path="subscriptions" element={<AdminSubscriptionsPage />} />
         <Route path="runs" element={<AdminRunsPage />} />
         <Route path="applications" element={<AdminApplicationsPage />} />
+        <Route path="companies" element={<AdminCompaniesPage />} />
+        <Route path="companies/:company" element={<AdminCompanyPage />} />
         <Route path="plans" element={<AdminPlansPage />} />
         <Route path="system" element={<AdminSystemPage />} />
         <Route path="*" element={<NotFoundPage />} />

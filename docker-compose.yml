@@ -1,0 +1,63 @@
+# Local / staging stack for ApplyXAI (API + worker + Postgres + Redis).
+# Build frontend separately (`cd frontend && npm run build`) and serve via nginx or Vite proxy.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: applyxai
+      POSTGRES_PASSWORD: applyxai
+      POSTGRES_DB: applyxai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    working_dir: /app
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://applyxai:applyxai@postgres:5432/applyxai
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URL: redis://redis:6379/1
+      SECRET_KEY: dev-secret-key-at-least-32-chars-long
+      JWT_SECRET: dev-jwt-secret-at-least-32-chars-long
+      FRONTEND_URL: http://localhost:5173
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./storage:/app/storage
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    working_dir: /app
+    command: celery -A backend.app.worker worker -B --loglevel=info
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://applyxai:applyxai@postgres:5432/applyxai
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-at-least-32-chars-long
+      JWT_SECRET: dev-jwt-secret-at-least-32-chars-long
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./storage:/app/storage
+
+volumes:
+  pgdata:

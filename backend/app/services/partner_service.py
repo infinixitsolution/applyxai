@@ -339,9 +339,13 @@ def referrals(db: Session, partner: Partner) -> dict:
 
 
 def set_status(db: Session, partner: Partner, status: PartnerStatus) -> Partner:
+    if status in COMMERCIAL and partner.kyc_status not in KYC_ELIGIBLE:
+        raise AppError(
+            "KYC_REQUIRED",
+            "Verify partner KYC (or mark not required) before approving or activating this partner.",
+            409,
+        )
     partner.status = status
-    if status in COMMERCIAL and partner.kyc_status == KycStatus.PENDING:
-        pass
     db.flush()
     return partner
 
@@ -630,6 +634,14 @@ def set_payout_status(db: Session, payout_id: uuid.UUID, status: PayoutStatus, n
     row = db.get(PartnerPayout, payout_id)
     if row is None:
         raise AppError("NOT_FOUND", "Payout not found.", 404)
+    if status in (PayoutStatus.APPROVED, PayoutStatus.PAID):
+        partner = db.get(Partner, row.partner_id)
+        if partner is not None and not commercial_ready(partner):
+            raise AppError(
+                "KYC_REQUIRED",
+                "Partner KYC must be verified before approving or marking a payout paid.",
+                409,
+            )
     row.status = status
     if note:
         row.note = note[:500]

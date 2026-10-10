@@ -13,7 +13,7 @@ import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage, fieldErrors } from "../../services/api";
 import { admin } from "../../services/endpoints";
 import type { Institute, InstituteSettings, Partner } from "../../types";
-import { providerLabel, Stat, SubBadge, Table, Td, UserLink } from "./shared";
+import { FilterChip, FilterChipBrand, providerLabel, Stat, SubBadge, Table, Td, UserLink } from "./shared";
 
 const INSTITUTE_STATUS_TONES: Record<string, "green" | "amber" | "red" | "slate"> = {
   pending: "amber", active: "green", suspended: "red", closed: "slate",
@@ -106,18 +106,11 @@ function InstituteStatusFilters({ value, onChange }: { value: InstituteListStatu
     <div>
       <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
       <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={value === ""} onClick={() => onChange("")}
-                className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                  value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-          All
-        </button>
+        <FilterChip active={value === ""} onClick={() => onChange("")}>All</FilterChip>
         {INSTITUTE_STATUS_FILTERS.map((f) => (
-          <button key={f.value} type="button" aria-pressed={value === f.value}
-                  onClick={() => onChange(value === f.value ? "" : f.value)}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    value === f.value ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+          <FilterChipBrand key={f.value} active={value === f.value} onClick={() => onChange(value === f.value ? "" : f.value)}>
             {f.label}
-          </button>
+          </FilterChipBrand>
         ))}
       </div>
     </div>
@@ -739,18 +732,11 @@ function PartnerStatusFilters({ value, onChange }: { value: PartnerListStatus; o
     <div>
       <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
       <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={value === ""} onClick={() => onChange("")}
-                className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                  value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-          All
-        </button>
+        <FilterChip active={value === ""} onClick={() => onChange("")}>All</FilterChip>
         {PARTNER_STATUS_FILTERS.map((f) => (
-          <button key={f.value} type="button" aria-pressed={value === f.value}
-                  onClick={() => onChange(value === f.value ? "" : f.value)}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    value === f.value ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+          <FilterChipBrand key={f.value} active={value === f.value} onClick={() => onChange(value === f.value ? "" : f.value)}>
             {f.label}
-          </button>
+          </FilterChipBrand>
         ))}
       </div>
     </div>

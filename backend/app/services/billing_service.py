@@ -52,7 +52,9 @@ def seed_plans(db: Session) -> int:
     if not existing:
         for order, (code, plan) in enumerate(PLAN_LIMITS.items()):
             kind = PlanKind.INSTITUTE if plan.get("kind") == "institute" else PlanKind.PERSONAL
-            limits = {k: v for k, v in plan.items() if k in ("applications_per_month", "resumes", "seats")}
+            from backend.app.core.plans import PLAN_LIMIT_KEYS
+
+            limits = {k: v for k, v in plan.items() if k in PLAN_LIMIT_KEYS}
             db.add(Plan(code=code, name=plan["name"], kind=kind, price_cents=plan["price_cents"], currency="INR",
                         interval="month", limits=limits, sort_order=order))
             added += 1
@@ -62,7 +64,9 @@ def seed_plans(db: Session) -> int:
         if code in existing:
             continue
         kind = PlanKind.INSTITUTE if plan.get("kind") == "institute" else PlanKind.PERSONAL
-        limits = {k: v for k, v in plan.items() if k in ("applications_per_month", "resumes", "seats")}
+        from backend.app.core.plans import PLAN_LIMIT_KEYS
+
+        limits = {k: v for k, v in plan.items() if k in PLAN_LIMIT_KEYS}
         db.add(Plan(code=code, name=plan["name"], kind=kind, price_cents=plan["price_cents"], currency="INR",
                     interval="month", limits=limits, sort_order=order))
         added += 1

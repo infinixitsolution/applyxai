@@ -37,6 +37,36 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Backend “unlimited” personal plan caps (see `backend/app/core/plans.py`). */
+export const UNLIMITED_APPLICATIONS_CAP = 999_999;
+export const UNLIMITED_RESUMES_CAP = 999_999;
+export const UNLIMITED_MOCK_INTERVIEWS_CAP = 999_999;
+
+export type UsageMeterKind = "applications" | "resumes" | "mock_interviews";
+
+export function isUnlimitedUsageCap(limit: number, kind: UsageMeterKind): boolean {
+  if (kind === "applications") return limit >= UNLIMITED_APPLICATIONS_CAP;
+  if (kind === "resumes") return limit >= UNLIMITED_RESUMES_CAP;
+  return limit >= UNLIMITED_MOCK_INTERVIEWS_CAP;
+}
+
+export function formatUsageCap(limit: number, kind: UsageMeterKind): string {
+  return isUnlimitedUsageCap(limit, kind) ? "Unlimited" : limit.toLocaleString();
+}
+
+/** Progress fill %; unlimited plans use a visual scale so non-zero usage still shows a bar. */
+export function usageMeterPercent(value: number, limit: number, kind: UsageMeterKind): number {
+  if (isUnlimitedUsageCap(limit, kind)) {
+    const visualMax = kind === "applications" ? 500 : kind === "mock_interviews" ? 30 : 20;
+    if (value <= 0) return 0;
+    return Math.max(6, Math.min(100, Math.round((value / visualMax) * 100)));
+  }
+  if (limit <= 0) return 0;
+  const pct = Math.round((value / limit) * 100);
+  if (value > 0 && pct === 0) return 6;
+  return Math.min(100, pct);
+}
+
 /** Job URLs come from third-party pages: only ever render http(s) links. */
 export function safeExternalUrl(url: string | null | undefined): string | null {
   if (!url) return null;

@@ -5,8 +5,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
-from backend.app.models import Plan, Resume, Subscription, SubscriptionStatus, UsageCounter
+from backend.app.core.plans import FREE_PLAN, MOCK_INTERVIEWS_UNLIMITED, PLAN_LIMITS, RESUMES_UNLIMITED
+from backend.app.models import MockInterviewSession, Plan, Resume, Subscription, SubscriptionStatus, UsageCounter
 
 _ENTITLED = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
 _COUNTERS = ("applications", "jobs_discovered", "runtime_seconds")
@@ -62,7 +62,25 @@ def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
 def _limits_of(plan: Plan) -> dict:
     """The catalogue defaults, overridden by what an admin set on the plan row."""
     defaults = PLAN_LIMITS.get(plan.code, PLAN_LIMITS[FREE_PLAN])
-    return {**defaults, "plan": plan.code, "name": plan.name, "price_cents": plan.price_cents, **(plan.limits or {})}
+    merged = {**defaults, **(plan.limits or {})}
+    merged["resumes"] = RESUMES_UNLIMITED
+    return {**merged, "plan": plan.code, "name": plan.name, "price_cents": plan.price_cents}
+
+
+def mock_interviews_used(db: Session, user_id: uuid.UUID, period: str | None = None) -> int:
+    start, end = period_bounds(period or current_period())
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(MockInterviewSession)
+            .where(
+                MockInterviewSession.user_id == user_id,
+                MockInterviewSession.created_at >= start,
+                MockInterviewSession.created_at < end,
+            )
+        )
+        or 0
+    )
 
 
 def get_counter(db: Session, user_id: uuid.UUID, period: str | None = None) -> UsageCounter | None:
@@ -103,14 +121,31 @@ def usage_summary(db: Session, user_id: uuid.UUID) -> dict:
     counter = get_counter(db, user_id, period)
     used = counter.applications if counter else 0
     resumes = db.scalar(select(func.count()).select_from(Resume).where(Resume.user_id == user_id))
-    app_limit, resume_limit = limits["applications_per_month"], limits["resumes"]
+    app_limit = int(limits["applications_per_month"])
+    resume_limit = RESUMES_UNLIMITED
+    mock_limit = int(limits.get("mock_interviews_per_month") or 0)
+    mock_used = mock_interviews_used(db, user_id, period)
+    mock_remaining = (
+        max(mock_limit - mock_used, 0) if mock_limit < MOCK_INTERVIEWS_UNLIMITED else MOCK_INTERVIEWS_UNLIMITED
+    )
     return {
         "plan": limits["plan"],
         "plan_name": limits["name"],
         "period": period,
         "resets_at": period_bounds(period)[1].isoformat(),
         "applications": {"used": used, "limit": app_limit, "remaining": max(app_limit - used, 0)},
-        "resumes": {"used": resumes, "limit": resume_limit, "remaining": max(resume_limit - resumes, 0)},
+        "resumes": {
+            "used": resumes or 0,
+            "limit": resume_limit,
+            "remaining": max(resume_limit - (resumes or 0), 0),
+            "unlimited": True,
+        },
+        "mock_interviews": {
+            "used": mock_used,
+            "limit": mock_limit,
+            "remaining": mock_remaining,
+            "unlimited": mock_limit >= MOCK_INTERVIEWS_UNLIMITED,
+        },
         "jobs_discovered": counter.jobs_discovered if counter else 0,
         "runtime_seconds": counter.runtime_seconds if counter else 0,
         "limit_reached": used >= app_limit,

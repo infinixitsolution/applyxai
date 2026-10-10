@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,8 @@ from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, Noti
 logger = logging.getLogger("applyxai.settings")
 
 SMTPS_PORT = 465
+_PLATFORM_ROW_CACHE: tuple[float, Any] | None = None
+_PLATFORM_ROW_TTL_SEC = 3.0
 
 
 def _fernet() -> Fernet | None:
@@ -67,11 +70,18 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 
 def _row(db: Session) -> PlatformSettings:
+    global _PLATFORM_ROW_CACHE
+    now = time.monotonic()
+    if _PLATFORM_ROW_CACHE is not None:
+        cached_at, cached_row = _PLATFORM_ROW_CACHE
+        if now - cached_at < _PLATFORM_ROW_TTL_SEC:
+            return cached_row
     row = db.get(PlatformSettings, PLATFORM_SETTINGS_KEY)
     if row is None:
         row = PlatformSettings(key=PLATFORM_SETTINGS_KEY)
         db.add(row)
         db.flush()
+    _PLATFORM_ROW_CACHE = (now, row)
     return row
 
 
@@ -150,9 +160,9 @@ def get_effective_payments(db: Session | None) -> EffectivePayments:
     else:
         webhook = settings.PAYMENT_WEBHOOK_SECRET
     provider = str(db_pay.get("provider") or settings.PAYMENT_PROVIDER or "null")
-    if provider not in ("null", "razorpay"):
+    if provider not in ("null", "razorpay", "stripe"):
         provider = "null"
-    if provider == "razorpay" and not (key_id and key_secret):
+    if provider in ("razorpay", "stripe") and not (key_id and key_secret):
         provider = "null"
     return EffectivePayments(provider=provider, key_id=key_id, key_secret=key_secret, webhook_secret=webhook)
 
@@ -239,7 +249,10 @@ def get_effective_ai(db: Session | None) -> EffectiveAi:
     if db is not None:
         db_ai = _deep_merge(dict(DEFAULT_AI), _row(db).ai or {})
     enabled = bool(db_ai.get("enabled"))
-    api_key = decrypt_secret(db_ai.get("api_key_encrypted") or "") if db_ai.get("api_key_encrypted") else ""
+    encrypted = db_ai.get("api_key_encrypted") or ""
+    api_key = decrypt_secret(encrypted) if encrypted else ""
+    if encrypted and not api_key:
+        logger.warning("Platform AI API key is stored but could not be decrypted (check SECRET_KEY/JWT_SECRET)")
     models = _deep_merge(dict(DEFAULT_AI["models"]), db_ai.get("models") or {})
     features = _deep_merge(dict(DEFAULT_AI["features"]), db_ai.get("features") or {})
     return EffectiveAi(
@@ -265,7 +278,9 @@ def notification_email_enabled(db: Session, event_type: str) -> bool:
 
 
 def invalidate_caches() -> None:
-    pass
+    """Clear the short-lived in-process platform settings row cache after admin updates."""
+    global _PLATFORM_ROW_CACHE
+    _PLATFORM_ROW_CACHE = None
 
 
 def build_admin_view(db: Session) -> dict:
@@ -351,6 +366,9 @@ def _admin_ai_view(db: Session) -> dict:
     eff = get_effective_ai(db)
     row = _row(db)
     db_ai = row.ai or {}
+    from backend.app.core.platform_defaults import merge_mock_interview_presenter
+
+    presenter = merge_mock_interview_presenter(db_ai.get("mock_interview_presenter"))
     return {
         "enabled": eff.enabled,
         "provider": eff.provider,
@@ -360,6 +378,8 @@ def _admin_ai_view(db: Session) -> dict:
         "features": eff.features,
         "ready": eff.enabled and eff.configured,
         "resume_ready": eff.feature_on("resume"),
+        "mock_interview_ready": eff.feature_on("mock_interview"),
+        "mock_interview_presenter": presenter,
     }
 
 
@@ -438,6 +458,16 @@ def update_ai(db: Session, payload: AiIn) -> dict:
         stored["api_key_encrypted"] = encrypt_secret(payload.api_key)
     elif existing.get("api_key_encrypted"):
         stored["api_key_encrypted"] = existing["api_key_encrypted"]
+    from backend.app.core.platform_defaults import DEFAULT_AI
+
+    if payload.mock_interview_presenter is not None:
+        stored["mock_interview_presenter"] = payload.mock_interview_presenter.model_dump()
+    elif isinstance(existing.get("mock_interview_presenter"), dict):
+        stored["mock_interview_presenter"] = existing["mock_interview_presenter"]
+    else:
+        stored["mock_interview_presenter"] = dict(DEFAULT_AI.get("mock_interview_presenter") or {})
+    if isinstance(existing.get("mock_interview_voice"), dict):
+        stored["mock_interview_voice"] = existing["mock_interview_voice"]
     row.ai = stored
     invalidate_caches()
     return _admin_ai_view(db)

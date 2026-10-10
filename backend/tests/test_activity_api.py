@@ -85,6 +85,14 @@ def test_application_detail_includes_description(history, db):
     assert data["job"]["description"] == "Build APIs" and data["status"] == "applied"
 
 
+def test_application_detail_includes_published_contacts(history, db):
+    contacts = [{"name": "Jane HR", "email": "jobs@acme.com", "phone": "+1 555 0100", "role": "Recruiter", "link": ""}]
+    app = add_application(db, EMAIL, "55", published_contacts=contacts)
+    data = history.get(f"/api/applications/{app.id}").json()["data"]
+    assert data["job"]["published_contacts"][0]["email"] == "jobs@acme.com"
+    assert data["job"]["published_contacts"][0]["name"] == "Jane HR"
+
+
 def test_export_csv_escapes_formulas(history, db):
     add_application(db, EMAIL, "6", title="=HYPERLINK(\"http://evil\")", company="+cmd")
     resp = history.get("/api/applications/export?status=applied")
@@ -168,6 +176,24 @@ def test_notifications_flow(alice, db):
 
     assert alice.post("/api/notifications/read-all", headers=h).json()["data"] == {"marked": 1}
     assert alice.get("/api/notifications").json()["data"]["unread_count"] == 0
+
+
+def test_notification_email_preferences(alice):
+    r = alice.get("/api/notifications/preferences")
+    assert r.status_code == 200
+    types = r.json()["data"]["types"]
+    assert "run_finished" in types
+    assert types["run_finished"]["email"] is True
+    assert types["run_finished"]["label"]
+
+    h = csrf_headers(alice)
+    patch = alice.patch(
+        "/api/notifications/preferences",
+        json={"types": {"run_finished": {"email": False}}},
+        headers=h,
+    )
+    assert patch.status_code == 200
+    assert patch.json()["data"]["types"]["run_finished"]["email"] is False
 
 
 @pytest.mark.parametrize("path", ["/api/applications", "/api/applications/export", "/api/jobs",

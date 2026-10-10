@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../auth/session";
 import { ChipSelect, TextArea, TextInput, Toggle } from "../../components/form";
+import { RichHtmlEditor } from "../../components/RichHtmlEditor";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
-import { Alert, Badge, Button, Card, PageHeader, Spinner, cx } from "../../components/ui";
+import { AdminSettingsSideNav, Alert, Badge, Button, Card, PageHeader, Spinner } from "../../components/ui";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { agentServerUrl } from "../../lib/config";
@@ -32,51 +33,50 @@ type TabId = (typeof TABS)[number]["id"];
 export function AdminSettingsPage() {
   const [tab, setTab] = useState<TabId>("cms");
   const query = useQuery({ queryKey: SETTINGS_KEY, queryFn: admin.settings });
+
+  let panel: ReactNode;
+  if (query.isPending) {
+    panel = <Spinner />;
+  } else if (query.error) {
+    panel = (
+      <Alert kind="error">
+        {errorMessage(query.error)}
+        {query.error instanceof ApiError && query.error.status > 0 && (
+          <span className="mt-1 block text-xs text-slate-500">HTTP {query.error.status} · {query.error.code}</span>
+        )}
+      </Alert>
+    );
+  } else if (!query.data) {
+    panel = <Alert kind="error">Settings data was empty. Restart the API after pulling the latest code.</Alert>;
+  } else {
+    const data = query.data;
+    panel = (
+      <>
+        {tab === "cms" && <CmsTab data={data.cms} />}
+        {tab === "smtp" && <SmtpTab smtp={data.smtp} auth={data.auth_email} unverified={data.unverified_users} />}
+        {tab === "auth" && <AuthTab auth={data.auth_email} unverified={data.unverified_users} />}
+        {tab === "notifications" && <NotificationsTab notifications={data.notifications} />}
+        {tab === "templates" && (
+          <TemplatesTab
+            templates={data.email_templates ?? { auth: {}, events: {} }}
+            notifications={data.notifications}
+          />
+        )}
+        {tab === "ai" && <AiTab ai={data.ai} />}
+        {tab === "payments" && <PaymentsTab payments={data.payments} />}
+        {tab === "integrations" && <IntegrationsTab infra={data.infrastructure} smtp={data.smtp} ai={data.ai} payments={data.payments} />}
+        {tab === "operations" && <OperationsTab />}
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Settings" description="CMS, email, auth policy, notifications, and platform operations." />
-      <nav className="mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={cx(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-              tab === t.id ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-      {query.isPending ? <Spinner /> : query.error ? (
-        <Alert kind="error">
-          {errorMessage(query.error)}
-          {query.error instanceof ApiError && query.error.status > 0 && (
-            <span className="mt-1 block text-xs text-slate-500">HTTP {query.error.status} · {query.error.code}</span>
-          )}
-        </Alert>
-      ) : !query.data ? (
-        <Alert kind="error">Settings data was empty. Restart the API after pulling the latest code.</Alert>
-      ) : (
-        <>
-          {tab === "cms" && <CmsTab data={query.data.cms} />}
-          {tab === "smtp" && <SmtpTab smtp={query.data.smtp} auth={query.data.auth_email} unverified={query.data.unverified_users} />}
-          {tab === "auth" && <AuthTab auth={query.data.auth_email} unverified={query.data.unverified_users} />}
-          {tab === "notifications" && <NotificationsTab notifications={query.data.notifications} />}
-          {tab === "templates" && (
-            <TemplatesTab
-              templates={query.data.email_templates ?? { auth: {}, events: {} }}
-              notifications={query.data.notifications}
-            />
-          )}
-          {tab === "ai" && <AiTab ai={query.data.ai} />}
-          {tab === "payments" && <PaymentsTab payments={query.data.payments} />}
-          {tab === "integrations" && <IntegrationsTab infra={query.data.infrastructure} smtp={query.data.smtp} ai={query.data.ai} payments={query.data.payments} />}
-          {tab === "operations" && <OperationsTab />}
-        </>
-      )}
+      <div className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
+        <AdminSettingsSideNav tabs={[...TABS]} value={tab} onChange={setTab} ariaLabel="Platform settings" />
+        <div className="min-w-0">{panel}</div>
+      </div>
     </>
   );
 }
@@ -229,20 +229,28 @@ function CmsTab({ data }: { data: PlatformCms }) {
         ))}
         <p className="text-xs text-slate-500">Icon keys: sliders, bot, filter, file-text, bar-chart, shield</p>
       </Card>
-      <Card title="Legal pages (Markdown)">
-        <label className="mb-3 block text-sm"><span className="font-medium">Privacy</span>
-          <textarea className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono text-xs" rows={8}
-                    value={cms.legal.privacy_md} onChange={(e) => setLegal({ privacy_md: e.target.value })} />
-        </label>
-        <label className="mb-3 block text-sm"><span className="font-medium">Terms</span>
-          <textarea className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono text-xs" rows={8}
-                    value={cms.legal.terms_md} onChange={(e) => setLegal({ terms_md: e.target.value })} />
-        </label>
-        <label className="block text-sm"><span className="font-medium">Refund policy</span>
-          <textarea className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono text-xs" rows={6}
-                    value={cms.legal.refund_md} onChange={(e) => setLegal({ refund_md: e.target.value })} />
-        </label>
-        <p className="mt-2 text-xs text-slate-500">Preview on <Link to="/privacy" className="text-brand-600 underline">/privacy</Link>, <Link to="/terms" className="text-brand-600 underline">/terms</Link>, <Link to="/refund-policy" className="text-brand-600 underline">/refund-policy</Link>.</p>
+      <Card title="Legal pages">
+        <RichHtmlEditor
+          label="Privacy"
+          value={cms.legal.privacy_md}
+          onChange={(privacy_md) => setLegal({ privacy_md })}
+        />
+        <RichHtmlEditor
+          label="Terms"
+          value={cms.legal.terms_md}
+          onChange={(terms_md) => setLegal({ terms_md })}
+        />
+        <RichHtmlEditor
+          label="Refund policy"
+          value={cms.legal.refund_md}
+          onChange={(refund_md) => setLegal({ refund_md })}
+        />
+        <p className="text-xs text-slate-500">
+          Live pages:{" "}
+          <Link to="/privacy" className="text-brand-600 underline" target="_blank" rel="noopener noreferrer">/privacy</Link>,{" "}
+          <Link to="/terms" className="text-brand-600 underline" target="_blank" rel="noopener noreferrer">/terms</Link>,{" "}
+          <Link to="/refund-policy" className="text-brand-600 underline" target="_blank" rel="noopener noreferrer">/refund-policy</Link>.
+        </p>
       </Card>
       <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
       {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
@@ -821,6 +829,21 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
   const [embedding, setEmbedding] = useState(ai.models.embedding);
   const [featApp, setFeatApp] = useState(ai.features.applications);
   const [featResume, setFeatResume] = useState(ai.features.resume);
+  const [featMock, setFeatMock] = useState(ai.features.mock_interview ?? true);
+  const defaultPresenter = ai.mock_interview_presenter ?? {
+    mode: "digital_human_3d" as const,
+    image_url: "/mock-interviewer-host.jpg",
+    glb_url: "/portrait",
+    live_stream_url: "",
+    supports_barge_in: true,
+    supports_replay: true,
+  };
+  const [presenterMode, setPresenterMode] = useState(defaultPresenter.mode);
+  const [presenterImage, setPresenterImage] = useState(defaultPresenter.image_url);
+  const [presenterGlb, setPresenterGlb] = useState(defaultPresenter.glb_url ?? "/portrait");
+  const [presenterStream, setPresenterStream] = useState(defaultPresenter.live_stream_url ?? "");
+  const [presenterBargeIn, setPresenterBargeIn] = useState(defaultPresenter.supports_barge_in !== false);
+  const [presenterReplay, setPresenterReplay] = useState(defaultPresenter.supports_replay !== false);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     setEnabled(ai.enabled);
@@ -831,13 +854,31 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
     setEmbedding(ai.models.embedding);
     setFeatApp(ai.features.applications);
     setFeatResume(ai.features.resume);
+    setFeatMock(ai.features.mock_interview ?? true);
     setApiKeyConfigured(ai.api_key_configured);
+    const p = ai.mock_interview_presenter;
+    if (p) {
+      setPresenterMode(p.mode);
+      setPresenterImage(p.image_url);
+      setPresenterGlb(p.glb_url ?? "/portrait");
+      setPresenterStream(p.live_stream_url ?? "");
+      setPresenterBargeIn(p.supports_barge_in !== false);
+      setPresenterReplay(p.supports_replay !== false);
+    }
   }, [ai]);
   const save = useMutation({
     mutationFn: () => admin.updateAi({
       enabled, provider, base_url: baseUrl, api_key: apiKey,
       models: { fast, strong, embedding },
-      features: { applications: featApp, resume: featResume },
+      features: { applications: featApp, resume: featResume, mock_interview: featMock },
+      mock_interview_presenter: {
+        mode: presenterMode,
+        image_url: presenterImage.trim() || "/mock-interviewer-host.jpg",
+        glb_url: presenterGlb.trim() || "/portrait",
+        live_stream_url: presenterStream.trim(),
+        supports_barge_in: presenterBargeIn,
+        supports_replay: presenterReplay,
+      },
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: SETTINGS_KEY });
@@ -851,8 +892,12 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
   return (
     <div className="space-y-6">
       <Card title="Platform AI" actions={
-        <Badge tone={ai.resume_ready ? "green" : ai.ready ? "amber" : "amber"}>
-          {ai.resume_ready ? "Resume AI ready" : ai.ready ? "AI on (Resume off or key missing)" : "Not configured"}
+        <Badge tone={ai.mock_interview_ready ? "green" : ai.ready ? "amber" : "amber"}>
+          {ai.mock_interview_ready
+            ? "Mock interview ready"
+            : ai.ready
+              ? "AI on (enable Mock interview or fix key)"
+              : "Not configured"}
         </Badge>
       }>
         <p className="mb-4 text-sm text-slate-600">API keys are encrypted and never shown to users. Enable Platform AI, save an API key, and turn on <strong>Resume AI</strong> for JD tailoring during automation.</p>
@@ -884,9 +929,56 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
         <div className="mt-4 flex flex-wrap gap-4">
           <Toggle label="Application Q&A" checked={featApp} onChange={setFeatApp} />
           <Toggle label="Resume AI" checked={featResume} onChange={setFeatResume} />
+          <Toggle label="Mock interview" checked={featMock} onChange={setFeatMock} />
         </div>
         <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
         {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      </Card>
+      <Card title="Mock interview presenter">
+        <p className="mb-4 text-sm text-slate-600">
+          Controls the live interviewer panel. Use <strong>static photo</strong> (default host image) or a{" "}
+          <strong>live stream</strong> URL (iframe or direct <code className="text-xs">.mp4</code> /{" "}
+          <code className="text-xs">.webm</code>) when you integrate a talking-avatar provider.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Presenter mode</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={presenterMode}
+              onChange={(e) =>
+                setPresenterMode(e.target.value as "digital_human_3d" | "static_photo" | "live_stream")
+              }
+            >
+              <option value="digital_human_3d">3D digital human (idle, blink, lip sync)</option>
+              <option value="static_photo">Static photo + light motion</option>
+              <option value="live_stream">Live stream URL (provider POC)</option>
+            </select>
+          </label>
+          <TextInput
+            label="Photo URL (static mode)"
+            value={presenterImage}
+            onChange={setPresenterImage}
+            maxLength={512}
+          />
+          <TextInput
+            label="3D model (digital human): /portrait or GLB path"
+            value={presenterGlb}
+            onChange={setPresenterGlb}
+            maxLength={512}
+          />
+          <TextInput
+            label="Live stream URL (live mode)"
+            value={presenterStream}
+            onChange={setPresenterStream}
+            maxLength={1024}
+          />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-4">
+          <Toggle label="Allow barge-in / interrupt" checked={presenterBargeIn} onChange={setPresenterBargeIn} />
+          <Toggle label="Allow replay last question" checked={presenterReplay} onChange={setPresenterReplay} />
+        </div>
+        <p className="mt-3 text-xs text-slate-500">Saved with Platform AI above — click Save on the AI card after changing presenter settings.</p>
       </Card>
       <Card title="Test AI connection">
         <Button variant="secondary" loading={test.isPending} disabled={!apiKeyConfigured && !apiKey} onClick={() => test.mutate()}>Run test</Button>

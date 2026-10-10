@@ -54,6 +54,7 @@ What is implemented today. Planned hardening is listed at the end.
   - Stored as `STORAGE_DIR/resumes/<user_id>/<random>.pdf|docx`. The uploaded filename is sanitised and kept for display only; it never becomes part of a path.
   - Downloads are always attachments with `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`.
   - The resume count is checked server-side against the plan (`backend/app/core/plans.py`, later the `plans` table).
+  - When `CLAMAV_HOST` is set, uploads are scanned with clamd (`zINSTREAM`) before being written to disk (`resume_malware_scan.py`). Malware is rejected with `MALWARE_DETECTED`; if ClamAV is unreachable, upload fails with `SCAN_UNAVAILABLE`.
 
 ## Desktop agent
 
@@ -89,5 +90,4 @@ What is implemented today. Planned hardening is listed at the end.
 
 ## Planned (later phases)
 
-- Malware scanning of uploads (for example ClamAV) before production launch (Phase 12)
-- Security headers (HSTS, CSP, frame-ancestors), structured JSON logs with secret redaction, dependency pinning, and backups (Phase 12)
+- Enforce Content-Security-Policy (currently Report-Only in nginx snippet); structured JSON logs with secret redaction; dependency pinning

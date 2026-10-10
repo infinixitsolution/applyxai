@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, contains_eager
 
 from backend.app.models import Application, ApplicationStatus, AutomationJob, Job
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
-from backend.app.services import usage_service
+from backend.app.services import mock_interview_service, usage_service
 from backend.app.services.automation_service import run_out
 
 CHART_DAYS = 30
@@ -69,4 +69,5 @@ def stats(db: Session, user_id: uuid.UUID, now: datetime | None = None) -> dict:
         "recent_applications": recent,
         "automation": {"active": run_out(active), "last": run_out(last)},
         "usage": usage_service.usage_summary(db, user_id),
+        "mock_interviews": mock_interview_service.dashboard_stats(db, user_id),
     }

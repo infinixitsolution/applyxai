@@ -9,13 +9,24 @@ import { BillingPage } from "./Billing";
 
 const usage = {
   plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
-  applications: { used: 3, limit: 10, remaining: 7 }, resumes: { used: 1, limit: 1, remaining: 0 },
+  applications: { used: 3, limit: 10, remaining: 7 },
+  resumes: { used: 1, limit: 999_999, remaining: 999_998, unlimited: true },
+  mock_interviews: { used: 1, limit: 3, remaining: 2, unlimited: false },
   jobs_discovered: 5, runtime_seconds: 0, limit_reached: false,
 };
 const plans: Plan[] = [
-  { code: "free", name: "Free", price_cents: 0, currency: "INR", interval: "month", limits: { applications_per_month: 10, resumes: 1 } },
-  { code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month", limits: { applications_per_month: 100, resumes: 3 } },
-  { code: "pro", name: "Pro", price_cents: 99900, currency: "INR", interval: "month", limits: { applications_per_month: 500, resumes: 10 } },
+  {
+    code: "free", name: "Free", price_cents: 0, currency: "INR", interval: "month",
+    limits: { applications_per_month: 10, resumes: 999_999, mock_interviews_per_month: 3 },
+  },
+  {
+    code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month",
+    limits: { applications_per_month: 100, resumes: 999_999, mock_interviews_per_month: 10 },
+  },
+  {
+    code: "pro", name: "Pro", price_cents: 99900, currency: "INR", interval: "month",
+    limits: { applications_per_month: 500, resumes: 999_999, mock_interviews_per_month: 30 },
+  },
 ];
 const starterSub: Subscription = {
   id: "s1", plan: { code: "starter", name: "Starter", price_cents: 49900, currency: "INR", interval: "month" },
@@ -24,7 +35,9 @@ const starterSub: Subscription = {
 };
 
 function overview(over: Partial<BillingOverview> = {}): BillingOverview {
-  return { provider: "razorpay", subscription: null, pending: null, usage, payments: [], ...over };
+  return {
+    provider: "razorpay", checkout_available: true, subscription: null, pending: null, usage, payments: [], ...over,
+  };
 }
 
 const ok = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200 });
@@ -137,10 +150,13 @@ describe("BillingPage", () => {
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
   });
 
-  it("explains test mode with the development provider", async () => {
-    mockApi({ "GET /api/billing": overview({ provider: "null" }), "GET /api/plans": { plans } });
+  it("explains Razorpay test checkout when keys are in test mode", async () => {
+    mockApi({
+      "GET /api/billing": overview({ provider: "razorpay", razorpay_mode: "test" }),
+      "GET /api/plans": { plans },
+    });
     renderPage();
-    expect(await screen.findByText(/Test mode/)).toBeInTheDocument();
+    expect(await screen.findByText(/4111 1111 1111 1111/)).toBeInTheDocument();
     expect(screen.getByText("No payments yet")).toBeInTheDocument();
   });
 });

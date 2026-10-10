@@ -1,6 +1,8 @@
 # ApplyXAI — SaaS Roadmap
 
-Companion to `docs/ARCHITECTURE_AUDIT.md`. This is a proposal awaiting approval; nothing below has been implemented yet.
+> **Status:** Historical architecture and phase proposal (2026). Much of the FastAPI + React + agent stack described here is **already implemented**. For what remains, use **[BACKLOG.md](./BACKLOG.md)** as the canonical tracker.
+
+Companion to `docs/ARCHITECTURE_AUDIT.md`. Original text below assumed greenfield delivery; treat it as design context, not current implementation status.
 
 Guiding rules:
 

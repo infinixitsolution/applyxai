@@ -19,7 +19,7 @@ const campus: Institute = {
 };
 const plan: Plan = {
   code: "campus", name: "Campus", price_cents: 49900, currency: "INR", interval: "month",
-  limits: { applications_per_month: 50, resumes: 2, seats: 10 },
+  limits: { applications_per_month: 50, resumes: 999_999, mock_interviews_per_month: 10, seats: 10 },
 };
 const sub: Subscription = {
   id: "s1", plan: { code: "campus", name: "Campus", price_cents: 49900, currency: "INR", interval: "month" },

@@ -13,7 +13,14 @@ router = APIRouter(tags=["plans"])
 def _limits(code: str, overrides: dict | None) -> dict:
     defaults = PLAN_LIMITS.get(code, {})
     merged = {**defaults, **(overrides or {})}
-    return {"applications_per_month": merged.get("applications_per_month", 0), "resumes": merged.get("resumes", 0)}
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
+    return {
+        "applications_per_month": merged.get("applications_per_month", 0),
+        "mock_interviews_per_month": merged.get("mock_interviews_per_month", 0),
+        "resumes": RESUMES_UNLIMITED,
+        "resumes_unlimited": True,
+    }
 
 
 @router.get("/plans", summary="Public plan catalogue (pricing page)")

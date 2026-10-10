@@ -116,9 +116,11 @@ async def upload_resume(
     *,
     counts_against_plan: bool = True,
 ) -> Resume:
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
     limit = plan_limits(db, user.id)["resumes"]
     library_count = resumes_counting_toward_limit(db, user.id) if counts_against_plan else 0
-    if counts_against_plan and library_count >= limit:
+    if counts_against_plan and limit < RESUMES_UNLIMITED and library_count >= limit:
         raise AppError(
             "PLAN_LIMIT_REACHED",
             f"Your plan allows {limit} resume{'s' if limit != 1 else ''}. Delete one or upgrade.",
@@ -138,6 +140,10 @@ async def upload_resume(
         raise _invalid("The file is empty")
     if not (_looks_like_pdf(data) if file_type == "pdf" else _looks_like_docx(data)):
         raise _invalid(f"The file is not a valid {file_type.upper()} document")
+
+    from backend.app.services.resume_malware_scan import scan_resume_bytes
+
+    scan_resume_bytes(data)
 
     rel = f"resumes/{user.id}/{uuid.uuid4().hex}.{file_type}"
     path = _storage_root() / rel

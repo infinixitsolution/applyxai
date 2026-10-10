@@ -57,13 +57,15 @@ venv\Scripts\python -m agent run
 
 This launches the real engine, which opens Chrome and applies on LinkedIn with your account. Tick **Practice run** to fill in forms without submitting them. Use `--home <folder>` (or `APPLYXAI_AGENT_HOME`) to keep a test agent separate from your normal one. The commands the Connect dialog shows use `VITE_AGENT_SERVER_URL`, or the page's own address if that isn't set.
 
-The periodic tasks (failing runs whose computer went silent, deleting expired pairing codes) run in Celery and need Redis:
+The periodic tasks (failing runs whose computer went silent, deleting expired pairing codes, **marking idle mock interviews abandoned**) run in Celery and need Redis:
 
 ```powershell
 venv\Scripts\celery -A backend.app.worker worker --beat --pool=solo --loglevel=info
 ```
 
-Without the worker, the Automation page still cleans up the signed-in user's stale runs when it loads, so development works without Redis.
+Beat schedule includes `abandon-stale-mock-interviews` (hourly), which calls `mock_interview_service.mark_stale_sessions_abandoned` for sessions idle 24+ hours. Without beat, abandoned filters in the mock interview dashboard stay inaccurate until you end sessions manually.
+
+Without the worker, the Automation page still cleans up the signed-in user's stale runs when it loads, so development works without Redis. Mock interview abandonment still requires **worker + beat** in any environment where you rely on the `abandoned` status.
 
 ### Payments
 
@@ -146,6 +148,23 @@ Users pay on `/app/billing`; the app never stores card or UPI details.
 Application and resume AI use **admin-configured** keys in `/admin/system` → **AI**, not `config/secrets.py` on supervised runs. Before enabling user toggles on Preferences or resume tailor in production, set provider, models, and an API key there (encrypted at rest). User-facing copy should remind people to verify AI-generated answers and resumes.
 
 Per-run JD tailoring: set **Job preferences → Advanced → Resume for each job** to `tailor_if_gate` (requires platform **Resume AI**, default resume with **master skills**, and match ≥60% on the JD). The agent calls `POST /api/agent/runs/{id}/jobs/{job_id}/tailor`, saves a version linked to the application, and uploads it to LinkedIn. Manual tailoring remains on **Resumes → Tailor**.
+
+## Production deployment checklist
+
+With `APP_ENV=production`, the API **refuses to start** unless PostgreSQL, Razorpay (`PAYMENT_PROVIDER=razorpay` + keys), Secure cookies, shared Redis rate limits (`RATE_LIMIT_STORAGE_URL`), and strong `SECRET_KEY` / `JWT_SECRET` are configured (`backend/app/core/config.py`). SMTP may be set in `.env` or Admin → Email.
+
+| Requirement | Notes |
+|---|---|
+| PostgreSQL | Not SQLite; run `alembic upgrade head` on deploy (`scripts/update_server.sh`) |
+| Redis | Celery broker + `RATE_LIMIT_STORAGE_URL` (not `memory://`) |
+| Celery worker **+ beat** | `applyxai-celery.service` — includes hourly mock-interview abandonment |
+| Razorpay | Live keys + webhook URL; `python -m backend.app.cli sync-plans` |
+| Nginx + TLS | `scripts/nginx/applyxai.conf` + security headers snippet |
+| Backups | `scripts/backup_postgres.sh` (schedule on the host; not in-app) |
+| ClamAV (recommended) | Set `CLAMAV_HOST` / `CLAMAV_PORT` to your `clamd`; resume uploads use INSTREAM scan |
+| Post-deploy smoke | [SITE_AUDIT.md](./SITE_AUDIT.md) curl checklist |
+
+Full open items: [BACKLOG.md](./BACKLOG.md).
 
 ## Rules while the migration is in progress
 

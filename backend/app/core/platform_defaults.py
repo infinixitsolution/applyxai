@@ -214,6 +214,11 @@ DEFAULT_NOTIFICATIONS: dict = {
         "label": "Partner commission",
         "description": "When commission is accrued on your partner account.",
     },
+    "form_question": {
+        "email": False,
+        "label": "LinkedIn question needs an answer",
+        "description": "When automation hits a form question you have not saved an answer for yet.",
+    },
     "job_applied": {
         "email": False,
         "label": "Job application submitted",
@@ -345,6 +350,17 @@ DEFAULT_EMAIL_TEMPLATES: dict = {
             "email_body": "Commission earned\n\n{message}\n\nOpen in {app_name}:\n{link_url}",
             "email_html": "",
         },
+        "form_question": {
+            "in_app_title": "Answer needed: {question_label}",
+            "in_app_body": "{message}",
+            "email_subject": "{app_name}: LinkedIn question needs your answer",
+            "email_body": (
+                "Automation needs an answer for a LinkedIn form question.\n\n"
+                "{message}\n\n"
+                "Open Automation to answer:\n{link_url}"
+            ),
+            "email_html": "",
+        },
         "job_applied": {
             "in_app_title": "Applied to {job_title}",
             "in_app_body": "{message}",
@@ -388,5 +404,40 @@ DEFAULT_AI: dict = {
         "strong": "gpt-4o",
         "embedding": "text-embedding-3-small",
     },
-    "features": {"applications": True, "resume": True},
+    "features": {"applications": True, "resume": True, "mock_interview": True},
+    "mock_interview_presenter": {
+        "mode": "digital_human_3d",
+        "image_url": "/interviewer-portrait.png",
+        "glb_url": "/portrait",
+        "live_stream_url": "",
+        "supports_barge_in": True,
+        "supports_replay": True,
+    },
+    "mock_interview_voice": {
+        "model": "gpt-4o-mini-tts",
+        "fallback_model": "tts-1-hd",
+        "last_resort_model": "tts-1",
+        "voice": "shimmer",
+        "speed": 0.92,
+        "instructions": (
+            "You are an adult Indian woman conducting a professional job interview. "
+            "Use natural Indian English as spoken in Indian tech and business settings (clear, neutral metro accent—not exaggerated). "
+            "Sound warm, confident, and respectful. Speak at a measured pace with brief pauses at commas and before the main question. "
+            "Pronounce names, company names, and technical terms carefully."
+        ),
+    },
 }
+
+
+def merge_mock_interview_presenter(raw: dict | None) -> dict:
+    """Fill missing presenter keys for legacy platform AI JSON."""
+    defaults = dict(DEFAULT_AI.get("mock_interview_presenter") or {})
+    if not isinstance(raw, dict):
+        return defaults
+    merged = {**defaults, **raw}
+    for key in ("image_url", "glb_url", "live_stream_url"):
+        if not str(merged.get(key) or "").strip():
+            merged[key] = defaults.get(key, "")
+    if not merged.get("mode"):
+        merged["mode"] = defaults.get("mode", "digital_human_3d")
+    return merged

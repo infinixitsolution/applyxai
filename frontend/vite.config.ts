@@ -12,7 +12,16 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { "/api": { target: API_TARGET, changeOrigin: false } },
+    // Bind IPv4 as well as IPv6 on Windows (otherwise only [::1]:5173 works, not 127.0.0.1:5173).
+    host: "127.0.0.1",
+    proxy: {
+      "/api": {
+        target: API_TARGET,
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
+    },
   },
   test: {
     environment: "jsdom",

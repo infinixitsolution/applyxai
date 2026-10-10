@@ -12,7 +12,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
@@ -21,7 +21,6 @@ from backend.app.models import AgentConnectSession, AgentDevice, User
 
 PAIRING_MINUTES = 10
 CONNECT_MINUTES = 15
-MAX_DEVICES = 5
 ONLINE_SECONDS = 45
 TOKEN_PREFIX = "axd_"
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"      # no 0/O or 1/I lookalikes
@@ -45,12 +44,16 @@ def _active_devices(user_id: uuid.UUID):
                                      AgentDevice.revoked_at.is_(None))
 
 
+def _revoke_other_devices(db: Session, user_id: uuid.UUID, keep_device_id: uuid.UUID) -> None:
+    """Only one active computer per account; connecting a new one revokes the rest."""
+    now = _now()
+    for other in db.scalars(_active_devices(user_id).where(AgentDevice.id != keep_device_id)):
+        other.revoked_at = now
+    db.flush()
+
+
 def create_pairing_code(db: Session, user: User) -> tuple[str, datetime]:
     """A new code for `user`; any earlier unused code stops working. The caller commits."""
-    count = db.scalar(select(func.count()).select_from(_active_devices(user.id).subquery()))
-    if count >= MAX_DEVICES:
-        raise AppError("DEVICE_LIMIT_REACHED",
-                       f"You can connect up to {MAX_DEVICES} computers. Remove one to connect another.", 409)
     db.execute(delete(AgentDevice).where(AgentDevice.user_id == user.id, AgentDevice.token_hash.is_(None)))
     code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
     expires = _now() + timedelta(minutes=PAIRING_MINUTES)
@@ -78,6 +81,7 @@ def pair(db: Session, code: str, *, name: str, platform: str, agent_version: str
     device.platform = platform.strip()[:50]
     device.agent_version = agent_version.strip()[:32]
     device.paired_at = device.last_seen_at = _now()
+    _revoke_other_devices(db, device.user_id, device.id)
     db.flush()
     return device, token
 
@@ -155,10 +159,6 @@ def approve_connect_session(db: Session, user: User, session_id: uuid.UUID) -> A
         raise AppError("CONNECT_EXPIRED", "This connection request expired. Open the desktop app and try again.", 400)
     if session.user_id is not None and session.deliver_token:
         return session
-    count = db.scalar(select(func.count()).select_from(_active_devices(user.id).subquery()))
-    if count >= MAX_DEVICES:
-        raise AppError("DEVICE_LIMIT_REACHED",
-                       f"You can connect up to {MAX_DEVICES} computers. Remove one to connect another.", 409)
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     device = AgentDevice(
         user_id=user.id,
@@ -171,6 +171,7 @@ def approve_connect_session(db: Session, user: User, session_id: uuid.UUID) -> A
     )
     db.add(device)
     db.flush()
+    _revoke_other_devices(db, user.id, device.id)
     session.user_id = user.id
     session.device_id = device.id
     session.deliver_token = token

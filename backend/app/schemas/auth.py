@@ -48,6 +48,19 @@ class LoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=PASSWORD_MAX)
 
 
+class TwoFactorLoginIn(BaseModel):
+    challenge_token: str = Field(min_length=20, max_length=200)
+    code: str = Field(min_length=6, max_length=12)
+
+
+class TwoFactorCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+
+
+class TwoFactorDisableIn(TwoFactorCodeIn):
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX)
+
+
 class EmailIn(BaseModel):
     email: EmailStr
 
@@ -78,3 +91,4 @@ class UserOut(BaseModel):
     partner_id: uuid.UUID | None = None
     institute_status: str | None = None
     partner_status: str | None = None
+    totp_enabled: bool = False

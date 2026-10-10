@@ -6,6 +6,16 @@ from pydantic import BaseModel, ConfigDict
 from backend.app.models import ApplicationStatus
 
 
+class PublishedContactOut(BaseModel):
+    """Contact info the company published on the job posting (not the applicant)."""
+
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    role: str = ""
+    link: str = ""
+
+
 class JobSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -22,6 +32,7 @@ class JobSummary(BaseModel):
     salary_min: int | None
     salary_max: int | None
     discovered_at: datetime
+    published_contacts: list[PublishedContactOut] = []
 
 
 class JobDetail(JobSummary):

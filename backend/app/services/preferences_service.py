@@ -158,6 +158,31 @@ def _clean_label_for_pattern(label: str) -> str:
     return text[:500] or "Unknown question"
 
 
+def _notify_form_question_needed(db: Session, user_id: uuid.UUID, item: dict) -> None:
+    from backend.app.services import notification_service
+
+    label = str(item.get("label") or "Form question")
+    job_title = str(item.get("job_title") or "")
+    company = str(item.get("company") or "")
+    message = f"LinkedIn asked: {label}"
+    if job_title or company:
+        where = " · ".join(x for x in (job_title, company) if x)
+        message = f"{message} ({where})"
+    notification_service.notify_event(
+        db,
+        user_id,
+        "form_question",
+        link="/app/automation?pending=1",
+        variables={
+            "question_label": label[:255],
+            "job_title": job_title[:200],
+            "company": company[:200],
+            "message": message[:500],
+        },
+    )
+    item["in_app_notified"] = True
+
+
 def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_details: dict | None = None) -> None:
     """Append a LinkedIn form question seen during automation (deduped by label + type)."""
     user = db.get(User, user_id)
@@ -176,6 +201,7 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
     pending = list(prefs.pending_form_questions or [])
     hit = next((p for p in pending if p.get("_key") == key), None)
     now = datetime.now(timezone.utc).isoformat()
+    target: dict | None = hit
     if hit:
         hit["times_seen"] = int(hit.get("times_seen") or 1) + 1
         hit["last_seen_at"] = now
@@ -184,7 +210,7 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
         if options and not hit.get("options"):
             hit["options"] = options
     else:
-        pending.append({
+        target = {
             "id": str(uuid.uuid4()),
             "_key": key,
             "label": label,
@@ -197,9 +223,14 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
             "times_seen": 1,
             "first_seen_at": now,
             "last_seen_at": now,
-        })
+        }
+        pending.append(target)
     if len(pending) > _MAX_PENDING_FORM_QUESTIONS:
         pending = pending[-_MAX_PENDING_FORM_QUESTIONS:]
+        if target and target not in pending:
+            target = next((p for p in pending if p.get("_key") == key), target)
+    if needs and target and not target.get("in_app_notified"):
+        _notify_form_question_needed(db, user_id, target)
     prefs.pending_form_questions = pending
     db.flush()
 

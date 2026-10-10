@@ -7,7 +7,9 @@ from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, error_response, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import User
-from backend.app.schemas.auth import EmailIn, LoginIn, RegisterIn, ResetPasswordIn, TokenIn
+from backend.app.schemas.auth import (
+    EmailIn, LoginIn, RegisterIn, ResetPasswordIn, TokenIn, TwoFactorCodeIn, TwoFactorDisableIn, TwoFactorLoginIn,
+)
 from backend.app.services import auth_service
 from backend.app.services import platform_settings_service as ps
 from backend.app.services.workspace import user_payload
@@ -50,9 +52,47 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
           limiter: RateLimiter = Depends(get_rate_limiter)):
     limiter.hit("5/minute", "login-ip", client_ip(request))
     limiter.hit("10/hour", "login-email", auth_service.normalize_email(body.email))
-    session = auth_service.login(db, body.email, body.password)
+    result = auth_service.login(db, body.email, body.password)
+    if isinstance(result, auth_service.TwoFactorChallenge):
+        return ok({"requires_2fa": True, "challenge_token": result.challenge_token})
+    set_session_cookies(response, result.access_token, result.refresh_token)
+    return ok({"user": _user(db, result.user)})
+
+
+@router.post("/login/2fa", summary="Complete login with an authenticator code")
+def login_two_factor(body: TwoFactorLoginIn, request: Request, response: Response, db: Session = Depends(get_db),
+                     limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("10/minute", "login-2fa-ip", client_ip(request))
+    session = auth_service.complete_two_factor_login(db, body.challenge_token, body.code)
     set_session_cookies(response, session.access_token, session.refresh_token)
     return ok({"user": _user(db, session.user)})
+
+
+@router.post("/2fa/setup", summary="Start TOTP setup (returns secret + otpauth URI)")
+def two_factor_setup(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from backend.app.services import two_factor_service as tfa
+
+    payload = tfa.begin_setup(user)
+    db.commit()
+    return ok(payload)
+
+
+@router.post("/2fa/enable", summary="Confirm TOTP setup with a valid code")
+def two_factor_enable(body: TwoFactorCodeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from backend.app.services import two_factor_service as tfa
+
+    tfa.confirm_setup(db, user, body.code)
+    db.commit()
+    return ok({"totp_enabled": True})
+
+
+@router.post("/2fa/disable", summary="Turn off TOTP (password + current code required)")
+def two_factor_disable(body: TwoFactorDisableIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from backend.app.services import two_factor_service as tfa
+
+    tfa.disable(db, user, body.password, body.code)
+    db.commit()
+    return ok({"totp_enabled": False})
 
 
 @router.post("/refresh", summary="Rotate the session using the refresh cookie")

@@ -12,6 +12,9 @@ def resolve_payment_provider(db: Session | None) -> PaymentProvider:
     if eff.provider == "razorpay" and eff.configured:
         from backend.app.services.payments.razorpay import RazorpayProvider
         return RazorpayProvider(eff.key_id, eff.key_secret, eff.webhook_secret)
+    if eff.provider == "stripe" and eff.configured:
+        from backend.app.services.payments.stripe_provider import StripeProvider
+        return StripeProvider(eff.key_id, eff.key_secret, eff.webhook_secret)
     from backend.app.services.payments.null import NullProvider
     return NullProvider()
 

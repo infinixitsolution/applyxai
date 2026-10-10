@@ -1,6 +1,7 @@
 import type {
-  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminEmailStatus, AdminPlatformSettings, EmailTemplates, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminCompany, AdminCompanyDetail, AdminEmailStatus, AdminPlatformSettings, EmailTemplates, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
   AdminInstituteDetail, AdminPartnerDetail, AdminUserDetail, AdminWorkers, AgentDevice, Application, ApplicationDetail, ApplicationStatus,
+  InterviewType, MockInterviewCompleteResult, MockInterviewFeedback, MockInterviewFeedbackJob, MockInterviewPresenterSettings, MockInterviewSessionDetail, MockInterviewSessionSummary, MockInterviewTurnResult,
   Institute, InstituteAssignment, InstituteDashboard, Partner, PartnerCampaign, PartnerCommission,
   PartnerDashboard, PartnerPayout, SeatCounts,
   PlatformCms, PublicSite,
@@ -8,7 +9,49 @@ import type {
   Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, ResumeTemplate, RunLogLine, SearchConfig,
   SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
 } from "../types";
-import { buildUrl, request } from "./api";
+import { ApiError, buildUrl, request, requestFull } from "./api";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForMockInterviewFeedbackJob(
+  jobId: string,
+  sessionId: string,
+): Promise<{ session: MockInterviewSessionDetail; feedback: MockInterviewFeedback }> {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const job = await request<MockInterviewFeedbackJob>(`/mock-interviews/feedback-jobs/${jobId}`);
+    if (job.status === "failed") {
+      throw new ApiError(
+        job.error_code ?? "FEEDBACK_FAILED",
+        job.error_message ?? "Report generation failed.",
+        502,
+      );
+    }
+    if (job.status === "succeeded") {
+      const session = await request<MockInterviewSessionDetail>(`/mock-interviews/sessions/${sessionId}`);
+      return { session, feedback: (session.feedback ?? {}) as MockInterviewFeedback };
+    }
+    await sleep(2000);
+  }
+  throw new ApiError("TIMEOUT", "Report generation is taking longer than expected. Refresh the page in a moment.", 504);
+}
+
+async function finishMockInterviewAction(
+  path: string,
+  sessionId: string,
+  body: { presentation_frames?: string[] },
+): Promise<{ session: MockInterviewSessionDetail; feedback: MockInterviewFeedback }> {
+  const { status, data } = await requestFull<MockInterviewCompleteResult>(path, { method: "POST", body });
+  if (status === 202 && data.job?.job_id) {
+    return waitForMockInterviewFeedbackJob(data.job.job_id, sessionId);
+  }
+  if (data.session && data.feedback) {
+    return { session: data.session, feedback: data.feedback };
+  }
+  if (data.session?.feedback) {
+    return { session: data.session, feedback: data.session.feedback as MockInterviewFeedback };
+  }
+  throw new ApiError("FEEDBACK_PENDING", "Report is still processing.", 202);
+}
 
 export interface ApplicationFilters {
   status?: ApplicationStatus[];
@@ -23,8 +66,26 @@ export interface ApplicationFilters {
 
 export const auth = {
   me: () => request<{ user: User }>("/auth/me").then((d) => d.user),
-  login: (email: string, password: string) =>
-    request<{ user: User }>("/auth/login", { method: "POST", body: { email, password } }).then((d) => d.user),
+  login: async (email: string, password: string) => {
+    const data = await request<{ user?: User; requires_2fa?: boolean; challenge_token?: string }>(
+      "/auth/login",
+      { method: "POST", body: { email, password } },
+    );
+    if (data.requires_2fa && data.challenge_token) {
+      return { kind: "2fa" as const, challengeToken: data.challenge_token };
+    }
+    return { kind: "session" as const, user: data.user! };
+  },
+  loginTwoFactor: (challengeToken: string, code: string) =>
+    request<{ user: User }>("/auth/login/2fa", { method: "POST", body: { challenge_token: challengeToken, code } }).then(
+      (d) => d.user,
+    ),
+  twoFactorSetup: () =>
+    request<{ secret: string; otpauth_uri: string }>("/auth/2fa/setup", { method: "POST" }),
+  twoFactorEnable: (code: string) =>
+    request<{ totp_enabled: boolean }>("/auth/2fa/enable", { method: "POST", body: { code } }),
+  twoFactorDisable: (password: string, code: string) =>
+    request<{ totp_enabled: boolean }>("/auth/2fa/disable", { method: "POST", body: { password, code } }),
   register: (body: {
     email: string; password: string; first_name?: string; last_name?: string;
     account_type?: "candidate" | "institute" | "partner"; institute_name?: string; contact_name?: string;
@@ -103,6 +164,49 @@ export const applications = {
   exportUrl: (filters: ApplicationFilters) => {
     const { page: _page, page_size: _size, ...rest } = filters;
     return buildUrl("/applications/export", { ...rest });
+  },
+};
+
+export const mockInterviews = {
+  availability: () =>
+    request<{
+      available: boolean;
+      reason: string;
+      message: string;
+      voice: boolean;
+      provider?: string;
+      presenter?: MockInterviewPresenterSettings;
+    }>("/mock-interviews/availability"),
+  listSessions: (query: { page?: number; page_size?: number } = {}) =>
+    request<Page<MockInterviewSessionSummary>>("/mock-interviews/sessions", { query }),
+  createSession: (body: { application_id: string; interview_types: InterviewType[] }) =>
+    request<MockInterviewSessionSummary>("/mock-interviews/sessions", { method: "POST", body }),
+  getSession: (id: string) => request<MockInterviewSessionDetail>(`/mock-interviews/sessions/${id}`),
+  opening: (id: string) =>
+    request<{ interviewer_message: MockInterviewTurnResult["interviewer_message"]; should_end: boolean; audio_base64: string; audio_mime: string }>(
+      `/mock-interviews/sessions/${id}/opening`,
+      { method: "POST", query: { include_audio: false } },
+    ),
+  turn: (id: string, content: string, clientTurnId?: string) =>
+    request<MockInterviewTurnResult>(`/mock-interviews/sessions/${id}/turns`, {
+      method: "POST",
+      body: { content, client_turn_id: clientTurnId },
+      query: { include_audio: false },
+    }),
+  messageTts: (sessionId: string, messageId: string) =>
+    request<{ audio_base64: string; audio_mime: string }>(
+      `/mock-interviews/sessions/${sessionId}/messages/${messageId}/tts`,
+      { method: "POST", body: {} },
+    ),
+  getFeedbackJob: (jobId: string) => request<MockInterviewFeedbackJob>(`/mock-interviews/feedback-jobs/${jobId}`),
+  complete: (id: string, body: { presentation_frames?: string[] } = {}) =>
+    finishMockInterviewAction(`/mock-interviews/sessions/${id}/complete`, id, body),
+  regenerateFeedback: (id: string, body: { presentation_frames?: string[] } = {}) =>
+    finishMockInterviewAction(`/mock-interviews/sessions/${id}/regenerate-feedback`, id, body),
+  transcribe: (file: Blob, filename = "audio.webm") => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    return request<{ text: string }>("/mock-interviews/transcribe", { method: "POST", form });
   },
 };
 
@@ -199,6 +303,8 @@ export const admin = {
   stopRun: (id: string) => request<AutomationRun>(`/admin/automation-jobs/${id}/stop`, { method: "POST" }),
   applications: (query: Paged & { status?: ApplicationStatus | ""; q?: string }) =>
     request<Page<AdminApplication>>("/admin/applications", { query }),
+  companies: (query: Paged & { q?: string }) => request<Page<AdminCompany>>("/admin/companies", { query }),
+  company: (name: string) => request<AdminCompanyDetail>("/admin/companies/detail", { query: { name } }),
   logs: (query: Paged & { level: LogLevel[]; q?: string }) => request<Page<AdminLogLine>>("/admin/logs", { query }),
   audit: (query: Paged) => request<Page<AdminAuditEntry>>("/admin/audit-log", { query }),
   workers: () => request<AdminWorkers>("/admin/workers"),
@@ -223,7 +329,8 @@ export const admin = {
     base_url: string;
     api_key?: string;
     models: { fast: string; strong: string; embedding: string };
-    features: { applications: boolean; resume: boolean };
+    features: { applications: boolean; resume: boolean; mock_interview?: boolean };
+    mock_interview_presenter?: MockInterviewPresenterSettings;
   }) => request<{ ai: AdminPlatformSettings["ai"] }>("/admin/settings/ai", { method: "PUT", body }),
   testAi: () => request<{ ok: boolean; reply: string }>("/admin/settings/ai/test", { method: "POST" }),
   updatePayments: (body: {
@@ -245,7 +352,9 @@ export const admin = {
   resendVerification: (id: string) =>
     request<AdminUserDetail>(`/admin/users/${id}/resend-verification`, { method: "POST" }),
   plans: () => request<{ plans: AdminPlan[] }>("/admin/plans").then((d) => d.plans),
+  createPlan: (body: import("../types").PlanCreate) => request<AdminPlan>("/admin/plans", { method: "POST", body }),
   updatePlan: (code: string, body: PlanUpdate) => request<AdminPlan>(`/admin/plans/${code}`, { method: "PUT", body }),
+  deletePlan: (code: string) => request<{ deleted: string }>(`/admin/plans/${code}`, { method: "DELETE" }),
   institutes: (query: Paged & { q?: string; status?: string }) => request<Page<Institute>>("/admin/institutes", { query }),
   createInstitute: (body: {
     name: string; email: string; password: string; contact_name?: string; phone?: string; approve?: boolean;

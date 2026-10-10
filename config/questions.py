@@ -70,8 +70,8 @@ then it will add '.' before last 5 digits and answer. Examples:
 # * 850000 will be answered as "70833"
 '''
 
-# (In Development) # Currency of salaries you mentioned. Companies that allow string inputs will add this tag to the end of numbers. Eg: 
-# currency = "INR"                 # "USD", "INR", "EUR", etc.
+# Currency suffix for salary answers on free-text fields (leave "" to omit). Eg: "INR", "USD", "EUR".
+currency = ""
 
 # What is your notice period in days?
 notice_period = 30                   # Any number >= 0 without quotes. Eg: 0, 7, 15, 30, 45, etc.

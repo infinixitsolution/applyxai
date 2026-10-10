@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.core.errors import ok
 from backend.app.services import platform_settings_service as ps
+from backend.app.core.config import settings
 from backend.app.services import site_seo_service
 
 router = APIRouter(prefix="/site", tags=["site"])
@@ -25,3 +26,11 @@ def robots_txt(db: Session = Depends(get_db)):
 @router.get("/sitemap.xml", summary="Sitemap for public marketing pages")
 def sitemap_xml(db: Session = Depends(get_db)):
     return Response(content=site_seo_service.sitemap_xml(db), media_type="application/xml; charset=utf-8")
+
+
+@router.get("/agent-release", summary="Latest desktop agent version and download URL for auto-update checks")
+def agent_release():
+    url = (settings.AGENT_DOWNLOAD_URL or "").strip()
+    if not url and settings.DESKTOP_AGENT_SETUP_PATH.is_file():
+        url = "/api/agent/download/setup"
+    return ok({"version": settings.AGENT_LATEST_VERSION, "download_url": url})

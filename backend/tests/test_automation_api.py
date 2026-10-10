@@ -122,12 +122,16 @@ def test_logging_out_everywhere_disconnects_agents(alice, alice_agent):
     assert alice_agent.get("/api/agent/me").status_code == 401
 
 
-def test_device_limit(app, alice, monkeypatch):
-    from backend.app.services import agent_service
-    monkeypatch.setattr(agent_service, "MAX_DEVICES", 1)
-    pair(app, alice)
-    resp = alice.post("/api/automation/devices/pairing-code", headers=csrf_headers(alice))
-    assert resp.status_code == 409 and resp.json()["error"]["code"] == "DEVICE_LIMIT_REACHED"
+def test_new_computer_replaces_previous(app, alice):
+    first = pair(app, alice, name="Old laptop")
+    old_id = alice.get("/api/automation/devices").json()["data"]["devices"][0]["id"]
+    assert first.get("/api/agent/me").status_code == 200
+    pair(app, alice, name="New desktop")
+    devices = alice.get("/api/automation/devices").json()["data"]["devices"]
+    assert len(devices) == 1
+    assert devices[0]["id"] != old_id
+    assert devices[0]["name"] == "New desktop"
+    assert first.get("/api/agent/me").status_code == 401
 
 
 # ----------------------------------------------------------------------------- starting

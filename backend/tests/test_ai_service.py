@@ -42,6 +42,17 @@ def test_admin_ai_settings_round_trip(api, make_user, engine, monkeypatch):
     assert overview["ai"]["ready"] is True
 
 
+def test_provider_401_maps_to_auth_failed():
+    import httpx
+
+    from backend.app.services.ai_service import _raise_for_provider_response
+
+    resp = httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+    with pytest.raises(AppError) as err:
+        _raise_for_provider_response(resp)
+    assert err.value.code == "AI_AUTH_FAILED"
+
+
 def test_complete_requires_feature(db, monkeypatch):
     monkeypatch.setattr("backend.app.core.config.settings.SECRET_KEY", "x" * 32)
     ps.update_ai(

@@ -74,7 +74,7 @@ export function LinkedInCapturedQuestions({ items }: { items: PendingFormQuestio
         {sorted.map((q) => (
           <li
             key={q.id}
-            className={`rounded-lg border p-4 ${q.needs_answer ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-slate-50/80"}`}
+            className={`rounded-xl p-4 ring-1 ${q.needs_answer ? "bg-amber-50/60 ring-amber-200" : "bg-brand-50/30 ring-slate-200/80"}`}
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <p className="font-medium text-slate-900">{q.label}</p>

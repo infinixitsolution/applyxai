@@ -29,6 +29,10 @@ celery_app.conf.update(
             "task": "applyxai.send_candidate_daily_reports",
             "schedule": 86400.0,
         },
+        "abandon-stale-mock-interviews": {
+            "task": "applyxai.abandon_stale_mock_interviews",
+            "schedule": 3600.0,
+        },
     },
 )
 
@@ -59,3 +63,25 @@ def send_candidate_daily_reports() -> int:
     if count:
         logger.info("sent %d candidate daily report(s)", count)
     return count
+
+
+@celery_app.task(name="applyxai.abandon_stale_mock_interviews")
+def abandon_stale_mock_interviews() -> int:
+    from backend.app.services import mock_interview_service
+
+    with SessionLocal() as db:
+        count = mock_interview_service.mark_stale_sessions_abandoned(db)
+        db.commit()
+    if count:
+        logger.info("marked %d mock interview session(s) abandoned", count)
+    return count
+
+
+@celery_app.task(name="applyxai.mock_interview_feedback", bind=True, max_retries=2)
+def run_mock_interview_feedback_job(self, job_id: str) -> str:
+    from backend.app.services.mock_interview_feedback_jobs import run_feedback_job
+
+    with SessionLocal() as db:
+        run_feedback_job(db, __import__("uuid").UUID(job_id))
+        db.commit()
+    return job_id

@@ -3,7 +3,7 @@ import { CreditCard } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ConfirmDialog } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
+import { Alert, Badge, Button, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner, surfaceCardClass } from "../../components/ui";
 import { formatDate, formatMoney } from "../../lib/format";
 import { CheckoutError, openRazorpayCheckout } from "../../lib/razorpay";
 import { errorMessage } from "../../services/api";
@@ -189,8 +189,16 @@ function CurrentPlan({ data, onCancel }: { data: BillingOverview; onCancel: () =
       </div>
       <p className="mt-1 text-sm text-slate-600">{planLine(sub)}</p>
       <div className="mt-4 space-y-4">
-        <ProgressBar label="Applications this month" value={u.applications.used} max={u.applications.limit} />
-        <ProgressBar label="Resumes" value={u.resumes.used} max={u.resumes.limit} />
+        <ProgressBar label="Applications this month" usageKind="applications" value={u.applications.used} max={u.applications.limit} />
+        {u.mock_interviews && (
+          <ProgressBar
+            label="Mock interviews this month"
+            usageKind="mock_interviews"
+            value={u.mock_interviews.used}
+            max={u.mock_interviews.limit}
+          />
+        )}
+        <ProgressBar label="Resumes" usageKind="resumes" value={u.resumes.used} max={u.resumes.limit} />
       </div>
       <p className="mt-4 text-xs text-slate-500">Usage resets on {formatDate(u.resets_at)}.</p>
       {sub && !sub.cancel_at_period_end && (
@@ -213,7 +221,7 @@ function PlanCard({ plan: p, sub, busy, loading, checkoutAvailable, onChoose }: 
 }) {
   const current = (sub ? sub.plan.code : "free") === p.code;
   return (
-    <div className={cx("rounded-xl bg-white p-5 ring-1", current ? "ring-2 ring-brand-600" : "ring-slate-200")}>
+    <div className={cx(surfaceCardClass, "p-5", current ? "ring-2 ring-brand-600" : "")}>
       <div className="flex items-center justify-between">
         <p className="font-semibold">{p.name}</p>
         {current && <Badge tone="brand">Current</Badge>}
@@ -223,7 +231,8 @@ function PlanCard({ plan: p, sub, busy, loading, checkoutAvailable, onChoose }: 
         {p.price_cents > 0 && <span className="text-sm font-normal text-slate-500"> / {p.interval}</span>}
       </p>
       <p className="mt-2 text-sm text-slate-600">
-        {p.limits.applications_per_month.toLocaleString()} applications / month &middot; {p.limits.resumes} resume{p.limits.resumes === 1 ? "" : "s"}
+        {p.limits.applications_per_month.toLocaleString()} applications / month &middot;{" "}
+        {(p.limits.mock_interviews_per_month ?? 0).toLocaleString()} mock interviews / month &middot; unlimited resumes
       </p>
       {!current && p.price_cents > 0 && (
         <Button

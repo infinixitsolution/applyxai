@@ -14,6 +14,7 @@ export interface User {
   partner_id?: string | null;
   institute_status?: string | null;
   partner_status?: string | null;
+  totp_enabled?: boolean;
 }
 
 export interface EducationEntry {
@@ -151,6 +152,15 @@ export const APPLICATION_STATUSES: ApplicationStatus[] = [
   "applied", "failed", "skipped", "external", "queued", "running", "discovered", "cancelled",
 ];
 
+/** Contact details the employer published on the job posting (not your personal data). */
+export interface PublishedContact {
+  name?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  link?: string;
+}
+
 export interface JobSummary {
   id: string;
   platform: string;
@@ -165,6 +175,7 @@ export interface JobSummary {
   salary_min: number | null;
   salary_max: number | null;
   discovered_at: string;
+  published_contacts?: PublishedContact[];
 }
 
 export interface JobDetail extends JobSummary {
@@ -226,7 +237,8 @@ export interface Usage {
   period: string;
   resets_at: string;
   applications: { used: number; limit: number; remaining: number };
-  resumes: { used: number; limit: number; remaining: number };
+  resumes: { used: number; limit: number; remaining: number; unlimited?: boolean };
+  mock_interviews?: { used: number; limit: number; remaining: number; unlimited?: boolean };
   jobs_discovered: number;
   runtime_seconds: number;
   limit_reached: boolean;
@@ -305,6 +317,7 @@ export interface DashboardStats {
   recent_applications: Application[];
   automation: { active: AutomationRun | null; last: AutomationRun | null };
   usage: Usage;
+  mock_interviews?: MockInterviewDashboardStats;
 }
 
 export interface Notification {
@@ -326,7 +339,13 @@ export interface Plan {
   currency: string;
   interval: string;
   kind?: PlanKind;
-  limits: { applications_per_month: number; resumes: number; seats?: number };
+  limits: {
+    applications_per_month: number;
+    mock_interviews_per_month: number;
+    resumes: number;
+    resumes_unlimited?: boolean;
+    seats?: number;
+  };
 }
 
 export type SubscriptionStatus = "pending" | "trialing" | "active" | "past_due" | "cancelled" | "expired";
@@ -389,6 +408,21 @@ export interface AdminAnalytics {
   revenue_30d_cents: Record<string, number>;
   applications: { this_month_by_status: Record<ApplicationStatus, number>; daily: { date: string; applied: number; failed: number }[] };
   automation: { active_runs: number; last_24h_by_status: Record<RunStatus, number>; devices: number; devices_online: number };
+  mock_interviews: {
+    total_sessions: number;
+    this_month: number;
+    by_status: Record<MockInterviewSessionStatus, number>;
+    failed_feedback_jobs_24h: number;
+  };
+}
+
+export interface MockInterviewPresenterSettings {
+  mode: "digital_human_3d" | "static_photo" | "live_stream";
+  image_url: string;
+  glb_url?: string;
+  live_stream_url?: string;
+  supports_barge_in?: boolean;
+  supports_replay?: boolean;
 }
 
 export interface AdminUser {
@@ -425,6 +459,48 @@ export interface WithOwner {
 
 export type AdminSubscription = Subscription & WithOwner;
 export type AdminRun = AutomationRun & WithOwner & { device: string };
+
+export interface AdminCompany {
+  company: string;
+  users: number;
+  user_emails: string[];
+  jobs: number;
+  applied: number;
+  search_filters: number;
+  last_seen: string | null;
+}
+
+export interface AdminCompanyJob {
+  id: string;
+  title: string;
+  location: string;
+  job_url: string;
+  applied: number;
+  other: number;
+  users: number;
+  last_seen: string | null;
+}
+
+export interface AdminCompanyContact {
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  link: string;
+  jobs: { title: string; job_url: string }[];
+}
+
+export interface AdminCompanyDetail {
+  company: string;
+  users: number;
+  jobs: number;
+  applied: number;
+  search_filters: number;
+  locations: string[];
+  last_seen: string | null;
+  job_list: AdminCompanyJob[];
+  contacts: AdminCompanyContact[];
+}
 
 export interface AdminApplication extends WithOwner {
   id: string;
@@ -590,9 +666,11 @@ export interface AdminPlatformSettings {
     base_url: string;
     api_key_configured: boolean;
     models: { fast: string; strong: string; embedding: string };
-    features: { applications: boolean; resume: boolean };
+    features: { applications: boolean; resume: boolean; mock_interview?: boolean };
     ready: boolean;
     resume_ready?: boolean;
+    mock_interview_ready?: boolean;
+    mock_interview_presenter?: MockInterviewPresenterSettings;
   };
   payments: {
     provider: "null" | "razorpay";
@@ -657,10 +735,15 @@ export interface PlanUpdate {
   name: string;
   price_cents: number;
   applications_per_month: number;
-  resumes: number;
+  mock_interviews_per_month: number;
   seats?: number;
   is_active: boolean;
   sort_order: number;
+}
+
+export interface PlanCreate extends PlanUpdate {
+  code: string;
+  kind: PlanKind;
 }
 
 export interface SeatCounts {
@@ -844,4 +927,179 @@ export interface AdminPartnerDetail extends PartnerDashboard {
     commissions_by_status: Record<string, number>;
     payouts_by_status: Record<string, number>;
   };
+}
+
+export type InterviewType = "behavioral" | "technical" | "hr" | "mixed";
+export type MockInterviewSessionStatus = "active" | "completed" | "abandoned";
+export type MockInterviewMessageRole = "interviewer" | "candidate";
+
+export interface MockInterviewDashboardStats {
+  total: number;
+  by_status: Record<MockInterviewSessionStatus, number>;
+  average_score: number | null;
+  best_score: number | null;
+  completed_with_score: number;
+  recent: {
+    id: string;
+    status: MockInterviewSessionStatus;
+    turn_count: number;
+    overall_score: number | null;
+    job_title: string;
+    company: string;
+    created_at: string;
+  }[];
+}
+
+export interface MockInterviewMessage {
+  id: string;
+  role: MockInterviewMessageRole;
+  content: string;
+  meta?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface MockInterviewSessionSummary {
+  id: string;
+  application_id: string;
+  interview_types: InterviewType[];
+  status: MockInterviewSessionStatus;
+  turn_count: number;
+  context_snapshot: Record<string, string>;
+  feedback?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  overall_score?: number | null;
+  max_duration_seconds: number;
+  ends_at: string;
+  seconds_remaining?: number | null;
+}
+
+export interface MockInterviewSessionDetail extends MockInterviewSessionSummary {
+  messages: MockInterviewMessage[];
+}
+
+export interface MockInterviewTurnResult {
+  candidate_message: MockInterviewMessage;
+  interviewer_message: MockInterviewMessage;
+  should_end: boolean;
+  turn_count: number;
+  audio_base64: string;
+  audio_mime: string;
+}
+
+export interface MockInterviewFeedbackJob {
+  job_id: string;
+  session_id: string;
+  operation: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  attempt_count: number;
+  error_code?: string | null;
+  error_message?: string | null;
+  presentation_frame_count: number;
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface MockInterviewCompleteResult {
+  session?: MockInterviewSessionDetail;
+  feedback?: MockInterviewFeedback;
+  job?: MockInterviewFeedbackJob;
+}
+
+export interface MockInterviewRubricScore {
+  id: number;
+  key: string;
+  label: string;
+  category_id: string;
+  category_label: string;
+  score: number | null;
+  notes?: string | null;
+}
+
+export interface MockInterviewRubricCategory {
+  category_id: string;
+  category_label: string;
+  average_score: number | null;
+  parameters_scored: number;
+  parameters_total: number;
+}
+
+export type MockInterviewBehaviorStatus = "ok" | "concern" | "not_observable" | "na" | string;
+
+export interface MockInterviewBehaviorParameter {
+  id: number;
+  category_id: string;
+  category_label: string;
+  key: string;
+  label: string;
+  score?: number | null;
+  status?: MockInterviewBehaviorStatus;
+  detected?: boolean;
+  notes?: string;
+}
+
+export interface MockInterviewBehaviorCategory {
+  category_id: string;
+  category_label: string;
+  average_score?: number | null;
+  parameters_scored?: number;
+  parameters_total?: number;
+  concerns_detected?: number;
+}
+
+export interface MockInterviewAnalysisMeta {
+  generated_at?: string;
+  message_count?: number;
+  candidate_turns?: number;
+  presentation_frames_analyzed?: number;
+  behavior_parameters_total?: number;
+  behavior_concerns?: number;
+  rubric_version?: number;
+  behavior_analysis_version?: number;
+  includes?: string[];
+}
+
+export interface MockInterviewFeedback {
+  overall_score?: number;
+  analysis_meta?: MockInterviewAnalysisMeta;
+  rubric_version?: number;
+  rubric_overall?: number;
+  rubric_scores?: MockInterviewRubricScore[];
+  rubric_categories?: MockInterviewRubricCategory[];
+  knowledge_summary?: string;
+  dimensions?: { key: string; label: string; score: number; notes: string }[];
+  question_breakdown?: {
+    question: string;
+    answer_quality: "strong" | "adequate" | "weak" | "missing" | string;
+    notes: string;
+  }[];
+  presentation?: {
+    available?: boolean;
+    reason?: string;
+    overall_score?: number;
+    facial_expression?: { score: number; notes: string };
+    eye_contact?: { score: number; notes: string };
+    grooming?: { score: number; notes: string };
+    professional_conduct?: {
+      score?: number | null;
+      issues?: string[];
+      notes?: string;
+    };
+    behavior_analysis_version?: number;
+    behavior_overall?: number | null;
+    behavioral_parameters?: MockInterviewBehaviorParameter[];
+    behavior_categories?: MockInterviewBehaviorCategory[];
+    presentability_summary?: string;
+  };
+  answer_authenticity?: {
+    overall: "human" | "mixed" | "bookish" | "ai_like" | "missing" | "unknown" | string;
+    confidence?: number;
+    signals?: string[];
+    notes?: string;
+  };
+  strengths?: string[];
+  improvements?: string[];
+  sample_answers?: { question: string; suggestion: string }[];
+  error?: string;
 }

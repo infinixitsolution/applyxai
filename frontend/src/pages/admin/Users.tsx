@@ -13,7 +13,7 @@ import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage, fieldErrors } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminUser, type AdminUserDetail } from "../../types";
-import { PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
+import { FilterChip, FilterChipBrand, PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
 
 const USER_STATUS_FILTERS = [
   { value: "active", label: "Active" },
@@ -34,17 +34,11 @@ function AdminUserStatusFilters({ value, onChange }: { value: UserListStatus; on
     <div>
       <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
       <div className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={value === ""} onClick={() => onChange("")}
-                className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                  value === "" ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
-          All
-        </button>
+        <FilterChip active={value === ""} onClick={() => onChange("")}>All</FilterChip>
         {USER_STATUS_FILTERS.map((f) => (
-          <button key={f.value} type="button" aria-pressed={value === f.value} onClick={() => onChange(value === f.value ? "" : f.value)}
-                  className={cx("rounded-full px-3 py-1 text-sm ring-1 ring-inset transition-colors",
-                    value === f.value ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50")}>
+          <FilterChipBrand key={f.value} active={value === f.value} onClick={() => onChange(value === f.value ? "" : f.value)}>
             {f.label}
-          </button>
+          </FilterChipBrand>
         ))}
       </div>
     </div>
@@ -476,8 +470,8 @@ export function AdminUserPage() {
 
         <Card title={`Usage (${usage.period})`}>
           <div className="space-y-4">
-            <ProgressBar label="Applications" value={usage.applications.used} max={usage.applications.limit} />
-            <ProgressBar label="Resumes" value={data.resumes} max={usage.resumes.limit} />
+            <ProgressBar label="Applications" usageKind="applications" value={usage.applications.used} max={usage.applications.limit} />
+            <ProgressBar label="Resumes" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
             <div className="flex flex-wrap gap-1">
               {APPLICATION_STATUSES.filter((s) => data.applications_by_status[s] > 0).map((s) => (
                 <Badge key={s} tone={STATUS_TONES[s]}>{STATUS_LABELS[s]}: {data.applications_by_status[s]}</Badge>

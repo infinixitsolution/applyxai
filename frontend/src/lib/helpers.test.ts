@@ -4,7 +4,9 @@ import { fromDraft, toDraft } from "../components/DynamicField";
 import { appLink } from "../components/NotificationBell";
 import { resumeFileProblem } from "../features/ResumeManager";
 import type { FieldMeta } from "../types";
-import { formatBytes, formatMoney, safeExternalUrl } from "./format";
+import {
+  formatBytes, formatMoney, safeExternalUrl,
+} from "./format";
 
 const field = (type: FieldMeta["type"], options?: string[]): FieldMeta =>
   ({ key: "k", label: "Thing", type, help: "", section: "Profile", advanced: false, options });
@@ -59,6 +61,7 @@ describe("appLink", () => {
   it("maps backend paths into the app", () => {
     expect(appLink("/automation")).toBe("/app/automation");
     expect(appLink("/app/billing")).toBe("/app/billing");
+    expect(appLink("/invite/abc")).toBe("/invite/abc");
     expect(appLink("")).toBe("/app/notifications");
     expect(appLink("//evil.example")).toBe("/app/notifications");
     expect(appLink("https://evil.example")).toBe("/app/notifications");

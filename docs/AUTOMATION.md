@@ -78,6 +78,7 @@ run.stop(timeout=60)       # asks politely, then kills the process tree
 
 - **Jobs and applications:** it upserts the shared `jobs` row and the user's `applications` row. An application that's already `applied` never goes back to another status.
 - **Run tracking (with `run`):** it updates the run's status, current job, and counters, writes numbered `automation_logs` lines, and sends a notification when the run finishes.
+- **Form questions:** when the engine emits `form_question` with `needs_answer: true`, the server stores it in application preferences and sends an immediate in-app notification (`form_question`, link `/app/automation?pending=1`). Email for that event is optional via admin **Templates** settings.
 - **Batches:** pass the returned `context` along with the next batch, so `failed` and `skipped` events still get their job titles.
 - **Usage:** new applications count toward the monthly plan limit unless `count_usage=False`.
 

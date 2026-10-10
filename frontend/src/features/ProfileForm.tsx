@@ -150,7 +150,7 @@ function ProfileFormInner({ initial, onSaved, submitLabel }: { initial: Profile;
                 hint="A short professional summary. Some application forms ask for one." />
       <TagInput label="Skills" value={form.skills} onChange={set("skills")} error={errors.skills} placeholder="Python, SQL, …" />
 
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+      <section className="space-y-3 rounded-xl bg-brand-50/40 p-4 ring-1 ring-slate-200/80">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-900">Work experience</h3>
           <Button type="button" variant="ghost" size="sm" onClick={() => setForm((f) => ({ ...f, work_history: [...f.work_history, emptyWork()] }))}>
@@ -181,7 +181,7 @@ function ProfileFormInner({ initial, onSaved, submitLabel }: { initial: Profile;
         )}
       </section>
 
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+      <section className="space-y-3 rounded-xl bg-brand-50/40 p-4 ring-1 ring-slate-200/80">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-900">Education</h3>
           <Button type="button" variant="ghost" size="sm" onClick={() => setForm((f) => ({ ...f, education: [...f.education, emptyEducation()] }))}>
