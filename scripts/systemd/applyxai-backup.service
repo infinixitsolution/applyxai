@@ -1,0 +1,14 @@
+[Unit]
+Description=ApplyXAI PostgreSQL backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/applyxai
+EnvironmentFile=-/etc/default/applyxai-backup
+# Defaults if not overridden in EnvironmentFile:
+Environment=BACKUP_DIR=/home/ubuntu/applyxai/storage/backups
+EnvironmentFile=/home/ubuntu/applyxai/.env
+ExecStart=/home/ubuntu/applyxai/scripts/backup_postgres.sh

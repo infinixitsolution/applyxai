@@ -164,6 +164,10 @@ With `APP_ENV=production`, the API **refuses to start** unless PostgreSQL, Razor
 | ClamAV (recommended) | Set `CLAMAV_HOST` / `CLAMAV_PORT` to your `clamd`; resume uploads use INSTREAM scan |
 | Post-deploy smoke | [SITE_AUDIT.md](./SITE_AUDIT.md) curl checklist |
 
+EC2 runbook (Redis limits, backups, Celery beat, ClamAV, verify script): [PRODUCTION_OPS.md](./PRODUCTION_OPS.md).
+
+Production billing scope (Razorpay-only until Stripe ships): [BILLING.md](./BILLING.md).
+
 Full open items: [BACKLOG.md](./BACKLOG.md).
 
 ## Rules while the migration is in progress

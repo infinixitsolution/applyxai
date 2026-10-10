@@ -16,6 +16,10 @@ ApplyXAI accrues partner commissions when eligible institutes pay through Razorp
 4. Execute the bank transfer via your finance tool; record reference in the payout **note**.
 5. Mark **Paid** when the transfer settles.
 
-## Automation (#33)
+## Automation (#33) — v1 scope
 
-Fully automated Razorpay X payouts are not implemented in v1. Track execution in your ops runbook until payout APIs are integrated.
+**In scope (shipped):** KYC gates on partner status, payout request/approve/paid workflow in admin API and UI, commission accrual on qualifying payments.
+
+**Out of scope for v1 (by design):** Fully automated Razorpay X / bank API payout execution. Finance runs transfers manually (or via Razorpay dashboard) and marks payouts **Paid** in admin.
+
+**Future (#33):** Integrate Razorpay X or payout APIs; webhook or poll for settlement; idempotent payout references. Track in [BACKLOG.md](./BACKLOG.md) until prioritized.

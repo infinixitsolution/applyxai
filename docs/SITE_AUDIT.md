@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-09. Use after deploy to verify production.
 
+Production ops verify: [PRODUCTION_OPS.md](./PRODUCTION_OPS.md) (`scripts/verify_production_ops.sh`).
+
 ## Automated on deploy (`scripts/update_server.sh`)
 
 - Nginx site + security header snippet (robots/sitemap → API, HSTS on all responses)

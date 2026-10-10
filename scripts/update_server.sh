@@ -50,4 +50,14 @@ fi
 
 sudo systemctl restart applyxai-backend
 sudo systemctl is-active applyxai-backend
+
+SMOKE_BASE="${APPLYXAI_SMOKE_URL:-https://applyxai.com}"
+if [[ -f "$APP_DIR/scripts/smoke_production.sh" ]]; then
+  BASE_URL="$SMOKE_BASE" bash "$APP_DIR/scripts/smoke_production.sh" || echo "WARN: smoke checks failed (deploy still complete)"
+fi
+
+if [[ -f "$APP_DIR/scripts/verify_production_ops.sh" ]]; then
+  bash "$APP_DIR/scripts/verify_production_ops.sh" || echo "WARN: ops verify reported issues (see docs/PRODUCTION_OPS.md)"
+fi
+
 echo "Deployed $BRANCH at $AFTER"

@@ -72,8 +72,7 @@ def abandon_stale_mock_interviews() -> int:
     with SessionLocal() as db:
         count = mock_interview_service.mark_stale_sessions_abandoned(db)
         db.commit()
-    if count:
-        logger.info("marked %d mock interview session(s) abandoned", count)
+    logger.info("abandon_stale_mock_interviews complete abandoned=%d", count)
     return count
 
 

@@ -45,4 +45,50 @@ describe("JobsDashboard", () => {
     );
     expect(await screen.findByText(/No jobs found/i)).toBeTruthy();
   });
+
+  it("lists jobs when API returns items", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input).split("?")[0]!;
+      if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+      if (url.includes("/preferences/options")) {
+        return ok({
+          search: { experience_level: [], job_type: [], on_site: [], date_posted: [], sort_by: [], extra_fields: [] },
+          application_fields: [],
+        });
+      }
+      if (url.includes("/jobs")) {
+        return ok({
+          items: [{
+            id: "job-1",
+            external_id: "ext-1",
+            title: "Backend Engineer",
+            company: "Acme Corp",
+            location: "Remote",
+            job_url: "https://example.com/j",
+            work_setting: "remote",
+            salary_min: null,
+            salary_max: null,
+            discovered_at: "2026-10-01T00:00:00Z",
+            application: { id: "app-1", status: "discovered", applied_at: null },
+          }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <JobsDashboard />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Backend Engineer")).toBeTruthy();
+    expect(screen.getAllByText(/Acme Corp/).length).toBeGreaterThan(0);
+  });
 });

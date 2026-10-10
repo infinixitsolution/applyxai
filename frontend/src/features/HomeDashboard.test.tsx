@@ -50,5 +50,56 @@ describe("HomeDashboard", () => {
     );
     expect(await screen.findByText("Dashboard")).toBeTruthy();
     expect(screen.getByText("Mock interview practice")).toBeTruthy();
+    expect(screen.getByText("No mock interviews yet")).toBeTruthy();
+  });
+
+  it("shows mock interview stats when sessions exist", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("/dashboard/stats")) {
+        return ok({
+          applications_by_status: { applied: 0, failed: 0, skipped: 0, queued: 0, running: 0, discovered: 0, external: 0, cancelled: 0 },
+          total_applied: 0, applied_today: 0, success_rate: null, daily: [], top_companies: [], recent_applications: [],
+          automation: { active: null, last: null },
+          usage: {
+            plan: "pro", plan_name: "Pro", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 1, limit: 100, remaining: 99 },
+            resumes: { used: 1, limit: 5, remaining: 4 },
+            mock_interviews: { used: 2, limit: 10, remaining: 8, unlimited: false },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+          mock_interviews: {
+            total: 2,
+            by_status: { active: 0, completed: 2, abandoned: 0 },
+            average_score: 72,
+            best_score: 80,
+            completed_with_score: 2,
+            recent: [{
+              id: "11111111-1111-1111-1111-111111111111",
+              status: "completed",
+              job_title: "Engineer",
+              company: "Acme",
+              overall_score: 80,
+              turn_count: 5,
+              created_at: "2026-10-01T12:00:00Z",
+            }],
+          },
+        });
+      }
+      if (url.includes("/automation/overview")) return ok({ devices: [], runs: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <HomeDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Total sessions")).toBeTruthy();
+    expect(screen.getByText("Average score")).toBeTruthy();
+    expect(screen.getByText("72")).toBeTruthy();
+    expect(screen.getByText(/Engineer · Acme/)).toBeTruthy();
   });
 });

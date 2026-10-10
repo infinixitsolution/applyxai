@@ -136,4 +136,5 @@ describe("MockInterviewReportPage", () => {
     render(wrapper("/app/mock-interview/sess-1/report"));
     await waitFor(() => expect(screen.getByText("Report dashboard")).toBeTruthy());
   });
+
 });

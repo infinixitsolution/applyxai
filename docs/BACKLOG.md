@@ -1,7 +1,7 @@
 # ApplyXAI — Product backlog
 
 **Canonical tracker** for incomplete features, partial implementations, tests, and production readiness.  
-**Last updated:** 2026-10-12.
+**Last updated:** 2026-10-12 (ops runbook + CI + verify scripts).
 
 Related docs: [MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md](./MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md) (mock interview WPs done), [SITE_AUDIT.md](./SITE_AUDIT.md) (deploy smoke), [SECURITY_CHECKLIST.md](./SECURITY_CHECKLIST.md) (agent + sign-off), [SAAS_ROADMAP.md](./SAAS_ROADMAP.md) (historical architecture proposal).
 
@@ -28,10 +28,10 @@ Related docs: [MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md](./MOCK_INTERVIEW_IMPLEMENT
 | 15 | Partner commercial status ↔ KYC enforcement | **Done (slice 1)** | Partner | `partner_service.set_status()` |
 | 17 | Security checklist sign-off | Partial | Ops | [SECURITY_SIGNOFF_TEMPLATE.md](./SECURITY_SIGNOFF_TEMPLATE.md) |
 | 32 | Production Razorpay configuration | Open | Billing | Documented in [DEVELOPMENT.md](./DEVELOPMENT.md); enforced in config |
-| 33 | Automated partner payout execution | Open | Partner/Ops | UI + services exist; ops + Razorpay |
-| 34 | Automated PostgreSQL backups to S3 | Partial | Ops | `scripts/backup_postgres.sh` — schedule on host |
-| 36 | Resume upload malware scanning (ClamAV) | Partial | Security | `resume_malware_scan.py` + `CLAMAV_*` env; deploy clamd separately |
-| 37 | Full CSP + security hardening | Partial | Ops | HSTS + CSP-Report-Only in nginx snippet; enforce CSP later |
+| 33 | Automated partner payout execution | Open (v1 manual) | Partner/Ops | Workflow shipped; API automation deferred — [PARTNER_PAYOUT.md](./PARTNER_PAYOUT.md) |
+| 34 | Automated PostgreSQL backups to S3 | Partial | Ops | `backup_postgres.sh` + systemd timer/cron; enable on host ([PRODUCTION_OPS.md](./PRODUCTION_OPS.md)) |
+| 36 | Resume upload malware scanning (ClamAV) | Partial | Security | Hook shipped; enable via `CLAMAV_*` or document waiver in sign-off |
+| 37 | Full CSP + security hardening | Partial | Ops | HSTS + CSP-Report-Only; enforce CSP after report review |
 | 40 | Production rate limiting (Redis) | Open | Infra | `RATE_LIMIT_STORAGE_URL` must not be `memory` in prod |
 | 43 | Full security checklist completion | Open | Ops | Human sign-off |
 
@@ -46,14 +46,14 @@ Related docs: [MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md](./MOCK_INTERVIEW_IMPLEMENT
 | 1 | Published HR contacts on candidate job UI | **Done (slice 1)** | Product | API + Application detail |
 | 5 | Mock interview live-stream presenter | POC | Mock interview | Admin `live_stream`; vendor SDK (#44) |
 | 7 | Complete report regeneration (vision) | **Done (slice 1)** | Mock interview | Merge prior `presentation` when no new frames |
-| 8 | Auto-abandon idle mock sessions | Partial | Mock interview | Needs Celery **beat** (#30, #47) |
+| 8 | Auto-abandon idle mock sessions | Partial | Mock interview | Beat task + hourly log; verify via [PRODUCTION_OPS.md](./PRODUCTION_OPS.md) |
 | 9 | Mock interview live/report frontend tests | **Done (slice 1)** | Tests | Vitest |
 | 18 | Partner payout workflow | **Done (slice 3)** | Partner | [PARTNER_PAYOUT.md](./PARTNER_PAYOUT.md); KYC on approve/paid |
 | 19 | Company contacts on candidate pages | **Done (slice 1)** | Product | Same as #1 |
 | 29 | Regenerate loses vision context | **Done (slice 1)** | Mock interview | `merge_regenerated_feedback()` |
-| 30 | Abandoned state needs scheduled task | Partial | Ops | `abandon_stale_mock_interviews` in worker beat |
+| 30 | Abandoned state needs scheduled task | Partial | Ops | In worker beat; confirm on EC2 with `verify_production_ops.sh` |
 | 44 | Commercial talking-avatar SDK | POC | Mock interview | Vendor-dependent |
-| 47 | Reliable stale-session cleanup | Partial | Ops | Same as #8/#30 |
+| 47 | Reliable stale-session cleanup | Partial | Ops | Same as #8/#30; backend test `test_mock_interview_abandon.py` |
 | 48 | Vision-aware report regeneration | **Done (slice 1)** | Mock interview | Same as #7/#29 |
 | 49 | Live-interview UI regression suite | Partial | Tests | Expanded in slice 1 |
 | 51–53 | MI live, report, PDF tests | Partial | Tests | PDF + page smoke in slice 1 |
@@ -90,11 +90,11 @@ Related docs: [MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md](./MOCK_INTERVIEW_IMPLEMENT
 | 24 | Engine `currency` in Easy Apply answers | **Done (slice 3)** | Engine | `config/questions.py` + `append_salary_currency` |
 | 25–26 | Deeper engine refactor / ChromeDriver naming | Partial | Engine | Platform-specific driver filename in `open_chrome.py` |
 | 27 | Implement or remove `invalidate_caches()` | **Done (slice 3)** | Platform | Short TTL platform row cache |
-| 31 | Stripe integration | Partial | Billing | Provider stub + admin mode; Checkout TBD |
+| 31 | Stripe integration | Partial | Billing | Stub only; production **Razorpay-only** — [BILLING.md](./BILLING.md) |
 | 35 | Docker Compose deployment bundle | **Done (slice 3)** | Infra | `docker-compose.yml` + `backend/Dockerfile` |
-| 38 | PostgreSQL migration CI (`TEST_POSTGRES_URL`) | Partial | CI | `scripts/ci_postgres_migrate.sh` |
+| 38 | PostgreSQL migration CI (`TEST_POSTGRES_URL`) | Partial | CI | `ci_postgres_migrate.sh` + `.github/workflows/ci.yml` |
 | 39 | Live OpenAI integration test | Optional skip | CI | Unchanged |
-| 42 | Automated production smoke tests | Partial | Ops | `scripts/smoke_production.sh` |
+| 42 | Automated production smoke tests | Partial | Ops | `smoke_production.sh`; runs on deploy via `update_server.sh` |
 | 45 | Datadog/CloudWatch MI metrics | Not built | Ops |
 | 46 | Photoreal 3D avatar default | Not default | Mock interview |
 | 54–60 | Extended test matrix | Open | Tests |
