@@ -23,6 +23,9 @@ function mockInterviewAiError(error: unknown): string {
     if (error.code === "SESSION_EXPIRED") {
       return "The 30-minute session has ended. End the interview to generate your report.";
     }
+    if (error.code === "SESSION_CLOSING" || error.code === "SESSION_LIMIT") {
+      return error.message;
+    }
     if (error.code === "AI_RATE_LIMIT") {
       return error.message;
     }
@@ -42,6 +45,12 @@ import { mockInterviews } from "../../services/endpoints";
 import type { MockInterviewFeedback, MockInterviewSessionDetail } from "../../types";
 
 const SESSION_KEY = (id: string) => ["mock-interview", id] as const;
+
+function sessionInterviewerClosed(session: MockInterviewSessionDetail | undefined): boolean {
+  const last = [...(session?.messages ?? [])].reverse().find((m) => m.role === "interviewer");
+  const meta = last?.meta;
+  return Boolean(meta && typeof meta === "object" && (meta as Record<string, unknown>).should_end === true);
+}
 
 class MockInterviewLiveErrorBoundary extends Component<
   { children: ReactNode },
@@ -90,6 +99,7 @@ export function MockInterviewLivePage() {
   const [micMuted, setMicMuted] = useState(false);
   const [showCaptions, setShowCaptions] = useState(false);
   const autoEndingRef = useRef(false);
+  const interviewClosedRef = useRef(false);
   const presentationFramesRef = useRef<string[]>([]);
   const finishInterviewRef = useRef<() => void>(() => {});
 
@@ -146,12 +156,18 @@ export function MockInterviewLivePage() {
     onTranscript: (text) => turnHandlerRef.current(text),
     transcribe: (blob) => mockInterviews.transcribe(blob).then((r) => r.text),
     bargeInEnabled: supportsBargeIn,
-    disabled: session?.status !== "active",
+    disabled: session?.status !== "active" || shouldEndHint,
     continuous: true,
   });
 
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
+
+  const markInterviewClosed = useCallback(() => {
+    interviewClosedRef.current = true;
+    setShouldEndHint(true);
+    voiceRef.current.stopLiveMode();
+  }, []);
 
   useEffect(() => {
     voiceRef.current.setFetchTts(({ messageId }) => mockInterviews.messageTts(sessionId, messageId));
@@ -166,7 +182,8 @@ export function MockInterviewLivePage() {
         if (has) return prev;
         return { ...prev, messages: [...prev.messages, data.interviewer_message] };
       });
-      setShouldEndHint(data.should_end);
+      if (data.should_end) markInterviewClosed();
+      else setShouldEndHint(false);
       if (!liveStarted.current) {
         liveStarted.current = true;
         voiceRef.current.startLiveMode();
@@ -221,6 +238,12 @@ export function MockInterviewLivePage() {
     openingMutateRef.current();
   }, [session?.id, session?.status, session?.ends_at, messageCount, hasInterviewerMsg, opening.isPending]);
 
+  useEffect(() => {
+    if (session && sessionInterviewerClosed(session)) {
+      markInterviewClosed();
+    }
+  }, [session, markInterviewClosed]);
+
   const complete = useMutation({
     mutationFn: (payload?: { presentation_frames?: string[] }) =>
       mockInterviews.complete(sessionId, {
@@ -244,7 +267,7 @@ export function MockInterviewLivePage() {
   finishInterviewRef.current = finishInterview;
 
   turnHandlerRef.current = async (text: string) => {
-    if (turnInFlightRef.current) return;
+    if (turnInFlightRef.current || interviewClosedRef.current || autoEndingRef.current) return;
     turnInFlightRef.current = true;
     const optimisticId = `pending-${Date.now()}`;
     qc.setQueryData<MockInterviewSessionDetail>(SESSION_KEY(sessionId), (prev) => {
@@ -277,6 +300,10 @@ export function MockInterviewLivePage() {
           completeMutateRef.current();
           return;
         }
+        if (err instanceof ApiError && (err.code === "SESSION_CLOSING" || err.code === "SESSION_LIMIT")) {
+          markInterviewClosed();
+          return;
+        }
         throw err;
       }
       qc.setQueryData<MockInterviewSessionDetail>(SESSION_KEY(sessionId), (prev) => {
@@ -288,7 +315,8 @@ export function MockInterviewLivePage() {
         if (!ids.has(result.interviewer_message.id)) msgs.push(result.interviewer_message);
         return { ...prev, messages: msgs, turn_count: result.turn_count };
       });
-      setShouldEndHint(result.should_end);
+      if (result.should_end) markInterviewClosed();
+      else setShouldEndHint(false);
       capturePresentationSnapshot();
       const msgId = result.interviewer_message.id;
       if (!spokenMessageIds.current.has(msgId)) {
@@ -299,6 +327,9 @@ export function MockInterviewLivePage() {
           result.audio_mime,
           result.interviewer_message.id,
         );
+      }
+      if (result.should_end && !autoEndingRef.current) {
+        finishInterviewRef.current();
       }
     } finally {
       turnInFlightRef.current = false;

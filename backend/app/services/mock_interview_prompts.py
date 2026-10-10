@@ -14,6 +14,25 @@ SUGGEST_END_AFTER_TURNS = 10
 MOCK_INTERVIEW_MAX_DURATION_MINUTES = 30
 MOCK_INTERVIEW_MAX_DURATION_SEC = MOCK_INTERVIEW_MAX_DURATION_MINUTES * 60
 
+_CLOSING_FOOTER = "Please end the session to receive your feedback report."
+
+
+def normalize_closing_reply(reply: str) -> str:
+    """Ensure a wrap-up line does not invite another Q&A turn."""
+    text = (reply or "").strip()
+    if not text:
+        return f"Thank you for your time today. That concludes our mock interview — {_CLOSING_FOOTER}"
+    lower = text.lower()
+    if _CLOSING_FOOTER.lower() in lower or "end the session" in lower:
+        if "?" not in text:
+            return text
+    if "?" in text:
+        lead = text.split("?")[0].strip()
+        if len(lead) < 40:
+            lead = "Thank you for sharing your experience with me today"
+        return f"{lead.rstrip('.')}. That wraps up our mock interview — {_CLOSING_FOOTER}"
+    return f"{text.rstrip('.')}. {_CLOSING_FOOTER}"
+
 
 def normalize_interview_types(types: list[str]) -> list[str]:
     cleaned = [t for t in types if t]

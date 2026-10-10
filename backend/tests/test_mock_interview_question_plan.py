@@ -1,5 +1,6 @@
 """JD ↔ resume question plan for mock interviews."""
 
+from backend.app.services.mock_interview_prompts import normalize_closing_reply
 from backend.app.services.mock_interview_question_plan import (
     build_question_plan,
     extract_jd_bullets,
@@ -58,3 +59,14 @@ def test_resume_profile_block_parses_work():
     )
     assert block["companies"] == ["X"]
     assert "Dev" in block["roles"][0]
+
+
+def test_normalize_closing_reply_strips_trailing_question():
+    out = normalize_closing_reply("Thanks for your time. Any questions for me?")
+    assert "?" not in out
+    assert "feedback report" in out.lower()
+
+
+def test_normalize_closing_reply_keeps_clean_signoff():
+    plain = "Thank you — that concludes our mock interview. Please end the session to receive your feedback report."
+    assert normalize_closing_reply(plain) == plain

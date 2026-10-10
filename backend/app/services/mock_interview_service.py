@@ -36,6 +36,7 @@ from backend.app.services.mock_interview_prompts import (
     feedback_system_prompt,
     feedback_user_prompt,
     interviewer_system_prompt,
+    normalize_closing_reply,
     normalize_interview_types,
     opening_user_prompt,
     turn_user_prompt,
@@ -150,6 +151,24 @@ def _types_strings(types: list) -> list[str]:
     for t in types:
         out.append(t.value if hasattr(t, "value") else str(t))
     return normalize_interview_types(out)
+
+
+def _interviewer_closed_session(session: MockInterviewSession) -> bool:
+    if not session.messages:
+        return False
+    last = session.messages[-1]
+    if last.role != MockInterviewMessageRole.INTERVIEWER:
+        return False
+    meta = last.meta if isinstance(last.meta, dict) else {}
+    return bool(meta.get("should_end"))
+
+
+def _apply_wrap_up(reply: str, *, should_end: bool, forced: bool) -> tuple[str, bool]:
+    if forced:
+        should_end = True
+    if should_end:
+        return normalize_closing_reply(reply), True
+    return reply, should_end
 
 
 def _parse_interviewer_json(raw: str) -> tuple[str, bool]:
@@ -279,7 +298,8 @@ def generate_opening(
         last = session.messages[-1]
         if last.role == MockInterviewMessageRole.INTERVIEWER:
             audio_b64, audio_mime = _maybe_audio(db, last.content) if include_audio else ("", "")
-            return last, False, audio_b64, audio_mime
+            meta = last.meta if isinstance(last.meta, dict) else {}
+            return last, bool(meta.get("should_end")), audio_b64, audio_mime
     app = application_service.get_application(db, user.id, session.application_id)
     ctx, _ = build_interview_context(db, user.id, app)
     types = _types_strings(session.interview_types)
@@ -288,13 +308,13 @@ def generate_opening(
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": opening_user_prompt()}]
     content, should_end = _generate_interviewer_reply(db, messages)
-    if timing.minutes_remaining <= 2:
-        should_end = True
+    forced = timing.minutes_remaining <= 2
+    content, should_end = _apply_wrap_up(content, should_end=should_end, forced=forced)
     msg = MockInterviewMessage(
         session_id=session.id,
         role=MockInterviewMessageRole.INTERVIEWER,
         content=content,
-        meta=_segment_meta(types, session.turn_count),
+        meta={**_segment_meta(types, session.turn_count), "should_end": should_end},
     )
     db.add(msg)
     db.flush()
@@ -352,6 +372,12 @@ def append_candidate_turn(
         cached = _turn_response_for_idempotency(db, session, client_turn_id)
         if cached is not None:
             return cached
+    if _interviewer_closed_session(session):
+        raise AppError(
+            "SESSION_CLOSING",
+            "The interviewer has closed this session. End the interview to generate your report.",
+            409,
+        )
     if session.turn_count >= MAX_TURNS_BEFORE_END:
         raise AppError("SESSION_LIMIT", "This interview has reached the maximum number of questions.", 409)
     text = content.strip()
@@ -390,10 +416,8 @@ def append_candidate_turn(
         {"role": "user", "content": turn_user_prompt(text, prior_interviewer_lines=asked)},
     ]
     reply, should_end = _generate_interviewer_reply(db, messages)
-    if session.turn_count >= MAX_TURNS_BEFORE_END:
-        should_end = True
-    if timing.minutes_remaining <= 2:
-        should_end = True
+    forced = session.turn_count >= MAX_TURNS_BEFORE_END or timing.minutes_remaining <= 2
+    reply, should_end = _apply_wrap_up(reply, should_end=should_end, forced=forced)
     meta = _segment_meta(types, session.turn_count)
     meta = {**meta, "should_end": should_end}
     interviewer = MockInterviewMessage(
