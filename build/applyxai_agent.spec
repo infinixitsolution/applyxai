@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 # Repository root
 REPO_ROOT = Path(SPECPATH).parent
 AGENT_ROOT = REPO_ROOT / "agent"
@@ -51,6 +53,8 @@ HIDDEN_IMPORTS = [
     "modules.validator",
     "modules.updater",
     "modules.ai",
+    "modules.ai.connections",
+    "modules.ai.prompts",
     "selenium",
     "selenium.webdriver",
     "selenium.webdriver.common.by",
@@ -59,12 +63,17 @@ HIDDEN_IMPORTS = [
     "undetected_chromedriver",
     "requests",
     "langchain",
+    "langchain.chat_models",
     "langchain_openai",
     "langchain_google_genai",
     "langgraph",
     "pyautogui",
     "flask",
 ]
+
+for _pkg in ("langchain", "langchain_openai", "langchain_google_genai", "langgraph"):
+    HIDDEN_IMPORTS.extend(collect_submodules(_pkg))
+HIDDEN_IMPORTS = sorted(set(HIDDEN_IMPORTS))
 
 _BRANDING = REPO_ROOT / "agent" / "branding"
 _ICON = _BRANDING / "applyxai.ico"

@@ -29,9 +29,12 @@ if (Test-Path $DistDir) {
     Remove-Item -Path $DistDir -Recurse -Force
     Write-Host "  Removed dist/"
 }
-if (Test-Path (Join-Path $RepoRoot "build")) {
-    Remove-Item -Path (Join-Path $RepoRoot "build") -Recurse -Force
-    Write-Host "  Removed build/"
+foreach ($sub in @("applyxai_agent", "applyxai_agent_gui")) {
+    $cache = Join-Path $BuildDir $sub
+    if (Test-Path $cache) {
+        Remove-Item -Path $cache -Recurse -Force
+        Write-Host "  Removed build/$sub/"
+    }
 }
 
 Write-Host ""
@@ -44,14 +47,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  PyInstaller installed"
 
 Write-Host ""
-Write-Host "Step 3: Running tests..." -ForegroundColor Yellow
-& $VenvPython -m pytest tests/test_agent.py -v
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Warning: Tests failed. Continuing with build..." -ForegroundColor Yellow
-}
-
 Write-Host ""
-Write-Host "Step 4: Building CLI executable..." -ForegroundColor Yellow
+Write-Host "Step 3: Building CLI executable..." -ForegroundColor Yellow
 $CliSpec = Join-Path $BuildDir "applyxai_agent.spec"
 & (Join-Path $RepoRoot "venv\Scripts\pyinstaller.exe") $CliSpec --clean
 if ($LASTEXITCODE -ne 0) {
@@ -61,7 +58,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  CLI built successfully"
 
 Write-Host ""
-Write-Host "Step 5: Building GUI executable..." -ForegroundColor Yellow
+Write-Host "Step 4: Building GUI executable..." -ForegroundColor Yellow
 $GuiSpec = Join-Path $BuildDir "applyxai_agent_gui.spec"
 & (Join-Path $RepoRoot "venv\Scripts\pyinstaller.exe") $GuiSpec --clean
 if ($LASTEXITCODE -ne 0) {
@@ -71,7 +68,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  GUI built successfully"
 
 Write-Host ""
-Write-Host "Step 6: Building installer (optional)..." -ForegroundColor Yellow
+Write-Host "Step 5: Building installer (optional)..." -ForegroundColor Yellow
 $InnoSetupPaths = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",

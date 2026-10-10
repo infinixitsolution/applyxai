@@ -4,7 +4,7 @@
 ; Output: dist\ApplyXAI-Agent-Setup.exe
 
 #define MyAppName "ApplyXAI Agent"
-#define MyAppVersion "1.1.2"
+#define MyAppVersion "1.1.3"
 #define MyAppPublisher "ApplyXAI"
 #define MyAppURL "https://applyxai.com"
 #define MyAppGuiExe "ApplyXAI-Agent-GUI.exe"
