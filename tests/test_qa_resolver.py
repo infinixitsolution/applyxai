@@ -1,4 +1,4 @@
-from automation.qa_resolver import can_use_ai, match_human_custom, resolve_missing_answer
+from automation.qa_resolver import can_use_ai, is_placeholder_cover, match_human_custom, resolve_missing_answer
 
 
 def test_match_human_contains():
@@ -11,6 +11,15 @@ def test_match_human_exact():
     qs = [{"id": "1", "match": "exact", "pattern": "Referral code", "answer": "ABC"}]
     assert match_human_custom("Referral code", qs) == "ABC"
     assert match_human_custom("referral code", qs) == "ABC"
+
+
+def test_placeholder_cover_letter_is_not_treated_as_real():
+    assert is_placeholder_cover("")
+    assert is_placeholder_cover("Cover Letter")
+    assert is_placeholder_cover("\nCover Letter\n")
+    assert not is_placeholder_cover(
+        "I am a backend engineer with five years of Python experience and I would like to join your platform team."
+    )
 
 
 def test_deny_blocks_ai():

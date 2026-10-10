@@ -82,6 +82,8 @@ def test_a_live_run_updates_applications_counters_logs_and_notifies(db, users, r
     failed = db.query(Application).join(Job).filter(Job.external_id == "102").one()
     assert failed.job.title == "Django Developer" and failed.job.company == "Initech"   # from job_started
     assert failed.failure_reason == "Problem in Easy Applying: Submit button missing"
+    skipped = db.query(Application).join(Job).filter(Job.external_id == "103").one()
+    assert skipped.failure_reason == "Found Blacklisted words in About Company"
     assert failed.automation_job_id == run.id
     applied = db.query(Application).join(Job).filter(Job.external_id == "101").one()
     assert applied.applied_at == datetime(2026, 10, 7, 4, 15, tzinfo=timezone.utc)

@@ -726,65 +726,214 @@ def _resume_step_visible(modal: WebElement) -> bool:
         return False
 
 
-def _wait_until_resume_attached(modal: WebElement, filename: str, timeout: float = 30) -> bool:
-    """Poll until LinkedIn shows the uploaded name, or the upload message has cleared."""
-    stem = os.path.splitext(filename)[0].lower()
-    needle = stem[:24] if len(stem) > 24 else stem
+_RESUME_ROWS_JS = r"""
+const root = arguments[0];
+const norm = (value) => (value || '')
+  .replace(/\u2026/g, '')
+  .replace(/\.\.\./g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase();
+const fileInput = [...root.querySelectorAll("input[type='file']")].find((el) => {
+  const blob = `${el.id} ${el.name} ${el.getAttribute('aria-label') || ''} ${el.accept || ''}`.toLowerCase();
+  return !blob.includes('cover');
+});
+let scope = root;
+if (fileInput) {
+  let node = fileInput;
+  for (let depth = 0; depth < 8 && node && node.parentElement; depth += 1) {
+    node = node.parentElement;
+    const text = (node.innerText || '').toLowerCase();
+    const radios = node.querySelectorAll("input[type='radio']");
+    if (radios.length && text.includes('resume') && !text.includes('cover letter')) {
+      scope = node;
+      break;
+    }
+  }
+}
+const rows = [];
+const seen = new Set();
+const rowFor = (radio) => {
+  let node = radio.parentElement;
+  for (let depth = 0; depth < 6 && node && node.parentElement; depth += 1) {
+    const siblings = [...node.parentElement.children];
+    const fileSiblings = siblings.filter((child) => /document-upload|last used|\.pdf|\.docx|\.doc/i.test(`${child.className || ''} ${child.innerText || ''}`));
+    if (fileSiblings.length >= 2 && fileSiblings.includes(node)) return node;
+    node = node.parentElement;
+  }
+  return radio.closest('[class*="card"]') || radio.closest('label') || radio.parentElement;
+};
+scope.querySelectorAll("input[type='radio'], [role='radio']").forEach((radio) => {
+  const card = rowFor(radio);
+  if (!card || seen.has(card)) return;
+  const full = card.innerText || '';
+  const blob = `${card.className || ''} ${full}`.toLowerCase();
+  const looksLikeFile = blob.includes('document-upload') || blob.includes('last used') || /\.(pdf|docx|doc)\b/i.test(full);
+  if (!looksLikeFile || blob.includes('cover letter')) return;
+  seen.add(card);
+  const lines = full.split('\n').map((part) => part.trim()).filter(Boolean);
+  const line = lines.find((part) => /\.(pdf|docx|doc)\b/i.test(part)) || lines[0] || '';
+  card.setAttribute('data-applyxai-resume', String(rows.length));
+  rows.push({text: line, full, selected: !!radio.checked});
+});
+return rows;
+"""
+
+_KEEP_PREPARED_RESUME_JS = r"""
+const root = arguments[0];
+const index = arguments[1];
+const stem = arguments[2];
+const norm = (value) => (value || '')
+  .replace(/\u2026/g, '')
+  .replace(/\.\.\./g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase();
+const wanted = norm(stem);
+const matches = (text) => {
+  const shown = norm(text);
+  if (!shown || !wanted) return false;
+  if (wanted.length >= 12 && shown.includes(wanted)) return true;
+  const clipped = shown.replace(/\.(pdf|docx|doc)$/i, '');
+  return clipped.length >= 18 && wanted.startsWith(clipped);
+};
+const enforce = () => {
+  const wantedNorm = norm(stem);
+  const cards = [...root.querySelectorAll('[data-applyxai-resume]')];
+  const fresh = cards.length ? cards : [...root.querySelectorAll("input[type='radio'], [role='radio']")].map((radio) => (
+    radio.closest('[class*="card"]') || radio.closest('label') || radio.parentElement
+  )).filter(Boolean);
+  const unique = [...new Set(fresh)];
+  let keep = unique.find((card) => card.getAttribute('data-applyxai-resume') === String(index));
+  if (!keep) {
+    keep = unique.find((card) => matches(card.innerText || ''));
+  }
+  if (!keep) return false;
+  unique.forEach((card) => {
+    const text = card.innerText || '';
+    const isResume = (card.getAttribute('data-applyxai-resume') !== null)
+      || /document-upload|last used|\.pdf|\.docx|\.doc/i.test(`${card.className || ''} ${text}`);
+    if (!isResume) return;
+    card.style.setProperty('display', card === keep ? '' : 'none', 'important');
+  });
+  root.querySelectorAll('button').forEach((button) => {
+    const label = (button.innerText || '').toLowerCase();
+    if (label.includes('more resume')) button.style.setProperty('display', 'none', 'important');
+  });
+  const radio = keep.querySelector("input[type='radio'], [role='radio']");
+  if (radio && radio.tagName === 'INPUT' && !radio.checked) radio.click();
+  if (radio && radio.tagName !== 'INPUT' && radio.getAttribute('aria-checked') !== 'true') radio.click();
+  const checked = radio
+    ? (radio.tagName === 'INPUT' ? radio.checked : radio.getAttribute('aria-checked') === 'true')
+    : true;
+  return !!checked && !!wantedNorm;
+};
+const selected = enforce();
+if (window.__applyxaiResumeObserver) window.__applyxaiResumeObserver.disconnect();
+window.__applyxaiResumeStem = wanted;
+const observer = new MutationObserver(() => {
+  if (window.__applyxaiResumeBusy) return;
+  window.__applyxaiResumeBusy = true;
+  try { enforce(); } finally { window.__applyxaiResumeBusy = false; }
+});
+observer.observe(root, {childList: true, subtree: true, attributes: true});
+window.__applyxaiResumeObserver = observer;
+return selected;
+"""
+
+
+def _expand_resume_list(modal: WebElement) -> None:
+    """Open LinkedIn's collapsed resume list so the prepared file can be found."""
+    for _ in range(3):
+        clicked = False
+        try:
+            clicked = bool(modal.parent.execute_script(
+                """
+                const root = arguments[0];
+                const button = [...root.querySelectorAll('button')].find((el) =>
+                  (el.innerText || '').toLowerCase().includes('more resume')
+                );
+                if (!button) return false;
+                button.click();
+                return true;
+                """,
+                modal,
+            ))
+        except Exception:
+            return
+        if not clicked:
+            return
+        buffer(0.4)
+
+
+def _resume_rows(modal: WebElement) -> list[dict]:
+    try:
+        return list(modal.parent.execute_script(_RESUME_ROWS_JS, modal) or [])
+    except Exception:
+        return []
+
+
+def _keep_only_prepared_resume(modal: WebElement, filename: str, before_labels: list[str]) -> bool:
+    """Select the JD resume and hide every other resume on this Easy Apply step."""
+    from automation.job_resume import choose_resume_card
+
+    _expand_resume_list(modal)
+    rows = _resume_rows(modal)
+    if not rows:
+        return False
+    labels = [str(row.get("text") or "") for row in rows]
+    choice = choose_resume_card(labels, filename, before_labels)
+    if choice is None:
+        full_labels = [str(row.get("full") or "") for row in rows]
+        choice = choose_resume_card(full_labels, filename, before_labels)
+        if choice is not None:
+            labels = full_labels
+    if choice is None:
+        print_lg(f'Prepared resume "{filename}" is not in LinkedIn\'s list, so no older resume was used.')
+        return False
+    stem = os.path.splitext(filename)[0]
+    try:
+        selected = bool(modal.parent.execute_script(_KEEP_PREPARED_RESUME_JS, modal, choice, stem))
+    except Exception as exc:
+        print_lg(f'Could not keep only the prepared resume: {exc}')
+        return False
+    if not selected:
+        print_lg(f'Could not select prepared resume "{labels[choice]}".')
+        return False
+    print_lg(f'Using the JD resume "{labels[choice]}". Other resumes are hidden on this step.')
+    return True
+
+
+def _wait_until_prepared_resume(modal: WebElement, filename: str, before_labels: list[str], timeout: float = 30) -> bool:
+    """True once the prepared file appears as its own card, not merely because an older resume is listed."""
+    from automation.job_resume import choose_resume_card, normalize_resume_label, resume_label_score
+
+    before_norm = {normalize_resume_label(label) for label in before_labels}
     deadline = time.time() + timeout
-    saw_upload = False
-    quiet_since = None
     while time.time() < deadline:
         try:
             text = (modal.text or "").lower()
         except Exception:
             text = ""
-        uploading = "uploading" in text
-        if uploading:
-            saw_upload = True
-            quiet_since = None
-        elif needle and needle in text:
-            return True
+        if "uploading" in text:
+            time.sleep(0.5)
+            continue
+        _expand_resume_list(modal)
+        rows = _resume_rows(modal)
+        if rows:
+            labels = [str(row.get("text") or "") for row in rows]
+            choice = choose_resume_card(labels, filename, before_labels)
+            if choice is not None:
+                chosen = labels[choice]
+                is_new = normalize_resume_label(chosen) not in before_norm
+                if is_new or resume_label_score(filename, chosen) >= 600:
+                    return True
         else:
-            if quiet_since is None:
-                quiet_since = time.time()
-            quiet_for = time.time() - quiet_since
-            if saw_upload and quiet_for >= 1.5:
-                return True
-            if quiet_for >= 4:
+            stem = os.path.splitext(filename)[0].lower()
+            if stem and stem in text:
                 return True
         time.sleep(0.5)
     return False
-
-
-def _select_uploaded_resume(modal: WebElement, filename: str) -> None:
-    """If LinkedIn lists saved resumes as radios, select the card for the file just uploaded."""
-    stem = os.path.splitext(filename)[0].lower()
-    target = filename.lower()
-    for radio in modal.find_elements(By.CSS_SELECTOR, "input[type='radio']"):
-        label_text = ""
-        try:
-            rid = radio.get_attribute("id") or ""
-            if rid:
-                labels = modal.find_elements(By.XPATH, f".//label[@for={_xpath_literal(rid)}]")
-                if labels:
-                    label_text = labels[0].text or ""
-            if not label_text:
-                label_text = radio.find_element(By.XPATH, "./ancestor::label[1]").text or ""
-        except Exception:
-            continue
-        lowered = label_text.lower()
-        if target not in lowered and stem not in lowered:
-            continue
-        if radio.is_selected():
-            return
-        try:
-            radio.click()
-        except Exception:
-            try:
-                modal.parent.execute_script("arguments[0].click();", radio)
-            except Exception:
-                pass
-        return
 
 
 def _xpath_literal(value: str) -> str:
@@ -804,18 +953,26 @@ def upload_resume(modal: WebElement, resume: str) -> tuple[bool, str]:
         print_lg(f'Resume file missing, keeping the previous LinkedIn resume: {resume}')
         return False, "Previous resume"
     try:
+        from automation.job_resume import choose_resume_card, resume_label_score
+        _expand_resume_list(modal)
+        before_labels = [str(row.get("text") or "") for row in _resume_rows(modal)]
+        already = choose_resume_card(before_labels, name, before=[])
+        if already is not None and resume_label_score(name, before_labels[already]) >= 600:
+            if _keep_only_prepared_resume(modal, name, before_labels):
+                return True, name
         file_input = _resume_file_input(modal)
         if file_input is None:
             return False, "Previous resume"
         file_input.send_keys(path)
-        if _resume_step_visible(modal):
-            print_lg(f'Waiting until LinkedIn finishes attaching "{name}"...')
-            if not _wait_until_resume_attached(modal, name):
-                print_lg(f'Resume "{name}" is not attached yet.')
+        if _resume_step_visible(modal) or _resume_rows(modal):
+            print_lg(f'Waiting until LinkedIn lists the JD resume "{name}"...')
+            if not _wait_until_prepared_resume(modal, name, before_labels):
+                print_lg(f'JD resume "{name}" did not appear. This application will not use an older resume.')
                 return False, "Previous resume"
         else:
             buffer(1)
-        _select_uploaded_resume(modal, name)
+        if not _keep_only_prepared_resume(modal, name, before_labels):
+            return False, "Previous resume"
         print_lg(f'Resume "{name}" is ready.')
         return True, name
     except Exception as e:
@@ -1036,7 +1193,7 @@ def answer_questions(
             continue
         
         # Check if it's a text question
-        text = try_xp(Question, ".//input[@type='text']", False)
+        text = try_xp(Question, ".//input[@type='text' or @type='number' or @type='tel' or @type='email']", False)
         if text: 
             label = try_xp(Question, ".//label[@for]", False)
             try: label = label.find_element(By.CLASS_NAME,'visually-hidden')
@@ -1152,7 +1309,16 @@ def answer_questions(
             prev_answer = text_area.get_attribute("value")
             if not prev_answer or overwrite_previous_answers:
                 if label_has(label, 'summary'): answer = linkedin_summary
-                elif label_has(label, 'cover'): answer = cover_letter
+                elif label_has(label, 'cover'):
+                    from automation.qa_resolver import ask_cover_letter, is_placeholder_cover
+                    generated = ask_cover_letter(
+                        job_description=job_description, job_title=job_title, company=job_company,
+                    )
+                    if generated:
+                        answer = generated
+                        print_lg(f'AI cover letter written for "{job_title or label_org}" ({len(answer)} characters).')
+                    elif not is_placeholder_cover(cover_letter):
+                        answer = cover_letter
                 if answer in ("", None):
                     extra = _qa_extra_answer(
                         label_org, label, "textarea", job_description=job_description,
@@ -1832,15 +1998,12 @@ def main() -> None:
         linkedIn_tab = driver.current_window_handle
 
         aiClient = None
-        from automation import job_resume
+        from automation import job_resume, qa_resolver
         job_resume.configure()
-        if use_AI:
-            from automation import qa_resolver
-            if ai_use_platform_proxy:
-                qa_resolver.configure()
-            else:
-                aiClient = create_ai_client()
-                qa_resolver.configure(local_answer=answer_question)
+        qa_resolver.configure()
+        if use_AI and not ai_use_platform_proxy:
+            aiClient = create_ai_client()
+            qa_resolver.configure(local_answer=answer_question)
 
         # Start applying to jobs
         driver.switch_to.window(linkedIn_tab)

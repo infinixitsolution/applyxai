@@ -1,25 +1,19 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, FileText, ListChecks, Search } from "lucide-react";
+import { Download, Eye, ListChecks, Paperclip, Search } from "lucide-react";
 import { useState } from "react";
 import { ChipSelect, Select, TextInput } from "../../components/form";
 import { Pagination } from "../../components/Pagination";
-import { Alert, Badge, buttonClass, Card, EmptyState, PageHeader, Spinner } from "../../components/ui";
-import { ApplicationDetailModal } from "../../features/ApplicationDetailModal";
+import { Modal } from "../../components/Modal";
+import { Alert, Badge, buttonClass, Button, Card, EmptyState, PageHeader, Spinner } from "../../components/ui";
+import { ApplicationDetailModal, resumeKindLabel } from "../../features/ApplicationDetailModal";
 import { formatDate, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
 import { applications, resumes as resumesApi, type ApplicationFilters } from "../../services/endpoints";
-import { APPLICATION_STATUSES, type ApplicationStatus } from "../../types";
+import { APPLICATION_STATUSES, type Application, type ApplicationStatus } from "../../types";
 
 const PAGE_SIZE = 20;
 
-function resumeKindLabel(resume: { generated_by?: string | null; is_default?: boolean } | null | undefined): string {
-  if (!resume) return "";
-  if (resume.generated_by === "ai") return "AI tailored";
-  if (resume.generated_by === "automation") return "Generated";
-  if (resume.is_default) return "Master resume";
-  return "Resume";
-}
 const SORTS = [
   { value: "-created_at", label: "Newest first" },
   { value: "created_at", label: "Oldest first" },
@@ -36,6 +30,7 @@ export function ApplicationsPage() {
   const [sort, setSort] = useState("-created_at");
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [resumeFor, setResumeFor] = useState<Application | null>(null);
   const search = useDebounced(q.trim());
 
   const filters: ApplicationFilters = {
@@ -80,60 +75,76 @@ export function ApplicationsPage() {
           </EmptyState></Card>
         ) : (
           <Card className={isFetching ? "opacity-70 transition-opacity" : ""}>
-            <div className="table-scroll -mx-4 sm:-mx-5">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                    <th className="px-5 py-3">Job</th>
-                    <th className="px-5 py-3">Location</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Resume</th>
-                    <th className="px-5 py-3">Applied</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {data.items.map((a) => (
-                    <tr key={a.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setOpenId(a.id)}>
-                      <td className="max-w-xs px-5 py-3">
-                        <button type="button" className="text-left" onClick={(e) => { e.stopPropagation(); setOpenId(a.id); }}>
-                          <span className="block truncate font-medium text-slate-900">{a.job.title}</span>
-                          <span className="block truncate text-slate-500">{a.job.company}</span>
-                        </button>
-                      </td>
-                      <td className="px-5 py-3 text-slate-600">{a.job.location || "—"}</td>
-                      <td className="px-5 py-3"><Badge tone={STATUS_TONES[a.status]}>{STATUS_LABELS[a.status]}</Badge></td>
-                      <td className="max-w-[200px] px-5 py-3" onClick={(e) => e.stopPropagation()}>
-                        {(a.generated_resumes?.length ?? 0) > 0 || a.resume ? (
-                          <div className="space-y-1">
-                            {a.resume && (
-                              <div className="min-w-0">
-                                <a href={resumesApi.downloadUrl(a.resume.id)} className="flex items-center gap-1 truncate text-brand-600 hover:underline"
-                                   title={a.resume.name}>
-                                  <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                  <span className="truncate">{a.resume.name}</span>
-                                </a>
-                                <p className="text-xs text-slate-500">{resumeKindLabel(a.resume)}</p>
-                              </div>
-                            )}
-                            {(a.generated_resumes?.length ?? 0) > 1 && (
-                              <span className="text-xs text-slate-500">+{(a.generated_resumes?.length ?? 0) - 1} more in details</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDate(a.applied_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="-mx-4 divide-y divide-slate-100 sm:-mx-5">
+              {data.items.map((a) => {
+                const meta = [a.job.company, a.job.location].filter(Boolean).join(" · ");
+                return (
+                  <li key={a.id}>
+                    <div className="flex min-w-0 flex-col gap-3 px-4 py-4 hover:bg-slate-50 sm:px-5 lg:flex-row lg:items-start lg:justify-between">
+                      <button type="button" className="w-full min-w-0 flex-1 text-left" onClick={() => setOpenId(a.id)}>
+                        <span className="line-clamp-2 font-medium text-slate-900">{a.job.title}</span>
+                        <span className="mt-1 block truncate text-sm text-slate-500">{meta || "Location not listed"}</span>
+                      </button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
+                        <Badge tone={STATUS_TONES[a.status]}>{STATUS_LABELS[a.status]}</Badge>
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap text-sm text-slate-500">
+                          {formatDate(a.applied_at)}
+                          {a.resume && (
+                            <button type="button" title={a.resume.name} aria-label={`Open resume ${a.resume.name}`}
+                                    className="rounded-md p-1 text-brand-600 hover:bg-brand-50"
+                                    onClick={() => setResumeFor(a)}>
+                              <Paperclip className="h-4 w-4" aria-hidden />
+                            </button>
+                          )}
+                        </span>
+                        <Button size="sm" variant="secondary" onClick={() => setOpenId(a.id)}>
+                          <Eye className="h-4 w-4" aria-hidden /> View
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
             <Pagination page={data.page} pageSize={data.page_size} total={data.total} onPage={setPage} />
           </Card>
         )}
       </div>
       <ApplicationDetailModal id={openId} onClose={() => setOpenId(null)} />
+      <Modal open={!!resumeFor} onClose={() => setResumeFor(null)} title="Resume" footer={
+        <Button variant="secondary" onClick={() => setResumeFor(null)}>Close</Button>
+      }>
+        {resumeFor?.resume ? (
+          <div className="space-y-3">
+            <div>
+              <p className="font-medium text-slate-900">{resumeFor.resume.name}</p>
+              <p className="mt-1 text-sm text-slate-600">{resumeKindLabel(resumeFor.resume)}</p>
+              <p className="mt-1 text-xs text-slate-500">{resumeFor.resume.filename}</p>
+              {(resumeFor.resume.job_title || resumeFor.resume.company) && (
+                <p className="mt-1 text-sm text-slate-600">
+                  Prepared for {[resumeFor.resume.job_title, resumeFor.resume.company].filter(Boolean).join(" at ")}
+                </p>
+              )}
+            </div>
+            <a href={resumesApi.downloadUrl(resumeFor.resume.id)}
+               className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline">
+              <Download className="h-4 w-4" aria-hidden /> Download resume
+            </a>
+            {(resumeFor.generated_resumes?.length ?? 0) > 1 && (
+              <ul className="divide-y divide-slate-100 rounded-lg ring-1 ring-slate-200">
+                {resumeFor.generated_resumes!.filter((item) => item.id !== resumeFor.resume!.id).map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0 truncate text-sm text-slate-700">{item.name}</span>
+                    <a href={resumesApi.downloadUrl(item.id)} className="shrink-0 text-sm font-medium text-brand-600 hover:underline">Download</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <p>No resume was attached to this application.</p>
+        )}
+      </Modal>
     </>
   );
 }

@@ -17,6 +17,15 @@ from backend.app.services.automation_service import run_out
 router = APIRouter(prefix="/automation", tags=["automation"])
 
 
+def _resolve_desktop_agent_file():
+    settings = get_settings()
+    if settings.DESKTOP_AGENT_SETUP_PATH.is_file():
+        return settings.DESKTOP_AGENT_SETUP_PATH, "ApplyXAI-Agent-Setup.exe"
+    if settings.DESKTOP_AGENT_GUI_PATH.is_file():
+        return settings.DESKTOP_AGENT_GUI_PATH, "ApplyXAI-Agent-GUI.exe"
+    return None, None
+
+
 @router.get("", summary="Current and recent runs, connected computers, and readiness")
 def overview(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ok(automation_service.overview(db, user.id))
@@ -40,16 +49,20 @@ def list_devices(user: User = Depends(get_current_user), db: Session = Depends(g
     return ok({"devices": [agent_service.device_out(d) for d in agent_service.list_devices(db, user.id)]})
 
 
+@router.get("/desktop-agent/info", summary="Whether the desktop agent download is available on this server")
+def desktop_agent_info(user: User = Depends(get_current_user)):
+    path, filename = _resolve_desktop_agent_file()
+    if not path:
+        return ok({"available": False, "filename": None, "size_bytes": None})
+    return ok({"available": True, "filename": filename, "size_bytes": path.stat().st_size})
+
+
 @router.get("/desktop-agent/download", summary="Download the Windows desktop agent installer")
 def download_desktop_agent(user: User = Depends(get_current_user),
                            limiter: RateLimiter = Depends(get_rate_limiter)):
     limiter.hit("20/hour", "desktop-agent-download", str(user.id))
-    settings = get_settings()
-    if settings.DESKTOP_AGENT_SETUP_PATH.is_file():
-        path, filename = settings.DESKTOP_AGENT_SETUP_PATH, "ApplyXAI-Agent-Setup.exe"
-    elif settings.DESKTOP_AGENT_GUI_PATH.is_file():
-        path, filename = settings.DESKTOP_AGENT_GUI_PATH, "ApplyXAI-Agent-GUI.exe"
-    else:
+    path, filename = _resolve_desktop_agent_file()
+    if not path:
         raise AppError(
             "AGENT_DOWNLOAD_UNAVAILABLE",
             "The desktop agent download isn't available on this server yet. Contact support.",

@@ -28,6 +28,71 @@ def _safe_name(job_id: str) -> str:
     return re.sub(r"[^\w.-]+", "_", job_id)[:64] or "job"
 
 
+def local_resume_filename(content_disposition: str, job_id: str, default_ext: str = ".docx") -> str:
+    """Save the tailored file under the JD version name LinkedIn will display."""
+    match = re.search(r'filename="?([^";]+)"?', content_disposition or "")
+    name = Path(match.group(1)).name if match else ""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
+    if not name or name.lower() in {".docx", ".pdf", ".doc"}:
+        name = f"{_safe_name(job_id)}-tailored{default_ext}"
+    if not Path(name).suffix:
+        name += default_ext
+    return name[:180]
+
+
+def normalize_resume_label(value: str) -> str:
+    text = (value or "").replace("…", "").replace("...", "")
+    text = os.path.splitext(text.strip())[0]
+    return " ".join(text.lower().split())
+
+
+def resume_label_score(filename: str, label: str) -> int:
+    """How closely a LinkedIn card title matches the prepared file.
+
+    A shared person name is not enough. Sibling resumes for other jobs must score 0
+    so Easy Apply does not pick them.
+    """
+    stem = normalize_resume_label(os.path.basename(filename or ""))
+    shown = normalize_resume_label(label)
+    if not stem or not shown:
+        return 0
+    if stem == shown:
+        return 1000
+    if stem.startswith(shown) or shown.startswith(stem):
+        return 600 + min(len(stem), len(shown))
+    shared = 0
+    for left, right in zip(stem, shown):
+        if left != right:
+            break
+        shared += 1
+    shorter = min(len(stem), len(shown))
+    if shared >= 20 or (shared >= 12 and shared / shorter >= 0.7):
+        return shared
+    return 0
+
+
+def choose_resume_card(labels: list[str], filename: str, before: list[str] | None = None) -> int | None:
+    """Index of the resume to use: the file just added, otherwise an exact match of this file."""
+    before_norm = {normalize_resume_label(item) for item in (before or [])}
+    new_indexes = [
+        index for index, label in enumerate(labels)
+        if normalize_resume_label(label) not in before_norm
+    ]
+    if new_indexes:
+        return max(
+            new_indexes,
+            key=lambda index: (resume_label_score(filename, labels[index]), -index),
+        )
+    best_index = None
+    best_score = 0
+    for index, label in enumerate(labels):
+        score = resume_label_score(filename, label)
+        if score >= 600 and score > best_score:
+            best_score = score
+            best_index = index
+    return best_index
+
+
 def wait_until_file_ready(path: str, *, timeout: float = 20, poll: float = 0.25) -> bool:
     """True once `path` exists, is non-empty, and its size stays the same across two checks."""
     deadline = time.time() + timeout
@@ -90,13 +155,9 @@ def resolve_upload_path(
         return default_path, None
 
     resume_id = (resp.headers.get("X-Resume-Id") or resp.headers.get("x-resume-id") or "").strip() or None
-    ext = ".docx"
     dispo = resp.headers.get("Content-Disposition") or ""
-    m = re.search(r'filename="?([^";]+)"?', dispo)
-    if m and "." in m.group(1):
-        ext = Path(m.group(1)).suffix or ext
     out_dir = Path(cache_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{_safe_name(job_id)}-tailored{ext}"
+    out_path = out_dir / local_resume_filename(dispo, job_id)
     out_path.write_bytes(resp.content)
     return str(out_path.resolve()), resume_id

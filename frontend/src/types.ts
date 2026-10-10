@@ -179,6 +179,10 @@ export interface ResumeVersion {
   created_at: string;
   is_default?: boolean;
   generated_by?: string | null;
+  job_title?: string | null;
+  company?: string | null;
+  match_score?: number | null;
+  fit_score?: number | null;
 }
 
 export interface Application {
@@ -256,6 +260,12 @@ export interface AgentDevice {
   paired_at: string | null;
   last_seen_at: string | null;
   online: boolean;
+}
+
+export interface DesktopAgentInfo {
+  available: boolean;
+  filename: string | null;
+  size_bytes: number | null;
 }
 
 export type ResumeRunMode = "default" | "tailor_if_gate";

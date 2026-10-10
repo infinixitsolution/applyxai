@@ -42,12 +42,25 @@ class _Filters:
                            automation_job_id=automation_job_id, sort=sort)
 
 
+def _optional_score(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _resume_version(resume: Resume | None) -> dict | None:
     if resume is None:
         return None
     meta = resume.ai_metadata or {}
     payload = ResumeVersionOut.model_validate(resume).model_dump(mode="json")
     payload["generated_by"] = meta.get("generated_by")
+    payload["job_title"] = (meta.get("job_title") or None)
+    payload["company"] = (meta.get("company") or None)
+    payload["match_score"] = _optional_score(meta.get("match_score"))
+    payload["fit_score"] = _optional_score(meta.get("fit_score"))
     return payload
 
 
@@ -63,9 +76,24 @@ def _display_resume(primary: Resume | None, versions: list[Resume]) -> Resume | 
     return versions[0] if versions else None
 
 
+def _versions_for(app, grouped: dict, by_job: dict) -> list:
+    versions = list(grouped.get(app.id, []))
+    if versions:
+        return versions
+    external_id = getattr(getattr(app, "job", None), "external_id", "") or ""
+    return list(by_job.get(str(external_id), []))
+
+
 def _out(db: Session, user_id: uuid.UUID, app) -> dict:
+    application_service.fill_missing_outcome_reasons(db, user_id, [app])
     data = ApplicationOut.model_validate(app).model_dump(mode="json")
-    versions = application_service.generated_resumes_for_applications(db, user_id, [app.id]).get(app.id, [])
+    external_id = app.job.external_id if app.job is not None else ""
+    by_job = application_service.resumes_by_external_job(db, user_id, [external_id])
+    versions = _versions_for(
+        app,
+        application_service.generated_resumes_for_applications(db, user_id, [app.id]),
+        by_job,
+    )
     data["generated_resumes"] = [_resume_version(r) for r in versions]
     primary = None
     if app.resume_id:
@@ -82,12 +110,15 @@ def _out_many(db: Session, user_id: uuid.UUID, apps: list) -> list[dict]:
         return []
     app_ids = [a.id for a in apps]
     grouped = application_service.generated_resumes_for_applications(db, user_id, app_ids)
+    external_ids = [a.job.external_id for a in apps if a.job is not None and a.job.external_id]
+    by_job = application_service.resumes_by_external_job(db, user_id, external_ids)
     resume_ids = [a.resume_id for a in apps if a.resume_id]
     primaries = application_service.primary_resumes(db, user_id, resume_ids)
+    application_service.fill_missing_outcome_reasons(db, user_id, apps)
     rows: list[dict] = []
     for app in apps:
         data = ApplicationOut.model_validate(app).model_dump(mode="json")
-        versions = grouped.get(app.id, [])
+        versions = _versions_for(app, grouped, by_job)
         data["generated_resumes"] = [_resume_version(r) for r in versions]
         primary = primaries.get(app.resume_id) if app.resume_id else None
         data["resume"] = _resume_version(_display_resume(primary, versions))

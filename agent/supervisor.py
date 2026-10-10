@@ -143,7 +143,8 @@ class _RunSession:
         path = self.engine.dir / _resume_filename(resume.get("filename", ""), resume.get("file_type", "pdf"))
         path.write_bytes(self.client.download_resume(self.run_id))
         qa = self.payload.get("application_qa") or {}
-        use_ai = bool(qa.get("ai_applications_enabled")) and bool(self.payload.get("ai_available"))
+        # Answer questions and write cover letters whenever platform Application AI is on.
+        use_ai = bool(self.payload.get("ai_available")) or bool(qa.get("ai_applications_enabled"))
         applyxai_qa = {
             "human_questions": qa.get("human_questions") or [],
             "ai_policy": qa.get("ai_policy") or {},

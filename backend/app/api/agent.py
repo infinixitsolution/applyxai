@@ -15,7 +15,7 @@ from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import AgentDevice, Application, ApplicationStatus, Job, User
-from backend.app.schemas.automation import AgentAiAnswerIn, AgentTailorIn, ConnectPollIn, ConnectStartIn, EventBatchIn, PairIn, PollIn
+from backend.app.schemas.automation import AgentAiAnswerIn, AgentCoverLetterIn, AgentTailorIn, ConnectPollIn, ConnectStartIn, EventBatchIn, PairIn, PollIn
 from backend.app.services import agent_service, application_context, application_service, automation_service, preferences_service, resume_ai_service, resume_service, run_config_service
 from backend.app.services.ai_service import AiTask, ai_available, complete
 
@@ -191,6 +191,8 @@ async def tailor_job_resume(
             resume_id=resume.id,
             job_description=body.job_description,
             job_id=key,
+            job_title=body.job_title,
+            company=body.company,
             application_id=app.id,
         )
     except AppError as exc:
@@ -225,14 +227,13 @@ def ai_answer(run_id: uuid.UUID, body: AgentAiAnswerIn, request: Request,
     run = automation_service.agent_run(db, device, run_id)
     if not automation_service.is_active(run):
         raise AppError("RUN_INACTIVE", "This run is no longer active.", 409)
-    if not ai_available(db, feature="applications"):
+    feature = "applications" if ai_available(db, feature="applications") else "resume" if ai_available(db, feature="resume") else ""
+    if not feature:
         raise AppError("AI_DISABLED", "Platform AI is not enabled for applications.", 503)
     user = db.get(User, run.user_id)
     if user is None:
         raise AppError("NOT_FOUND", "User not found", 404)
     doc = preferences_service.application_document(db, user)
-    if not doc.get("ai_applications_enabled"):
-        raise AppError("AI_DISABLED", "AI assistance is turned off in application preferences.", 403)
     deny = (doc.get("ai_policy") or {}).get("deny_label_contains") or []
     label = body.question.lower()
     if any(d and d in label for d in deny):
@@ -254,5 +255,37 @@ def ai_answer(run_id: uuid.UUID, body: AgentAiAnswerIn, request: Request,
     else:
         user = f"Context:\n{ctx}\n\nQuestion ({qtype}): {body.question}\n\nAnswer:"
         task = AiTask.APP_ANSWER
-    answer = complete(db, task, system=system, user=user, feature="applications", max_tokens=800)
+    answer = complete(db, task, system=system, user=user, feature=feature, max_tokens=800)
     return ok({"answer": answer})
+
+
+@router.post("/runs/{run_id}/ai/cover-letter", summary="Platform AI cover letter for one job")
+def ai_cover_letter(run_id: uuid.UUID, body: AgentCoverLetterIn, request: Request,
+                    device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db),
+                    limiter: RateLimiter = Depends(get_rate_limiter)):
+    ip = client_ip(request)
+    limiter.hit("30/hour", "agent-cover", f"{device.id}:{ip}")
+    run = automation_service.agent_run(db, device, run_id)
+    if not automation_service.is_active(run):
+        raise AppError("RUN_INACTIVE", "This run is no longer active.", 409)
+    feature = "applications" if ai_available(db, feature="applications") else "resume" if ai_available(db, feature="resume") else ""
+    if not feature:
+        raise AppError("AI_DISABLED", "Platform AI is not enabled for applications.", 503)
+    user = db.get(User, run.user_id)
+    if user is None:
+        raise AppError("NOT_FOUND", "User not found", 404)
+    ctx = application_context.build_context(
+        db, run.user_id, job_description=body.job_description, job_title=body.job_title, company=body.company,
+    )
+    system = (
+        "Write a cover letter this candidate could paste into a job application. "
+        "120 to 180 words. Use only facts from the context. Do not invent employers, degrees, dates, or metrics. "
+        "Plain professional tone. No subject line and no mention of AI. "
+        "If a company or role is known, address that role. Sign with the candidate's name. Output only the letter."
+    )
+    user_prompt = (
+        f"Context:\n{ctx}\n\nRole: {body.job_title or 'the role'}\n"
+        f"Company: {body.company or 'the company'}\n\nCover letter:"
+    )
+    letter = complete(db, AiTask.APP_ANSWER, system=system, user=user_prompt, feature=feature, max_tokens=700)
+    return ok({"cover_letter": letter.strip()})

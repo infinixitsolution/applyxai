@@ -51,3 +51,29 @@ def test_generated_resumes_grouped(db, users):
     db.commit()
     grouped = application_service.generated_resumes_for_applications(db, alice.id, [app.id])
     assert len(grouped[app.id]) == 2
+
+
+def test_resumes_by_external_job_finds_the_tailored_copy(db, users):
+    alice = users
+    resume = Resume(
+        user_id=alice.id,
+        name="Ada_Backend_Acme_5 years",
+        filename="Ada_Backend_Acme_5 years.docx",
+        storage_path="resumes/a/tailored.docx",
+        file_type="docx",
+        file_size=10,
+        ai_metadata={"generated_by": "ai", "job_id": "4392", "job_title": "Backend Engineer", "company": "Acme"},
+    )
+    other = Resume(
+        user_id=alice.id,
+        name="Master",
+        filename="master.docx",
+        storage_path="resumes/a/master.docx",
+        file_type="docx",
+        file_size=10,
+        ai_metadata={"generated_by": "ai", "job_id": "other"},
+    )
+    db.add_all([resume, other])
+    db.commit()
+    found = application_service.resumes_by_external_job(db, alice.id, ["4392"])
+    assert [row.id for row in found["4392"]] == [resume.id]

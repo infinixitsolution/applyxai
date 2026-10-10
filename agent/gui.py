@@ -84,7 +84,7 @@ try:
 except ImportError:
     # When packaged, we'll use subprocess to call the EXE
     AGENT_MODULES_AVAILABLE = False
-    AGENT_VERSION = "1.1.2"
+    AGENT_VERSION = "1.1.4"
 
 
 class AgentGUI:
@@ -114,11 +114,8 @@ class AgentGUI:
         # Start queue processor
         self._process_queue()
 
-        # Load initial status
+        # Load initial status. LinkedIn fields stay empty — nothing is prefilled.
         self._refresh_status()
-        
-        # Load existing LinkedIn credentials
-        self._load_linkedin_credentials()
 
     def _get_home(self):
         """Get the agent home directory."""
@@ -162,15 +159,15 @@ class AgentGUI:
 
     def _fit_window(self) -> None:
         self.root.update_idletasks()
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        width = min(980, max(520, screen_w - 80))
-        height = min(860, max(620, screen_h - 120))
+        screen_w = max(self.root.winfo_screenwidth(), 800)
+        screen_h = max(self.root.winfo_screenheight(), 600)
+        width = min(1120, max(520, int(screen_w * 0.72)))
+        height = min(900, max(640, int(screen_h * 0.78)))
         x = max(0, (screen_w - width) // 2)
-        y = max(0, (screen_h - height) // 6)
+        y = max(0, (screen_h - height) // 8)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    def _surface_card(self, parent, row: int, *, padding=(16, 14), expand: bool = False) -> ttk.Frame:
+    def _surface_card(self, parent, row: int, *, padding=(16, 14), expand: bool = False, role: str = "") -> ttk.Frame:
         sticky = (tk.W, tk.E, tk.N, tk.S) if expand else (tk.W, tk.E)
         outer = ttk.Frame(parent)
         outer.grid(row=row, column=0, sticky=sticky, pady=(0, 12))
@@ -185,6 +182,8 @@ class AgentGUI:
         body = ttk.Frame(inner, style="Card.TFrame", padding=padding)
         body.grid(row=0, column=0, sticky=sticky)
         body.columnconfigure(0, weight=1)
+        outer.card_role = role
+        self._card_hosts.append(outer)
         return body
 
     def _muted(self, parent, text: str) -> ttk.Label:
@@ -192,64 +191,66 @@ class AgentGUI:
         self._wrap_labels.append(label)
         return label
 
+    def _section_title(self, parent, text: str) -> None:
+        ttk.Label(parent, text=text, style="Card.TLabel", font=("Segoe UI", 12, "bold")).grid(
+            row=0, column=0, sticky=tk.W,
+        )
+
     def _build_ui(self):
-        """Build a layout that scrolls on short windows and reflows on narrow ones."""
+        """Dashboard that fills the window: side-by-side when wide, stacked when narrow."""
         self._wrap_labels: list[ttk.Label] = []
         self._status_tiles: list[tk.Frame] = []
         self._status_value_labels: dict[str, tk.Label] = {}
         self._status_cols = 3
+        self._card_hosts: list[ttk.Frame] = []
+        self._layout_mode = ""
 
-        shell = ttk.Frame(self.root, padding=(16, 12))
+        shell = ttk.Frame(self.root)
         shell.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         shell.columnconfigure(0, weight=1)
         shell.rowconfigure(1, weight=1)
 
-        accent = tk.Frame(shell, bg=BRAND, height=4)
-        accent.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 12))
+        header = tk.Frame(shell, bg=BRAND)
+        header.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E))
+        header.columnconfigure(1, weight=1)
+        mascot = self._load_mascot_photo(max_side=48)
+        if mascot:
+            tk.Label(header, image=mascot, bg=BRAND, borderwidth=0).grid(row=0, column=0, rowspan=2, padx=(16, 10), pady=12)
+        tk.Label(
+            header, text="ApplyXAI Agent", bg=BRAND, fg="#ffffff", font=("Segoe UI", 18, "bold"),
+        ).grid(row=0, column=1, sticky=tk.W, pady=(12, 0))
+        self._header_sub = tk.Label(
+            header,
+            text="Easy Apply runs on this PC. Passwords stay on this computer.",
+            bg=BRAND, fg="#dbeafe", font=("Segoe UI", 10), anchor=tk.W, justify=tk.LEFT,
+        )
+        self._header_sub.grid(row=1, column=1, sticky=tk.W, pady=(0, 12))
+        self._wrap_labels.append(self._header_sub)
+        tk.Label(
+            header, text=f"  v{AGENT_VERSION}  ", bg="#1d4ed8", fg="#ffffff",
+            font=("Segoe UI", 9, "bold"), padx=8, pady=3,
+        ).grid(row=0, column=2, sticky=tk.NE, padx=16, pady=14)
 
         self._canvas = tk.Canvas(shell, bg=BG, highlightthickness=0, borderwidth=0)
         scrollbar = ttk.Scrollbar(shell, orient=tk.VERTICAL, command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=scrollbar.set)
-        self._canvas.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
-        scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S))
+        self._canvas.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.E, tk.W), padx=(16, 0), pady=(12, 0))
+        scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S), pady=(12, 0), padx=(0, 4))
 
         content = ttk.Frame(self._canvas)
         self._content = content
         content.columnconfigure(0, weight=1)
-        content.rowconfigure(4, weight=1)
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(0, weight=1)
         self._canvas_window = self._canvas.create_window((0, 0), window=content, anchor=tk.NW)
         content.bind("<Configure>", self._on_content_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
         self._canvas.bind("<Enter>", lambda _e: self._canvas.bind_all("<MouseWheel>", self._on_mousewheel))
         self._canvas.bind("<Leave>", lambda _e: self._canvas.unbind_all("<MouseWheel>"))
 
-        hero = self._surface_card(content, 0, padding=(14, 16))
-        hero_inner = ttk.Frame(hero, style="Card.TFrame")
-        hero_inner.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        hero_inner.columnconfigure(1, weight=1)
-        mascot = self._load_mascot_photo(max_side=72)
-        if mascot:
-            tk.Label(hero_inner, image=mascot, bg=SURFACE, borderwidth=0).grid(
-                row=0, column=0, rowspan=2, padx=(0, 14), sticky=tk.N,
-            )
-        title_col = ttk.Frame(hero_inner, style="Card.TFrame")
-        title_col.grid(row=0, column=1, sticky=(tk.W, tk.E))
-        title_col.columnconfigure(0, weight=1)
-        heading = ttk.Frame(title_col, style="Card.TFrame")
-        heading.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        ttk.Label(heading, text="ApplyXAI Agent", style="Title.TLabel").pack(side=tk.LEFT)
-        tk.Label(
-            heading, text=f"  v{AGENT_VERSION}  ", bg=BRAND_LIGHT, fg=BRAND,
-            font=("Segoe UI", 9, "bold"), padx=8, pady=2,
-        ).pack(side=tk.LEFT, padx=(10, 0))
-        self._muted(
-            title_col,
-            "Runs LinkedIn Easy Apply on this PC. Passwords stay on this computer.",
-        ).grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-
-        status = self._surface_card(content, 1)
+        status = self._surface_card(content, 0, role="main")
         self._status_host = status
         ttk.Label(status, text="Connection", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
             row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10),
@@ -258,7 +259,7 @@ class AgentGUI:
         self._status_tile("Device", "device")
         self._status_tile("Status", "status")
 
-        connect = self._surface_card(content, 2)
+        connect = self._surface_card(content, 1, role="main")
         ttk.Label(connect, text="Connect to ApplyXAI", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
             row=0, column=0, sticky=tk.W,
         )
@@ -276,7 +277,7 @@ class AgentGUI:
         ))
         self.pair_button = self.connect_live_btn
 
-        control = self._surface_card(content, 3)
+        control = self._surface_card(content, 2, role="main")
         ttk.Label(control, text="Automation", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
             row=0, column=0, sticky=tk.W, pady=(0, 10),
         )
@@ -291,7 +292,7 @@ class AgentGUI:
         ctrl_row.add(ttk.Button(ctrl_row, text="Refresh", style="Secondary.TButton", command=self._refresh_status))
         ctrl_row.add(ttk.Button(ctrl_row, text="Disconnect", style="Secondary.TButton", command=self._on_unpair))
 
-        logs_outer = self._surface_card(content, 4, padding=(12, 12), expand=True)
+        logs_outer = self._surface_card(content, 3, padding=(12, 12), expand=True, role="log")
         logs_outer.rowconfigure(1, weight=1)
         ttk.Label(logs_outer, text="Activity log", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
             row=0, column=0, sticky=tk.W, pady=(0, 8),
@@ -306,27 +307,32 @@ class AgentGUI:
         )
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        linkedin = self._surface_card(content, 5)
-        linkedin.columnconfigure(1, weight=1)
-        ttk.Label(linkedin, text="LinkedIn (optional)", style="Card.TLabel", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8),
+        linkedin = self._surface_card(content, 4, role="main")
+        linkedin.columnconfigure(0, weight=1)
+        ttk.Label(linkedin, text="LinkedIn (optional)", style="Card.TLabel", font=("Segoe UI", 12, "bold")).grid(
+            row=0, column=0, sticky=tk.W,
         )
-        ttk.Label(linkedin, text="Email", style="CardMuted.TLabel").grid(row=1, column=0, sticky=tk.W, pady=4)
-        self.linkedin_email = ttk.Entry(linkedin)
-        self.linkedin_email.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=4, padx=(12, 0))
-        ttk.Label(linkedin, text="Password", style="CardMuted.TLabel").grid(row=2, column=0, sticky=tk.W, pady=4)
-        self.linkedin_password = ttk.Entry(linkedin, show="•")
-        self.linkedin_password.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=4, padx=(12, 0))
-        ttk.Button(
-            linkedin, text="Save on this PC only", style="Secondary.TButton", command=self._save_linkedin_credentials,
-        ).grid(row=3, column=0, columnspan=2, pady=(10, 0), sticky=tk.W)
         self._muted(
             linkedin,
-            "Saved in user_config.json on this machine only. Leave blank to sign in yourself in Chrome.",
-        ).grid(row=4, column=0, columnspan=2, pady=(8, 0), sticky=(tk.W, tk.E))
+            "Optional. Leave both fields empty to sign in yourself in Chrome. Nothing is filled in for you.",
+        ).grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
+        ttk.Label(linkedin, text="Email", style="Card.TLabel").grid(row=2, column=0, sticky=tk.W)
+        self.linkedin_email = ttk.Entry(linkedin)
+        self.linkedin_email.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
+        ttk.Label(linkedin, text="Password", style="Card.TLabel").grid(row=4, column=0, sticky=tk.W)
+        self.linkedin_password = ttk.Entry(linkedin, show="•")
+        self.linkedin_password.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(4, 12))
+        ttk.Button(
+            linkedin, text="Save on this PC only", style="Secondary.TButton", command=self._save_linkedin_credentials,
+        ).grid(row=6, column=0, sticky=tk.W)
+        self._muted(
+            linkedin,
+            "Saved only in user_config.json on this computer. It is never sent to ApplyXAI.",
+        ).grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(8, 0))
 
         foot = ttk.Frame(content)
-        foot.grid(row=6, column=0, sticky=(tk.W, tk.E), pady=(4, 8))
+        self._foot = foot
+        foot.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(4, 16), padx=(0, 8))
         foot.columnconfigure(0, weight=1)
         hint = ttk.Label(
             foot,
@@ -373,6 +379,7 @@ class AgentGUI:
         if cols != self._status_cols:
             self._status_cols = cols
             self._place_status_tiles()
+        self._reflow_cards(width)
 
     def _place_status_tiles(self) -> None:
         cols = self._status_cols
@@ -388,6 +395,46 @@ class AgentGUI:
             )
         for col in range(3):
             self._status_host.columnconfigure(col, weight=1 if cols == 3 or col == 0 else 0)
+
+    def _reflow_cards(self, width: int) -> None:
+        """Wide windows keep the log beside the controls. Narrow windows stack every card."""
+        mode = "split" if width >= 860 else "stack"
+        if mode == self._layout_mode:
+            return
+        self._layout_mode = mode
+        main = [host for host in self._card_hosts if getattr(host, "card_role", "") == "main"]
+        logs = [host for host in self._card_hosts if getattr(host, "card_role", "") == "log"]
+        log = logs[0] if logs else None
+        if mode == "split" and log is not None:
+            self._content.columnconfigure(0, weight=3)
+            self._content.columnconfigure(1, weight=2)
+            for index, host in enumerate(main):
+                host.grid(
+                    row=index, column=0, rowspan=1, columnspan=1,
+                    sticky=(tk.W, tk.E, tk.N), padx=(0, 8), pady=(0, 12),
+                )
+                self._content.rowconfigure(index, weight=0)
+            log.grid(
+                row=0, column=1, rowspan=max(len(main), 1), columnspan=1,
+                sticky=(tk.N, tk.S, tk.E, tk.W), padx=(8, 8), pady=(0, 12),
+            )
+            self._content.rowconfigure(0, weight=1)
+        else:
+            self._content.columnconfigure(0, weight=1)
+            self._content.columnconfigure(1, weight=0)
+            ordered = main[:3] + ([log] if log is not None else []) + main[3:]
+            for index, host in enumerate(ordered):
+                if host is None:
+                    continue
+                sticky = (tk.N, tk.S, tk.E, tk.W) if host is log else (tk.W, tk.E)
+                host.grid(
+                    row=index, column=0, rowspan=1, columnspan=2,
+                    sticky=sticky, padx=(0, 8), pady=(0, 12),
+                )
+                self._content.rowconfigure(index, weight=1 if host is log else 0)
+        if getattr(self, "_foot", None) is not None:
+            last = len(main) + (1 if log is not None else 0)
+            self._foot.grid(row=last, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 16), padx=(0, 8))
 
     def _status_tile(self, title: str, key: str) -> None:
         tile = tk.Frame(self._status_host, bg=BRAND_LIGHT, highlightbackground=BORDER, highlightthickness=1)
@@ -633,28 +680,6 @@ class AgentGUI:
                         self.command_queue.put(("status", "", "", False))
         except Exception as e:
             self._log(f"Status check failed: {str(e)}")
-
-    def _load_linkedin_credentials(self):
-        """Load existing LinkedIn credentials from user_config.json."""
-        try:
-            agent_home = Path(self.home)
-            user_config_path = agent_home / "user_config.json"
-            
-            if user_config_path.exists():
-                with open(user_config_path, 'r') as f:
-                    user_config = json.load(f)
-                
-                secrets = user_config.get("secrets", {})
-                username = secrets.get("username", "")
-                password = secrets.get("password", "")
-                
-                self.linkedin_email.delete(0, tk.END)
-                self.linkedin_email.insert(0, username)
-                self.linkedin_password.delete(0, tk.END)
-                self.linkedin_password.insert(0, password)
-        except Exception as e:
-            # Silently fail if config doesn't exist or can't be read
-            pass
 
     def _save_linkedin_credentials(self):
         """Save LinkedIn credentials to the secrets file."""

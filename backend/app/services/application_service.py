@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, contains_eager
 
 from backend.app.core.errors import AppError
-from backend.app.models import Application, ApplicationStatus, AutomationJob, Job, Resume
+from backend.app.models import Application, ApplicationStatus, AutomationJob, AutomationLog, Job, Resume
 from backend.app.services import usage_service
 
 SORTS = {
@@ -208,7 +208,10 @@ def record_application(db: Session, user_id: uuid.UUID, job: Job, status: Applic
         app.automation_job_id = automation_job_id
     if resume_id:
         app.resume_id = resume_id
-    app.failure_reason = failure_reason[:5000] if status == ApplicationStatus.FAILED else ""
+    if status in (ApplicationStatus.FAILED, ApplicationStatus.SKIPPED):
+        app.failure_reason = failure_reason[:5000]
+    elif status == ApplicationStatus.APPLIED:
+        app.failure_reason = ""
     if newly_applied:
         app.applied_at = applied_at or datetime.now(timezone.utc)
         if count_usage:
@@ -257,8 +260,61 @@ def generated_resumes_for_applications(db: Session, user_id: uuid.UUID, applicat
     return grouped
 
 
+def resumes_by_external_job(db: Session, user_id: uuid.UUID, external_ids: list[str]) -> dict[str, list[Resume]]:
+    """AI resumes stored against a LinkedIn job id, even when the application row was not linked."""
+    wanted = {str(item).strip() for item in external_ids if str(item).strip()}
+    if not wanted:
+        return {}
+    rows = db.scalars(
+        select(Resume).where(Resume.user_id == user_id).order_by(Resume.created_at.desc())
+    ).all()
+    grouped: dict[str, list[Resume]] = {}
+    for row in rows:
+        meta = row.ai_metadata or {}
+        if meta.get("generated_by") != "ai":
+            continue
+        key = str(meta.get("job_id") or "").strip()
+        if key in wanted:
+            grouped.setdefault(key, []).append(row)
+    return grouped
+
+
 def primary_resumes(db: Session, user_id: uuid.UUID, resume_ids: list[uuid.UUID]) -> dict[uuid.UUID, Resume]:
     if not resume_ids:
         return {}
     rows = db.scalars(select(Resume).where(Resume.user_id == user_id, Resume.id.in_(resume_ids))).all()
     return {row.id: row for row in rows}
+
+
+def fill_missing_outcome_reasons(db: Session, user_id: uuid.UUID, apps: list[Application]) -> None:
+    """Copy a skipped or failed reason out of the run log when the application row never stored one."""
+    pending = [
+        app for app in apps
+        if app.status in (ApplicationStatus.FAILED, ApplicationStatus.SKIPPED)
+        and not (app.failure_reason or "").strip()
+        and app.automation_job_id
+        and app.job is not None
+    ]
+    if not pending:
+        return
+    run_ids = {app.automation_job_id for app in pending}
+    logs = db.scalars(
+        select(AutomationLog).where(
+            AutomationLog.user_id == user_id,
+            AutomationLog.automation_job_id.in_(run_ids),
+            AutomationLog.event.in_(("failed", "skipped")),
+        )
+    ).all()
+    for app in pending:
+        label = f"{app.job.title} at {app.job.company}" if app.job.company else app.job.title
+        prefix = (
+            f"Skipped {label}: " if app.status == ApplicationStatus.SKIPPED
+            else f"Couldn't apply to {label}: "
+        )
+        for log in logs:
+            if log.automation_job_id != app.automation_job_id or log.event != app.status.value:
+                continue
+            if not log.message.startswith(prefix):
+                continue
+            app.failure_reason = log.message[len(prefix):].rstrip(".").strip()[:5000]
+            break

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, Copy, Laptop, Pause, Play, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { AgentDownloadPanel } from "../../components/AgentDownloadPanel";
 import { PendingQuestionsModal } from "../../components/PendingQuestionsModal";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
@@ -187,8 +188,16 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
         )}
         {devices.length === 0 && (
           <Alert kind="info">
-            Connect the ApplyXAI desktop agent on your computer to run automations.{" "}
-            <button type="button" onClick={onConnect} className="font-medium underline">Connect a computer</button>
+            <p>
+              Install the ApplyXAI desktop agent on your computer, then connect it to this account.
+            </p>
+            <div className="mt-3">
+              <AgentDownloadPanel />
+            </div>
+            <p className="mt-3">
+              Already installed?{" "}
+              <button type="button" onClick={onConnect} className="font-medium underline">Connect a computer</button>
+            </p>
           </Alert>
         )}
         {devices.length > 0 && !overview.agent_online && (
@@ -505,7 +514,10 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
       {devices.length === 0 ? (
         <div className="text-sm text-slate-600">
           <p>No computers connected yet.</p>
-          <Button className="mt-3" size="sm" onClick={onConnect}>Connect a computer</Button>
+          <div className="mt-3">
+            <AgentDownloadPanel />
+          </div>
+          <Button className="mt-3" size="sm" variant="secondary" onClick={onConnect}>Connect a computer</Button>
         </div>
       ) : (
         <ul className="-my-2 divide-y divide-slate-100">
@@ -587,8 +599,11 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
         <ol className="space-y-5">
           <li>
             <p className="font-medium text-slate-900">1. Install and open the ApplyXAI desktop agent on this computer.</p>
-            <p className="mt-1 text-sm text-slate-600">
-              Use the Windows installer package, or run from source with <code>{AGENT}</code>.
+            <div className="mt-2">
+              <AgentDownloadPanel />
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              Or run from source with <code>{AGENT}</code>.
             </p>
           </li>
           <li>

@@ -64,8 +64,8 @@ def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
     reason = ""
     if status in (ApplicationStatus.FAILED, ApplicationStatus.SKIPPED):
         reason = _text(event.get("reason"), 500)
-        detail = _text(event.get("detail"), 1000)
-        if status == ApplicationStatus.FAILED and detail and detail != reason:
+        detail = _text(event.get("detail"), 4000)
+        if detail and detail != reason:
             reason = f"{reason}: {detail}" if reason else detail
     applied_at = None
     if status == ApplicationStatus.APPLIED:

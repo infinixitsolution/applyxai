@@ -561,17 +561,26 @@ def build_resume_version_name(
     *,
     master_skills: list[str],
     patch: dict | None = None,
+    job_title: str = "",
+    company: str = "",
 ) -> str:
-    """Display name: {name}_{main skill}_{years of experience}."""
+    """Display name from the job when we have one: {name}_{role}_{company}_{years}."""
     person = _name_segment(" ".join(p for p in (user.first_name, user.last_name) if p), fallback="Resume")
-    order = (patch or {}).get("skills_order") or []
-    main_skill = _name_segment(str(order[0]), fallback="") if order else ""
-    if not main_skill and master_skills:
-        main_skill = _name_segment(str(master_skills[0]), fallback="General")
-    if not main_skill:
-        main_skill = "General"
+    role = _name_segment(job_title, fallback="")
+    if not role:
+        order = (patch or {}).get("skills_order") or []
+        role = _name_segment(str(order[0]), fallback="") if order else ""
+    if not role and master_skills:
+        role = _name_segment(str(master_skills[0]), fallback="General")
+    if not role:
+        role = "General"
+    org = _name_segment(company, fallback="")
     years = _experience_years_label(db, user.id)
-    return f"{person}_{main_skill}_{years}"[:255]
+    parts = [person, role]
+    if org:
+        parts.append(org)
+    parts.append(years)
+    return "_".join(parts)[:255]
 
 
 def render_docx(source_path: Path, patch: dict, out_path: Path, *, resume_text: str, template_id: str) -> None:
@@ -588,6 +597,8 @@ async def tailor_and_save(
     resume_id: uuid.UUID,
     job_description: str,
     job_id: str = "",
+    job_title: str = "",
+    company: str = "",
     template_id: str | None = None,
     application_id: uuid.UUID | None = None,
 ) -> Resume:
@@ -597,7 +608,9 @@ async def tailor_and_save(
     patch = preview_data.get("patch") or {}
     source = resume_service.get_resume(db, user, resume_id)
     masters = list(source.master_skills or [])
-    version_name = build_resume_version_name(db, user, master_skills=masters, patch=patch)
+    version_name = build_resume_version_name(
+        db, user, master_skills=masters, patch=patch, job_title=job_title, company=company,
+    )
     src_path = resume_service.absolute_path(source)
     resume_text = resume_text_service.extract_text(src_path, source.file_type)
     tmp = src_path.parent / f"tailored-{uuid.uuid4().hex}.docx"
@@ -610,6 +623,8 @@ async def tailor_and_save(
     new_resume.ai_metadata = {
         "generated_by": "ai",
         "job_id": job_id,
+        "job_title": (job_title or "")[:300],
+        "company": (company or "")[:300],
         "match_score": preview_data.get("match_score"),
         "fit_score": preview_data.get("fit_score"),
         "source_resume_id": str(resume_id),

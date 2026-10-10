@@ -4,7 +4,7 @@ import type {
   Institute, InstituteAssignment, InstituteDashboard, Partner, PartnerCampaign, PartnerCommission,
   PartnerDashboard, PartnerPayout, SeatCounts,
   PlatformCms, PublicSite,
-  AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, JobWithApplication, LogLevel,
+  AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, DesktopAgentInfo, JobWithApplication, LogLevel,
   Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, ResumeTemplate, RunLogLine, SearchConfig,
   SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
 } from "../types";
@@ -138,6 +138,7 @@ export const automation = {
   devices: () => request<{ devices: AgentDevice[] }>("/automation/devices").then((d) => d.devices),
   desktopAgentDownloadUrl: () =>
     import.meta.env.VITE_AGENT_DOWNLOAD_URL || buildUrl("/automation/desktop-agent/download"),
+  desktopAgentInfo: () => request<DesktopAgentInfo>("/automation/desktop-agent/info"),
   pairingCode: () => request<{ code: string; expires_at: string }>("/automation/devices/pairing-code", { method: "POST" }),
   approveConnect: (sessionId: string) =>
     request<{ ok: boolean; device_name?: string }>("/automation/devices/connect/approve", {

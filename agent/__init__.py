@@ -7,4 +7,4 @@ so ApplyXAI never sees the LinkedIn password.
     python -m agent run
 """
 
-AGENT_VERSION = "1.1.2"
+AGENT_VERSION = "1.1.4"

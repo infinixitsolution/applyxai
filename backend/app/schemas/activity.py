@@ -38,6 +38,10 @@ class ResumeVersionOut(BaseModel):
     created_at: datetime
     is_default: bool = False
     generated_by: str | None = None
+    job_title: str | None = None
+    company: str | None = None
+    match_score: int | None = None
+    fit_score: int | None = None
 
 
 class ApplicationOut(BaseModel):

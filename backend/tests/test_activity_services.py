@@ -56,12 +56,14 @@ def test_record_application_counts_usage_exactly_once(db, users):
     assert counter(db, alice).applications == 1 and app.status == ApplicationStatus.APPLIED
 
 
-def test_failure_reason_only_kept_for_failures(db, users):
+def test_failure_reason_kept_for_failed_and_skipped(db, users):
     alice, _ = users
     job = application_service.upsert_job(db, external_id="1", title="Dev")
     app = application_service.record_application(db, alice.id, job, ApplicationStatus.FAILED, failure_reason="boom")
     assert app.failure_reason == "boom"
-    application_service.record_application(db, alice.id, job, ApplicationStatus.SKIPPED, failure_reason="ignored")
+    application_service.record_application(db, alice.id, job, ApplicationStatus.SKIPPED, failure_reason="blacklisted company")
+    assert app.failure_reason == "blacklisted company"
+    application_service.record_application(db, alice.id, job, ApplicationStatus.APPLIED)
     assert app.failure_reason == ""
 
 

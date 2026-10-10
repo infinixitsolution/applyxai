@@ -2,10 +2,11 @@ import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Button, cx } from "./ui";
 
-export function Modal({ open, onClose, title, children, footer, wide }:
-  { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, footer, wide, size }:
+  { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean; size?: "md" | "lg" | "xl" }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const width = size === "xl" ? "max-w-3xl" : wide || size === "lg" ? "max-w-2xl" : "max-w-md";
 
   useEffect(() => {
     const dialog = ref.current;
@@ -19,7 +20,7 @@ export function Modal({ open, onClose, title, children, footer, wide }:
     <dialog ref={ref} aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); onClose(); }}
             onClick={(e) => { if (e.target === ref.current) onClose(); }}
             className={cx("m-auto w-[calc(100%-1rem)] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40 sm:w-[calc(100%-2rem)]",
-              wide ? "max-w-2xl" : "max-w-md")}>
+              width)}>
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
         <h2 id={titleId} className="pr-2 text-base font-semibold leading-snug text-slate-900">{title}</h2>
         <button type="button" aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600">

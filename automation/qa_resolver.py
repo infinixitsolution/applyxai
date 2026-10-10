@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Callable
 
 import requests
+
+log = logging.getLogger(__name__)
 
 _API_BASE = ""
 _AGENT_TOKEN = ""
@@ -53,6 +56,60 @@ def can_use_ai(label_lower: str, question_type: str, ai_policy: dict) -> bool:
     return True
 
 
+_PLACEHOLDER_COVERS = {
+    "cover letter",
+    "coverletter",
+    "your cover letter",
+    "n/a",
+    "na",
+    "none",
+    "user information",
+}
+
+
+def is_placeholder_cover(text: str) -> bool:
+    """True when the saved cover letter is empty or the stock placeholder, not a real letter."""
+    compact = " ".join((text or "").split()).strip()
+    if not compact:
+        return True
+    low = compact.lower().strip(" .")
+    if low in _PLACEHOLDER_COVERS:
+        return True
+    return len(compact) < 40
+
+
+def ask_cover_letter(
+    *,
+    job_description: str | None = None,
+    job_title: str = "",
+    company: str = "",
+) -> str:
+    """JD-specific cover letter from platform AI. Empty string when the API is unavailable."""
+    if not (_API_BASE and _AGENT_TOKEN and _RUN_ID):
+        return ""
+    headers = {"Authorization": f"Bearer {_AGENT_TOKEN}", "Content-Type": "application/json"}
+    body = {
+        "job_description": (job_description or "")[:12000],
+        "job_title": (job_title or "")[:300],
+        "company": (company or "")[:300],
+    }
+    try:
+        resp = requests.post(
+            f"{_API_BASE}/api/agent/runs/{_RUN_ID}/ai/cover-letter",
+            json=body,
+            headers=headers,
+            timeout=90,
+        )
+        data = resp.json()
+        if resp.status_code == 200 and isinstance(data, dict) and data.get("success"):
+            letter = (data.get("data") or {}).get("cover_letter") or ""
+            return str(letter).strip()
+        log.warning("Cover letter API returned %s: %s", resp.status_code, (resp.text or "")[:240])
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        log.warning("Cover letter request failed: %s", exc)
+    return ""
+
+
 def ask_platform_ai(
     *,
     label: str,
@@ -84,8 +141,9 @@ def ask_platform_ai(
             if resp.status_code == 200 and isinstance(data, dict) and data.get("success"):
                 ans = (data.get("data") or {}).get("answer") or ""
                 return str(ans).strip()
-        except (requests.RequestException, ValueError, TypeError):
-            pass
+            log.warning("AI answer API returned %s: %s", resp.status_code, (resp.text or "")[:240])
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            log.warning("AI answer request failed: %s", exc)
     if _LOCAL_ANSWER is not None:
         try:
             return (_LOCAL_ANSWER(label, question_type=question_type, job_description=job_description,

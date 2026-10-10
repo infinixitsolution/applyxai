@@ -254,7 +254,7 @@ def run_payload(db: Session, run: AutomationJob) -> dict:
     resume = run_config_service.default_resume(db, run.user_id)
     user = db.get(User, run.user_id)
     doc = preferences_service.application_document(db, user)
-    avail = ai_available(db, feature="applications")
+    avail = ai_available(db, feature="applications") or ai_available(db, feature="resume")
     search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == run.user_id))
     resume_mode = (search.extra or {}).get("resume_mode", "default") if search and search.extra else "default"
     return {
