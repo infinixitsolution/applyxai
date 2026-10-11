@@ -451,6 +451,67 @@ export interface AdminUserDetail {
   devices: AgentDevice[];
   applications_by_status: Record<ApplicationStatus, number>;
   resumes: number;
+  candidate?: AdminCandidate;
+}
+
+export interface AdminCandidate {
+  profile: {
+    phone: string;
+    headline: string;
+    summary: string;
+    current_title: string;
+    current_company: string;
+    experience_years: number | null;
+    skills: string[];
+    preferred_roles: string[];
+    preferred_locations: string[];
+    education: Record<string, unknown>[];
+    work_history: Record<string, unknown>[];
+  };
+  search: {
+    keywords: string[];
+    location: string;
+    easy_apply_only: boolean;
+    experience_level: string[];
+    job_type: string[];
+    on_site: string[];
+    date_posted: string;
+    salary_min: number | null;
+    salary_max: number | null;
+  } | null;
+  resume_list: { id: string; name: string; file_type: string; file_size: number; is_default: boolean; tailored: boolean; created_at: string | null }[];
+  stats: {
+    applications_total: number;
+    applied_total: number;
+    success_rate: number | null;
+    mock_interviews_total: number;
+    mock_average_score: number | null;
+    live_interviews_total: number;
+    live_average_score: number | null;
+  };
+  applications_daily: { date: string; applied: number; failed: number }[];
+  recent_applications: {
+    id: string; status: ApplicationStatus; title: string; company: string; location: string; job_url: string;
+    failure_reason: string; applied_at: string | null; created_at: string | null;
+  }[];
+  mock_interviews: {
+    id: string; status: MockInterviewSessionStatus; job_title: string; company: string; interview_types: string[];
+    turn_count: number; overall_score: number | null; created_at: string | null;
+  }[];
+  live_interviews: {
+    id: string; status: string; job_title: string; company: string; token: string; token_status: string;
+    overall_score: number | null; lines: number; started_at: string | null; ended_at: string | null;
+  }[];
+  live_tokens: { unused: number; reserved: number; used: number; paid: { currency: string; amount_cents: number }[] };
+  journey?: {
+    steps: { key: string; label: string; done: boolean; at: string | null; optional: boolean }[];
+    stopped_at: string | null;
+    stopped_label: string | null;
+    stopped_step: number | null;
+    completed: number;
+    total: number;
+    last_activity_at: string | null;
+  };
 }
 
 export interface WithOwner {

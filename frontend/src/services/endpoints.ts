@@ -314,6 +314,9 @@ export const admin = {
     is_verified?: boolean;
   }) => request<AdminUserDetail>("/admin/users", { method: "POST", body }),
   user: (id: string) => request<AdminUserDetail>(`/admin/users/${id}`),
+  userLiveInterview: (id: string, sessionId: string) =>
+    request<{ user: { id: string; email: string; name: string }; session: LiveInterviewSession }>(
+      `/admin/users/${id}/live-interviews/${sessionId}`),
   updateUser: (id: string, body: {
     email?: string;
     first_name?: string;

@@ -17,15 +17,16 @@ from backend.app.core.pagination import PageParams, paginate, page_response
 from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
 from backend.app.core.security import hash_password
 from backend.app.models import (
-    AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
-    MockInterviewFeedbackJob, MockInterviewSession, Payment, Plan, Resume, SearchConfig, Subscription,
-    SubscriptionStatus, User, UsageCounter,
+    AdminAction, AgentDevice, Application, ApplicationPreferences, ApplicationStatus, AuthToken, AutomationJob,
+    AutomationLog, AutomationStatus, Job, TokenPurpose,
+    LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, MockInterviewFeedbackJob, MockInterviewSession,
+    Payment, Plan, Resume, SearchConfig, Subscription, SubscriptionStatus, User, UserProfile, UsageCounter,
 )
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES, MockInterviewSessionStatus, PlanKind
 from backend.app.services.mock_interview_feedback_jobs import JOB_FAILED
 from backend.app.services import (
     agent_service, auth_service, automation_service, billing_service, dashboard_service, email_service,
-    notification_service, usage_service,
+    live_interview_service, notification_service, usage_service,
 )
 from backend.app.services.payments.base import PaymentProvider
 
@@ -221,7 +222,197 @@ def user_detail(db: Session, user_id: uuid.UUID) -> dict:
         "devices": [agent_service.device_out(d) for d in devices],
         "applications_by_status": by_status,
         "resumes": resumes,
+        "candidate": _candidate(db, user, by_status),
     }
+
+
+def _candidate(db: Session, user: User, by_status: dict[str, int]) -> dict:
+    """Profile, search, resumes (names only), recent applications, and interviews for one candidate."""
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+    search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == user.id))
+    resumes = db.scalars(select(Resume).where(Resume.user_id == user.id)
+                         .order_by(Resume.is_default.desc(), Resume.created_at.desc()).limit(50)).all()
+    recent = db.execute(
+        select(Application, Job).join(Job, Job.id == Application.job_id)
+        .where(Application.user_id == user.id)
+        .order_by(func.coalesce(Application.applied_at, Application.created_at).desc()).limit(25)
+    ).all()
+    since = _now() - timedelta(days=29)
+    daily: dict[str, dict[str, int]] = {}
+    for applied_at, status in db.execute(
+        select(func.coalesce(Application.applied_at, Application.created_at), Application.status)
+        .where(Application.user_id == user.id,
+               func.coalesce(Application.applied_at, Application.created_at) >= since,
+               Application.status.in_([ApplicationStatus.APPLIED, ApplicationStatus.FAILED]))
+    ):
+        day = applied_at.date().isoformat()
+        bucket = daily.setdefault(day, {"applied": 0, "failed": 0})
+        bucket["applied" if status == ApplicationStatus.APPLIED else "failed"] += 1
+    days = [(since + timedelta(days=i)).date().isoformat() for i in range(30)]
+
+    mocks = db.scalars(select(MockInterviewSession).where(MockInterviewSession.user_id == user.id)
+                       .order_by(MockInterviewSession.created_at.desc()).limit(25)).all()
+    mock_total = db.scalar(select(func.count()).select_from(MockInterviewSession)
+                           .where(MockInterviewSession.user_id == user.id)) or 0
+    lives = db.execute(
+        select(LiveInterviewSession, LiveInterviewToken)
+        .join(LiveInterviewToken, LiveInterviewToken.id == LiveInterviewSession.token_id)
+        .where(LiveInterviewSession.user_id == user.id)
+        .order_by(LiveInterviewSession.created_at.desc()).limit(50)
+    ).all()
+    tokens = {status: n for status, n in db.execute(
+        select(LiveInterviewToken.status, func.count()).where(LiveInterviewToken.user_id == user.id)
+        .group_by(LiveInterviewToken.status))}
+    paid = db.execute(
+        select(LiveInterviewOrder.currency, func.coalesce(func.sum(LiveInterviewOrder.amount_cents), 0))
+        .where(LiveInterviewOrder.user_id == user.id, LiveInterviewOrder.status == "paid")
+        .group_by(LiveInterviewOrder.currency)
+    ).all()
+
+    applied = by_status.get(ApplicationStatus.APPLIED.value, 0)
+    failed = by_status.get(ApplicationStatus.FAILED.value, 0)
+    mock_scores = [_score(m.feedback) for m in mocks]
+    live_scores = [_score(s.feedback) for s, _ in lives]
+    return {
+        "profile": {
+            "phone": profile.phone if profile else "",
+            "headline": profile.headline if profile else "",
+            "summary": profile.summary if profile else "",
+            "current_title": profile.current_title if profile else "",
+            "current_company": profile.current_company if profile else "",
+            "experience_years": profile.experience_years if profile else None,
+            "skills": list(profile.skills or []) if profile else [],
+            "preferred_roles": list(profile.preferred_roles or []) if profile else [],
+            "preferred_locations": list(profile.preferred_locations or []) if profile else [],
+            "education": list(profile.education or []) if profile else [],
+            "work_history": list(profile.work_history or []) if profile else [],
+        },
+        "search": None if search is None else {
+            "keywords": list(search.keywords or []),
+            "location": search.location,
+            "easy_apply_only": search.easy_apply_only,
+            "experience_level": list(search.experience_level or []),
+            "job_type": list(search.job_type or []),
+            "on_site": list(search.on_site or []),
+            "date_posted": search.date_posted,
+            "salary_min": search.salary_min,
+            "salary_max": search.salary_max,
+        },
+        "resume_list": [{
+            "id": str(r.id), "name": r.name, "file_type": r.file_type, "file_size": r.file_size,
+            "is_default": r.is_default, "tailored": r.application_id is not None, "created_at": _iso(r.created_at),
+        } for r in resumes],
+        "stats": {
+            "applications_total": sum(by_status.values()),
+            "applied_total": applied,
+            "success_rate": round(applied * 100 / (applied + failed)) if applied + failed else None,
+            "mock_interviews_total": mock_total,
+            "mock_average_score": _average(mock_scores),
+            "live_interviews_total": len(lives),
+            "live_average_score": _average(live_scores),
+        },
+        "applications_daily": [{"date": d, **daily.get(d, {"applied": 0, "failed": 0})} for d in days],
+        "recent_applications": [{
+            "id": str(app.id), "status": app.status.value, "title": job.title, "company": job.company,
+            "location": job.location, "job_url": job.job_url, "failure_reason": app.failure_reason,
+            "applied_at": _iso(app.applied_at), "created_at": _iso(app.created_at),
+        } for app, job in recent],
+        "mock_interviews": [{
+            "id": str(m.id), "status": m.status.value,
+            "job_title": str((m.context_snapshot or {}).get("job_title") or ""),
+            "company": str((m.context_snapshot or {}).get("company") or ""),
+            "interview_types": list(m.interview_types or []), "turn_count": m.turn_count,
+            "overall_score": score, "created_at": _iso(m.created_at),
+        } for m, score in zip(mocks, mock_scores)],
+        "live_interviews": [{
+            "id": str(s.id), "status": s.status, "job_title": s.job_title, "company": s.company,
+            "token": t.code, "token_status": t.status, "overall_score": score,
+            "lines": len(s.transcript or []), "started_at": _iso(s.started_at), "ended_at": _iso(s.ended_at),
+        } for (s, t), score in zip(lives, live_scores)],
+        "live_tokens": {
+            "unused": tokens.get("unused", 0), "reserved": tokens.get("reserved", 0), "used": tokens.get("used", 0),
+            "paid": [{"currency": c, "amount_cents": int(a)} for c, a in paid],
+        },
+        "journey": _journey(db, user, profile, search),
+    }
+
+
+def _journey(db: Session, user: User, profile: UserProfile | None, search: SearchConfig | None) -> dict:
+    """Each setup step after registration with when it happened, and the first step still open."""
+    def first(column, *where):
+        return db.scalar(select(func.min(column)).where(*where))
+
+    uid = user.id
+    verified_at = first(AuthToken.used_at, AuthToken.user_id == uid, AuthToken.purpose == TokenPurpose.VERIFY_EMAIL) \
+        if user.is_verified else None
+    signed_in_at = first(AuthToken.created_at, AuthToken.user_id == uid, AuthToken.purpose == TokenPurpose.REFRESH) \
+        or user.last_login_at
+    profile_filled = profile is not None and bool(
+        profile.headline or profile.summary or profile.skills or profile.work_history or profile.current_title)
+    answers = db.scalar(select(ApplicationPreferences).where(ApplicationPreferences.user_id == uid))
+    steps = [
+        ("registered", "Registered", True, user.created_at, False),
+        ("email_verified", "Verified email", user.is_verified, verified_at, False),
+        ("signed_in", "First sign-in", signed_in_at is not None, signed_in_at, False),
+        ("resume", "Uploaded a resume", None, first(Resume.created_at, Resume.user_id == uid), False),
+        ("profile", "Filled in profile", profile_filled, profile.updated_at if profile_filled else None, False),
+        ("job_preferences", "Saved job preferences", search is not None, search.created_at if search else None, False),
+        ("application_answers", "Saved application answers", answers is not None,
+         answers.created_at if answers else None, True),
+        ("desktop_agent", "Connected the desktop agent", None, first(AgentDevice.paired_at, AgentDevice.user_id == uid), False),
+        ("first_run", "Started automation", None, first(AutomationJob.created_at, AutomationJob.user_id == uid), False),
+        ("first_application", "First job applied", None,
+         first(Application.applied_at, Application.user_id == uid, Application.status == ApplicationStatus.APPLIED), False),
+    ]
+    out = [{"key": key, "label": label, "done": bool(at) if done is None else done, "at": _iso(at), "optional": optional}
+           for key, label, done, at, optional in steps]
+    stopped = next((s for s in out if not s["done"] and not s["optional"]), None)
+    actions = {
+        "email_verified": "Verify email", "signed_in": "Sign in for the first time", "resume": "Upload a resume",
+        "profile": "Fill in profile", "job_preferences": "Save job preferences",
+        "desktop_agent": "Connect the desktop agent", "first_run": "Start automation", "first_application": "Apply to a first job",
+    }
+    latest = [t for t in (
+        user.last_login_at,
+        db.scalar(select(func.max(Application.updated_at)).where(Application.user_id == uid)),
+        db.scalar(select(func.max(AutomationJob.updated_at)).where(AutomationJob.user_id == uid)),
+        db.scalar(select(func.max(AgentDevice.last_seen_at)).where(AgentDevice.user_id == uid)),
+        db.scalar(select(func.max(Resume.created_at)).where(Resume.user_id == uid)),
+        db.scalar(select(func.max(MockInterviewSession.updated_at)).where(MockInterviewSession.user_id == uid)),
+        db.scalar(select(func.max(LiveInterviewSession.updated_at)).where(LiveInterviewSession.user_id == uid)),
+        profile.updated_at if profile else None,
+        search.updated_at if search else None,
+        *(at for _, _, _, at, _ in steps),
+    ) if t]
+    last = max((t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in latest), default=None)
+    return {
+        "steps": out,
+        "stopped_at": stopped["key"] if stopped else None,
+        "stopped_label": actions.get(stopped["key"], stopped["label"]) if stopped else None,
+        "stopped_step": out.index(stopped) + 1 if stopped else None,
+        "completed": sum(1 for s in out if s["done"]),
+        "total": len(out),
+        "last_activity_at": _iso(last),
+    }
+
+
+def _score(feedback) -> int | None:
+    value = feedback.get("overall_score") if isinstance(feedback, dict) else None
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _average(scores: list[int | None]) -> int | None:
+    known = [s for s in scores if s is not None]
+    return round(sum(known) / len(known)) if known else None
+
+
+def user_live_interview(db: Session, user_id: uuid.UUID, session_id: uuid.UUID) -> dict:
+    user = _get_user(db, user_id)
+    return {"user": {"id": str(user.id), "email": user.email, "name": f"{user.first_name} {user.last_name}".strip()},
+            "session": live_interview_service.get_session(db, user.id, session_id)}
 
 
 def create_user(

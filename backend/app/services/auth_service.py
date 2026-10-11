@@ -20,7 +20,7 @@ from backend.app.core.security import (
     burn_password_check, create_access_token, generate_token, hash_password, hash_token,
     password_needs_rehash, verify_password,
 )
-from backend.app.models import AgentDevice, AuthToken, TokenPurpose, User
+from backend.app.models import AgentDevice, AuthToken, TokenPurpose, User, UserProfile
 
 logger = logging.getLogger("applyxai.auth")
 
@@ -153,6 +153,8 @@ def register(
             contact_name=contact_name or f"{first_name} {last_name}".strip(), phone=phone,
             gstin=gstin, pan_number=pan_number,
         )
+    elif phone:
+        db.add(UserProfile(user_id=user.id, phone=phone))
     token = None
     if auth.require_verification:
         token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=auth.verification_hours))

@@ -18,6 +18,16 @@ def _check_password(value: str) -> str:
     return value
 
 
+def _check_phone(value: str) -> str:
+    value = " ".join(value.split())
+    if not value:
+        return ""
+    digits = sum(ch.isdigit() for ch in value)
+    if not all(ch.isdigit() or ch in "+-() " for ch in value) or not 10 <= digits <= 15:
+        raise ValueError("Enter a valid mobile number")
+    return value
+
+
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
@@ -34,6 +44,7 @@ class RegisterIn(BaseModel):
     agreed: bool = False
 
     _password = field_validator("password")(_check_password)
+    _phone = field_validator("phone")(_check_phone)
 
     @field_validator("first_name", "last_name", "institute_name", "contact_name", "organization", "referral_code")
     @classmethod

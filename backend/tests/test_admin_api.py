@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
-    Plan, SearchConfig, Subscription, SubscriptionStatus, User, UserProfile,
+    LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, Plan, SearchConfig, Subscription,
+    SubscriptionStatus, SupportThread, User, UserProfile,
 )
 from backend.app.services import admin_service, dashboard_service
 from backend.app.services.payments import get_payment_provider
@@ -129,6 +130,58 @@ def test_user_detail_and_unknown_user(admin, alice):
     assert out["usage"]["applications"]["limit"] == 10
     assert out["subscription"] is None and out["runs"] == [] and out["devices"] == []
     assert get(admin, "/users/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+def test_user_detail_shows_the_candidate_with_live_interviews(admin, alice, db):
+    db.add(UserProfile(user_id=alice.user.id, phone="+91 99999 00000", headline="Engineer", skills=["Python"]))
+    db.add(SearchConfig(user_id=alice.user.id, keywords=["Backend"], location="Bangalore"))
+    job = Job(external_id="77", title="Backend Engineer", company="Acme")
+    db.add(job)
+    db.flush()
+    app_row = Application(user_id=alice.user.id, job_id=job.id, status=ApplicationStatus.APPLIED,
+                          applied_at=datetime.now(timezone.utc))
+    db.add(app_row)
+    thread = SupportThread(user_id=alice.user.id)
+    db.add(thread)
+    db.flush()
+    order = LiveInterviewOrder(user_id=alice.user.id, thread_id=thread.id, amount_cents=49900, status="paid")
+    db.add(order)
+    db.flush()
+    token = LiveInterviewToken(user_id=alice.user.id, order_id=order.id, code="12345678", status="used")
+    db.add(token)
+    db.flush()
+    session = LiveInterviewSession(
+        user_id=alice.user.id, token_id=token.id, job_title="Backend Engineer", company="Acme", status="completed",
+        transcript=[{"role": "interviewer", "text": "Tell me about yourself"}], feedback={"overall_score": 72},
+        started_at=datetime.now(timezone.utc), ended_at=datetime.now(timezone.utc),
+    )
+    db.add(session)
+    db.commit()
+
+    candidate = data(get(admin, f"/users/{alice.user.id}"))["candidate"]
+    assert candidate["profile"]["phone"] == "+91 99999 00000" and candidate["profile"]["skills"] == ["Python"]
+    assert candidate["search"]["keywords"] == ["Backend"] and candidate["search"]["location"] == "Bangalore"
+    assert candidate["recent_applications"][0]["title"] == "Backend Engineer"
+    assert candidate["stats"]["applied_total"] == 1 and candidate["stats"]["success_rate"] == 100
+    assert sum(day["applied"] for day in candidate["applications_daily"]) == 1
+    live = candidate["live_interviews"][0]
+    assert live["token"] == "12345678" and live["overall_score"] == 72 and live["lines"] == 1
+    assert candidate["stats"]["live_interviews_total"] == 1 and candidate["stats"]["live_average_score"] == 72
+    assert candidate["live_tokens"]["used"] == 1
+    assert candidate["live_tokens"]["paid"] == [{"currency": "INR", "amount_cents": 49900}]
+    journey = candidate["journey"]
+    steps = {s["key"]: s for s in journey["steps"]}
+    assert steps["registered"]["done"] and steps["registered"]["at"]
+    assert steps["profile"]["done"] and steps["job_preferences"]["done"] and steps["first_application"]["done"]
+    assert not steps["resume"]["done"] and steps["resume"]["at"] is None
+    assert journey["stopped_at"] == "resume" and journey["stopped_label"] == "Upload a resume"
+    assert journey["stopped_step"] == 4
+    assert journey["last_activity_at"]
+
+    report = data(get(admin, f"/users/{alice.user.id}/live-interviews/{session.id}"))
+    assert report["session"]["transcript"][0]["text"] == "Tell me about yourself"
+    assert report["user"]["email"] == "alice@example.com"
+    assert get(alice, f"/users/{alice.user.id}/live-interviews/{session.id}").status_code == 403
 
 
 def test_disabling_a_user_signs_them_out_disconnects_agents_and_stops_their_run(admin, alice, db):

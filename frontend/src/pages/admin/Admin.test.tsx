@@ -6,12 +6,13 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RequireAdmin } from "../../auth/session";
 import { ToastProvider } from "../../components/Toast";
-import type { AdminInstituteDetail, AdminPartnerDetail, AdminPlan, AdminPlatformSettings, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
+import type { AdminCandidate, AdminInstituteDetail, AdminPartnerDetail, AdminPlan, AdminPlatformSettings, AdminRun, AdminUser, AdminUserDetail, User } from "../../types";
 import { AdminCompanyPage } from "./Company";
 import { AdminCompaniesPage, AdminRunsPage } from "./Lists";
 import { AdminInstitutePage, AdminInstitutesPage, AdminPartnerPage, AdminPartnersPage } from "./Orgs";
 import { AdminPlansPage } from "./Plans";
 import { AdminSystemPage } from "./System";
+import { AdminUserLiveInterviewPage } from "./UserCandidate";
 import { AdminUserPage, AdminUsersPage } from "./Users";
 
 const me: User = {
@@ -281,6 +282,74 @@ describe("admin area", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send test" }));
     expect(await screen.findByText(/SMTPAuthenticationError: bad login/)).toBeInTheDocument();
     expect(calls.find((c) => c.key === "POST /api/admin/email/test")?.body).toEqual({ to: "ops@example.com" });
+  });
+
+  it("shows the candidate dashboard, profile, and live interview report", async () => {
+    const candidate: AdminCandidate = {
+      profile: {
+        phone: "+91 98765 43210", headline: "Backend engineer", summary: "Builds APIs.", current_title: "Engineer",
+        current_company: "Acme", experience_years: 4, skills: ["Python", "FastAPI"], preferred_roles: ["Backend"],
+        preferred_locations: ["Bangalore"], education: [{ school: "IIT Madras", degree: "B.Tech" }],
+        work_history: [{ title: "Engineer", company: "Acme", start: "2022" }],
+      },
+      search: { keywords: ["Python developer"], location: "Bangalore", easy_apply_only: true, experience_level: [],
+                job_type: [], on_site: ["Remote"], date_posted: "", salary_min: null, salary_max: null },
+      resume_list: [{ id: "r1", name: "Main CV", file_type: "pdf", file_size: 2048, is_default: true, tailored: false,
+                      created_at: "2026-10-02T00:00:00+00:00" }],
+      stats: { applications_total: 4, applied_total: 4, success_rate: 100, mock_interviews_total: 0, mock_average_score: null,
+               live_interviews_total: 1, live_average_score: 72 },
+      applications_daily: [{ date: "2026-10-11", applied: 4, failed: 0 }],
+      recent_applications: [{ id: "a1", status: "applied", title: "Backend Engineer", company: "Globex", location: "Remote",
+                              job_url: "", failure_reason: "", applied_at: "2026-10-11T00:00:00+00:00", created_at: null }],
+      mock_interviews: [],
+      live_interviews: [{ id: "L1", status: "completed", job_title: "Backend Engineer", company: "Globex", token: "12345678",
+                          token_status: "used", overall_score: 72, lines: 6, started_at: "2026-10-11T00:00:00+00:00",
+                          ended_at: "2026-10-11T00:30:00+00:00" }],
+      live_tokens: { unused: 1, reserved: 0, used: 1, paid: [{ currency: "INR", amount_cents: 99800 }] },
+      journey: {
+        steps: [
+          { key: "registered", label: "Registered", done: true, at: "2026-10-02T00:00:00+00:00", optional: false },
+          { key: "resume", label: "Uploaded a resume", done: true, at: "2026-10-02T01:00:00+00:00", optional: false },
+          { key: "desktop_agent", label: "Connected the desktop agent", done: false, at: null, optional: false },
+        ],
+        stopped_at: "desktop_agent", stopped_label: "Connect the desktop agent", stopped_step: 3, completed: 2, total: 3,
+        last_activity_at: "2026-10-11T00:00:00+00:00",
+      },
+    };
+    mockApi({
+      "GET /api/auth/me": { user: me },
+      "GET /api/plans": { plans },
+      "GET /api/admin/users/u1": detail({ candidate }),
+      "GET /api/admin/users/u1/live-interviews/L1": {
+        user: { id: "u1", email: "alice@example.com", name: "Alice Doe" },
+        session: { id: "L1", status: "completed", job_title: "Backend Engineer", company: "Globex", application_id: null,
+                   token: "12345678", started_at: "2026-10-11T00:00:00+00:00", ended_at: "2026-10-11T00:30:00+00:00",
+                   transcript: [{ role: "interviewer", text: "Tell me about yourself", at: "1" }],
+                   feedback: { overall_score: 72, summary: "Clear answers." } },
+      },
+    });
+    renderAt("/admin/users/u1", <>
+      <Route path="/admin/users/:id" element={<AdminUserPage />} />
+      <Route path="/admin/users/:id/live-interviews/:sessionId" element={<AdminUserLiveInterviewPage />} />
+    </>);
+    expect(await screen.findByText("+91 98765 43210")).toBeInTheDocument();
+    expect(screen.getByText("Applied (all time)")).toBeInTheDocument();
+    const journey = screen.getByRole("region", { name: "Progress after registration" });
+    expect(journey).toHaveTextContent("Stopped at step 3: Connect the desktop agent");
+    expect(journey).toHaveTextContent("2 of 3 steps done");
+    expect(within(journey).getByText("Stopped here")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Profile" }));
+    expect(await screen.findByText("IIT Madras")).toBeInTheDocument();
+    expect(screen.getByText("FastAPI")).toBeInTheDocument();
+    expect(screen.getByText("Main CV")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Interviews (1)" }));
+    expect(await screen.findByText(/Token 12345678/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "View report" }));
+    expect(await screen.findByText("Tell me about yourself")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Regenerate/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to candidate" })).toHaveAttribute("href", "/admin/users/u1?tab=interviews");
   });
 
   it("resends verification for an unverified user", async () => {

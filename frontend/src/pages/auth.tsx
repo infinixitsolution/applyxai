@@ -95,7 +95,7 @@ export function RegisterPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const next = params.get("next");
-  const [form, setForm] = useState({ first_name: "", last_name: "", email: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", password: "", confirm: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -106,6 +106,7 @@ export function RegisterPage() {
         password: form.password,
         first_name: form.first_name,
         last_name: form.last_name,
+        phone: form.phone.trim(),
       }),
     onSuccess: (result) => {
       rememberNext(next);
@@ -122,6 +123,10 @@ export function RegisterPage() {
     e.preventDefault();
     const problems = passwordProblem(form.password, form.confirm);
     if (!form.email.includes("@")) problems.email = "Enter a valid email address.";
+    const phoneDigits = form.phone.replace(/\D/g, "").length;
+    if (!/^[\d+\-() ]+$/.test(form.phone.trim()) || phoneDigits < 10 || phoneDigits > 15) {
+      problems.phone = "Enter a valid mobile number.";
+    }
     setErrors(problems);
     if (Object.keys(problems).length === 0) register.mutate();
   };
@@ -160,6 +165,18 @@ export function RegisterPage() {
               <TextInput label="Last name" autoComplete="family-name" value={form.last_name} onChange={set("last_name")} maxLength={100} />
             </div>
             <TextInput label="Email" type="email" autoComplete="email" required value={form.email} onChange={set("email")} error={errors.email} />
+            <TextInput
+              label="Mobile number"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              required
+              value={form.phone}
+              onChange={set("phone")}
+              error={errors.phone}
+              maxLength={32}
+              placeholder="+91 98765 43210"
+            />
           </div>
         </fieldset>
         <fieldset className="ax-login__section">

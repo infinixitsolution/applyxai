@@ -7,13 +7,16 @@ import { Select, TextArea, TextInput, Toggle } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Badge, Button, ButtonLink, Card, EmptyState, PageHeader, ProgressBar, Spinner, cx } from "../../components/ui";
+import { AdminTabNav, Alert, Badge, Button, ButtonLink, Card, EmptyState, PageHeader, ProgressBar, Spinner, cx } from "../../components/ui";
 import { formatDate, formatDateTime, formatMoney, formatRelative, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage, fieldErrors } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type AdminUser, type AdminUserDetail } from "../../types";
 import { FilterChip, FilterChipBrand, PAGE_SIZE, providerLabel, RUN_TONES, SubBadge, Table, Td, UserLink } from "./shared";
+import {
+  ApplicationsChart, CandidateHeader, CandidateInterviews, CandidateJourney, CandidateProfile, CandidateStats, RecentApplications,
+} from "./UserCandidate";
 
 const USER_STATUS_FILTERS = [
   { value: "active", label: "Active" },
@@ -361,9 +364,15 @@ function EditUserDialog({ user, selfId, onClose }: { user: AdminUser; selfId?: s
 
 // ------------------------------------------------------------------------------------------ detail
 type Pending = { title: string; message: string; confirm: string; danger: boolean; run: () => void };
+const USER_TABS = ["dashboard", "profile", "applications", "interviews", "billing"] as const;
+type UserTab = (typeof USER_TABS)[number];
 
 export function AdminUserPage() {
   const { id = "" } = useParams();
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("tab") as UserTab | null;
+  const tab: UserTab = requested && USER_TABS.includes(requested) ? requested : "dashboard";
+  const setTab = (next: UserTab) => setParams(next === "dashboard" ? {} : { tab: next }, { replace: true });
   const { data: me } = useSession();
   const client = useQueryClient();
   const toast = useToast();
@@ -410,6 +419,17 @@ export function AdminUserPage() {
     run: () => update.mutate({ is_admin: value }),
   });
 
+  const candidate = data.candidate;
+  const tabs: { id: UserTab; label: string }[] = [
+    { id: "dashboard", label: "Dashboard" },
+    ...(candidate ? [
+      { id: "profile" as const, label: "Profile" },
+      { id: "applications" as const, label: "Applications" },
+      { id: "interviews" as const, label: `Interviews (${candidate.stats.live_interviews_total + candidate.stats.mock_interviews_total})` },
+    ] : []),
+    { id: "billing", label: "Billing" },
+  ];
+
   return (
     <>
       <Link to="/admin/users" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
@@ -417,7 +437,26 @@ export function AdminUserPage() {
       </Link>
       <PageHeader title={u.email} description={[fullName(u), `Joined ${formatDate(u.created_at)}`,
         u.last_login_at ? `last signed in ${formatRelative(u.last_login_at)}` : "never signed in"].filter(Boolean).join(" \u00b7 ")} />
+      <CandidateHeader user={u} candidate={candidate} />
+      {candidate?.journey && <CandidateJourney journey={candidate.journey} />}
+      <AdminTabNav tabs={tabs} value={tab} onChange={setTab} ariaLabel="Candidate sections" />
 
+      {tab === "profile" && candidate && <CandidateProfile candidate={candidate} />}
+      {tab === "applications" && candidate && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap gap-1.5">
+            {APPLICATION_STATUSES.filter((s) => data.applications_by_status[s] > 0).map((s) => (
+              <Badge key={s} tone={STATUS_TONES[s]}>{STATUS_LABELS[s]}: {data.applications_by_status[s]}</Badge>
+            ))}
+          </div>
+          <ApplicationsChart days={candidate.applications_daily} />
+          <RecentApplications items={candidate.recent_applications} />
+        </div>
+      )}
+      {tab === "interviews" && candidate && <CandidateInterviews userId={u.id} candidate={candidate} />}
+
+      {tab === "dashboard" && <>
+      {candidate && <CandidateStats candidate={candidate} />}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card title="Account">
           <div className="space-y-4">
@@ -481,8 +520,17 @@ export function AdminUserPage() {
         </Card>
       </div>
 
+      {candidate && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <ApplicationsChart days={candidate.applications_daily} />
+          <RecentApplications items={candidate.recent_applications} limit={6} />
+        </div>
+      )}
+      </>}
+
+      {(tab === "dashboard" || tab === "billing") && (
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card title="Recent runs">
+        {tab === "dashboard" && <Card title="Recent runs">
           {data.runs.length === 0 ? <p className="text-sm text-slate-500">No runs yet.</p> : (
             <ul className="divide-y divide-slate-100 text-sm">
               {data.runs.map((r) => (
@@ -494,8 +542,8 @@ export function AdminUserPage() {
               ))}
             </ul>
           )}
-        </Card>
-        <Card title="Computers">
+        </Card>}
+        {tab === "dashboard" && <Card title="Computers">
           {data.devices.length === 0 ? <p className="text-sm text-slate-500">No desktop agent connected.</p> : (
             <ul className="divide-y divide-slate-100 text-sm">
               {data.devices.map((d) => (
@@ -507,8 +555,8 @@ export function AdminUserPage() {
               ))}
             </ul>
           )}
-        </Card>
-        <Card title="Subscription history">
+        </Card>}
+        {tab === "billing" && <Card title="Subscription history">
           {data.subscriptions.length === 0 ? <p className="text-sm text-slate-500">Never subscribed.</p> : (
             <ul className="divide-y divide-slate-100 text-sm">
               {data.subscriptions.map((s) => (
@@ -520,8 +568,8 @@ export function AdminUserPage() {
               ))}
             </ul>
           )}
-        </Card>
-        <Card title="Payments">
+        </Card>}
+        {tab === "billing" && <Card title="Payments">
           {data.payments.length === 0 ? <p className="text-sm text-slate-500">No payments.</p> : (
             <ul className="divide-y divide-slate-100 text-sm">
               {data.payments.map((p) => (
@@ -533,8 +581,9 @@ export function AdminUserPage() {
               ))}
             </ul>
           )}
-        </Card>
+        </Card>}
       </div>
+      )}
 
       {confirm && (
         <ConfirmDialog open title={confirm.title} message={confirm.message} confirmLabel={confirm.confirm} danger={confirm.danger}

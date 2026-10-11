@@ -88,13 +88,23 @@ function ScoreBar({ label, score }: { label: string; score: number }) {
   );
 }
 
-export function LiveInterviewReportDashboard({ session }: { session: LiveInterviewSession }) {
+export function LiveInterviewReportDashboard({
+  session,
+  readOnly = false,
+  backTo = "/app/live-interviews",
+  backLabel = "All interviews",
+}: {
+  session: LiveInterviewSession;
+  readOnly?: boolean;
+  backTo?: string;
+  backLabel?: string;
+}) {
   const [navActive, setNavActive] = useState<string>("overview");
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportPdfError, setExportPdfError] = useState<string | null>(null);
   const [applicationId, setApplicationId] = useState("");
   const queryClient = useQueryClient();
-  const needsJob = !session.job_title && !session.company;
+  const needsJob = !readOnly && !session.job_title && !session.company;
   const applications = useQuery({
     queryKey: ["live-interview-applications"],
     queryFn: liveInterviews.applications,
@@ -130,8 +140,11 @@ export function LiveInterviewReportDashboard({ session }: { session: LiveIntervi
     return (
       <Card title="Report">
         <p className="text-sm text-slate-600">
-          This interview is still running in the desktop agent. End it there to generate the report.
+          {readOnly
+            ? "This interview is still running in the candidate's desktop agent. The report appears when they end it."
+            : "This interview is still running in the desktop agent. End it there to generate the report."}
         </p>
+        {readOnly && <ButtonLink to={backTo} variant="secondary" className="mt-4">{backLabel}</ButtonLink>}
       </Card>
     );
   }
@@ -179,14 +192,16 @@ export function LiveInterviewReportDashboard({ session }: { session: LiveIntervi
                 <p className="text-xs text-slate-300">out of 100</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  loading={regenerate.isPending}
-                  onClick={() => regenerate.mutate()}
-                >
-                  <RefreshCw className="h-4 w-4" aria-hidden /> Regenerate
-                </Button>
+                {!readOnly && (
+                  <Button
+                    variant="secondary"
+                    className="border-white/20 bg-white/10 text-white hover:bg-white/20"
+                    loading={regenerate.isPending}
+                    onClick={() => regenerate.mutate()}
+                  >
+                    <RefreshCw className="h-4 w-4" aria-hidden /> Regenerate
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   className="border-white/20 bg-white/10 text-white hover:bg-white/20"
@@ -195,8 +210,8 @@ export function LiveInterviewReportDashboard({ session }: { session: LiveIntervi
                 >
                   <Download className="h-4 w-4" aria-hidden /> Export PDF
                 </Button>
-                <ButtonLink to="/app/live-interviews" variant="secondary" className="border-white/20 bg-white/10 text-white hover:bg-white/20">
-                  All interviews
+                <ButtonLink to={backTo} variant="secondary" className="border-white/20 bg-white/10 text-white hover:bg-white/20">
+                  {backLabel}
                 </ButtonLink>
               </div>
             </div>
@@ -416,9 +431,11 @@ export function LiveInterviewReportDashboard({ session }: { session: LiveIntervi
             ))}
             {!session.transcript?.length && <p className="text-sm text-slate-500">No lines captured.</p>}
           </div>
-          <p className="mt-4 text-center text-xs text-slate-500">
-            <Link to="/app/support" className="text-brand-700 underline">Request another token</Link> for the next live interview.
-          </p>
+          {!readOnly && (
+            <p className="mt-4 text-center text-xs text-slate-500">
+              <Link to="/app/support" className="text-brand-700 underline">Request another token</Link> for the next live interview.
+            </p>
+          )}
         </Card>
       </section>
     </div>

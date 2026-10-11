@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 
 from backend.app.core.cookies import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
-from backend.app.models import AuthToken, TokenPurpose, User
+from backend.app.models import AuthToken, TokenPurpose, User, UserProfile
 from backend.tests.conftest import PASSWORD, csrf_headers
 
 
@@ -54,6 +54,15 @@ def test_register_validation(api):
     assert _register(api, password="x" * 129).status_code == 422
     resp = _register(api, email="bob@example.com", password="bob@example.com")
     assert resp.status_code == 422 and resp.json()["error"]["code"] == "WEAK_PASSWORD"
+    assert _register(api, email="carl@example.com", phone="12345").status_code == 422
+    assert _register(api, email="carl@example.com", phone="call me maybe").status_code == 422
+
+
+def test_register_saves_mobile_number_on_profile(api, db):
+    assert _register(api, phone=" +91 98765  43210 ").status_code == 202
+    user = db.scalars(select(User)).one()
+    profile = db.scalars(select(UserProfile).where(UserProfile.user_id == user.id)).one()
+    assert profile.phone == "+91 98765 43210"
 
 
 # ------------------------------------------------------------------ verification + login

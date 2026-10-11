@@ -70,6 +70,11 @@ def user_detail(user_id: uuid.UUID, db: Session = Depends(get_db)):
     return ok(admin_service.user_detail(db, user_id))
 
 
+@router.get("/users/{user_id}/live-interviews/{session_id}", summary="One candidate's live interview report")
+def user_live_interview(user_id: uuid.UUID, session_id: uuid.UUID, db: Session = Depends(get_db)):
+    return ok(admin_service.user_live_interview(db, user_id, session_id))
+
+
 @router.patch("/users/{user_id}", summary="Update a user's profile and access")
 def update_user(user_id: uuid.UUID, body: UserUpdateIn, admin: User = Depends(require_admin),
                 db: Session = Depends(get_db)):

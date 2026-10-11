@@ -11,6 +11,7 @@ import { AdminPlansPage } from "./pages/admin/Plans";
 import { AdminSystemPage } from "./pages/admin/System";
 import { AdminInstitutePage, AdminInstitutesPage, AdminPartnerPage, AdminPartnersPage } from "./pages/admin/Orgs";
 import { AdminUserPage, AdminUsersPage } from "./pages/admin/Users";
+import { AdminUserLiveInterviewPage } from "./pages/admin/UserCandidate";
 import {
   InstituteDashboardPage, InstituteInvitationsPage, InstituteProfilePage, InstituteReportsPage,
   InstituteSeatsPage, InstituteSettingsPage, InstituteStudentsPage, InstituteSubscriptionPage,
@@ -150,6 +151,7 @@ export function App() {
         <Route index element={<AdminOverviewPage />} />
         <Route path="users" element={<AdminUsersPage />} />
         <Route path="users/:id" element={<AdminUserPage />} />
+        <Route path="users/:id/live-interviews/:sessionId" element={<AdminUserLiveInterviewPage />} />
         <Route path="institutes" element={<AdminInstitutesPage />} />
         <Route path="institutes/:id" element={<AdminInstitutePage />} />
         <Route path="partners" element={<AdminPartnersPage />} />
