@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from backend.app.models import ApplicationStatus
 
@@ -33,6 +33,11 @@ class JobSummary(BaseModel):
     salary_max: int | None
     discovered_at: datetime
     published_contacts: list[PublishedContactOut] = []
+
+    @field_validator("published_contacts", mode="before")
+    @classmethod
+    def _null_contacts(cls, value):
+        return value or []
 
 
 class JobDetail(JobSummary):

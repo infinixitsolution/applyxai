@@ -131,7 +131,8 @@ def upsert_job(db: Session, *, external_id: str, platform: str = "linkedin", **f
             return job
         try:
             with db.begin_nested():
-                job = Job(platform=platform, external_id=str(external_id), **fields)
+                job = Job(platform=platform, external_id=str(external_id),
+                          **{k: v for k, v in fields.items() if v is not None})
                 db.add(job)
             return job
         except IntegrityError:
