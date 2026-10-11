@@ -256,4 +256,4 @@ The current version does not include automatic updates. A future version will:
 For issues and support:
 - Discord: https://discord.gg/fFp7uUzWCY
 - GitHub Issues: https://github.com/GodsScion/Auto_job_applier_linkedIn/issues
-- Email: saivigneshgolla@outlook.com
+- Email:

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Author:  Sai Vignesh Golla
+# Author:
 # License: MIT License
 #          https://opensource.org/license/mit
 # GitHub:  https://github.com/GodsScion/Auto_job_applier_linkedIn

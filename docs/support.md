@@ -19,8 +19,8 @@ The fastest way to get help setting the tool up, or to talk about it in general,
 
 ## Socials
 
-- **Email**: saivigneshgolla@outlook.com
-- **X/Twitter**: https://x.com/saivigneshgolla
+- **Email**:
+- **X/Twitter**:
 - **Discord**: godsscion
 
 ## Support the project

@@ -1,7 +1,7 @@
 '''
-Author:     Sai Vignesh Golla
+Author:
 
-Copyright (c) 2024-2026 Sai Vignesh Golla
+Copyright (c) 2026 ApplyXAI
 
 License:    MIT License
             https://opensource.org/license/mit
@@ -119,7 +119,7 @@ As an independent developer, I pour my heart and soul into creating tools like t
 Your support, whether through donations big or small or simply spreading the word, means the world to me and helps keep this project alive and thriving.
 
 Gratefully yours 🙏🏻,
-Sai Vignesh Golla
+
 '''
 
 # --- Load user settings saved by the local control panel (user_config.json).

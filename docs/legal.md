@@ -34,7 +34,8 @@ Please consider the following:
 
 ## License
 
-Copyright (c) 2024-2026 Sai Vignesh Golla  <saivigneshgolla@outlook.com>
+Copyright (c) 2026 ApplyXAI  
+Copyright (c) 2024-2026 Sai Vignesh Golla
 
 This project is licensed under the **MIT License**. You are free to use, copy, modify, and
 distribute it — including in commercial and closed-source work — as long as the copyright

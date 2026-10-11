@@ -1,7 +1,7 @@
 '''
-Author:     Sai Vignesh Golla
+Author:
 
-Copyright (c) 2024-2026 Sai Vignesh Golla
+Copyright (c) 2026 ApplyXAI
 
 License:    MIT License
             https://opensource.org/license/mit

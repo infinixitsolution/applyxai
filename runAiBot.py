@@ -1,7 +1,7 @@
 '''
-Author:     Sai Vignesh Golla
+Author:
 
-Copyright (c) 2024-2026 Sai Vignesh Golla
+Copyright (c) 2026 ApplyXAI
 
 License:    MIT License
             https://opensource.org/license/mit
@@ -2197,10 +2197,10 @@ def main() -> None:
         print_lg("Irrelevant jobs skipped:        {}\n".format(skip_count))
         if randomly_answered_questions: print_lg("\n\nQuestions randomly answered:\n  {}  \n\n".format(";\n".join(str(question) for question in randomly_answered_questions)))
         quotes = choice([
-            "Never quit. You're one step closer than before. - Sai Vignesh Golla", 
-            "All the best with your future interviews, you've got this. - Sai Vignesh Golla", 
-            "Keep up with the progress. You got this. - Sai Vignesh Golla", 
-            "If you're tired, learn to take rest but never give up. - Sai Vignesh Golla",
+            "Never quit. You're one step closer than before.", 
+            "All the best with your future interviews, you've got this.", 
+            "Keep up with the progress. You got this.", 
+            "If you're tired, learn to take rest but never give up.",
             "Success is not final, failure is not fatal, It is the courage to continue that counts. - Winston Churchill (Not a sponsor)",
             "Believe in yourself and all that you are. Know that there is something inside you that is greater than any obstacle. - Christian D. Larson (Not a sponsor)",
             "Every job is a self-portrait of the person who does it. Autograph your work with excellence. - Jessica Guidobono (Not a sponsor)",

@@ -1,7 +1,7 @@
 '''
-Author:     Sai Vignesh Golla
+Author:
 
-Copyright (c) 2024-2026 Sai Vignesh Golla
+Copyright (c) 2026 ApplyXAI
 
 License:    MIT License
             https://opensource.org/license/mit
@@ -18,9 +18,9 @@ version:    2024.11.28.16.00
 # >>>>>>>>>>> Easy Apply Questions & Inputs <<<<<<<<<<<
 
 # Your legal name
-first_name = "Sai"                 # Your first name in quotes Eg: "First", "Sai"
-middle_name = "Vignesh"            # Your name in quotes Eg: "Middle", "Vignesh", ""
-last_name = "Golla"                # Your last name in quotes Eg: "Last", "Golla"
+first_name = ""                    # Your first name in quotes Eg: "First"
+middle_name = ""                   # Your middle name in quotes Eg: "Middle", ""
+last_name = ""                     # Your last name in quotes Eg: "Last"
 
 # Phone number (required), make sure it's valid.
 phone_number = "9876543210"        # Enter your 10 digit number in quotes Eg: "9876543210"
@@ -80,7 +80,7 @@ As an independent developer, I pour my heart and soul into creating tools like t
 Your support, whether through donations big or small or simply spreading the word, means the world to me and helps keep this project alive and thriving.
 
 Gratefully yours 🙏🏻,
-Sai Vignesh Golla
+
 '''
 
 # --- Load user settings saved by the local control panel (user_config.json).

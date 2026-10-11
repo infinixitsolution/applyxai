@@ -1,6 +1,6 @@
 @echo off
 REM
-REM Author:  Sai Vignesh Golla
+REM Author:
 REM License: MIT License
 REM          https://opensource.org/license/mit
 REM GitHub:  https://github.com/GodsScion/Auto_job_applier_linkedIn
