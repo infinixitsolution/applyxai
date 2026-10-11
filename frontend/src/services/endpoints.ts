@@ -6,7 +6,8 @@ import type {
   PartnerDashboard, PartnerPayout, SeatCounts,
   PlatformCms, PublicSite,
   AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, DesktopAgentInfo, JobWithApplication, LogLevel,
-  Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, ResumeTemplate, RunLogLine, SearchConfig,
+  LiveInterviewSession, Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, ResumeTemplate, RunLogLine, SearchConfig,
+  SupportMessage, SupportThread,
   SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
 } from "../types";
 import { ApiError, buildUrl, request, requestFull } from "./api";
@@ -226,6 +227,20 @@ export const dashboard = {
   usage: () => request<Usage>("/usage"),
 };
 
+export const support = {
+  thread: () => request<{ thread: SupportThread; messages: SupportMessage[] }>("/support/thread"),
+  send: (body: string) => request<{ message: SupportMessage }>("/support/messages", { method: "POST", body: { body } }),
+  requestLiveInterview: () => request<{ thread: SupportThread; messages: SupportMessage[] }>("/support/live-interview-request", { method: "POST" }),
+};
+
+export const liveInterviews = {
+  list: () => request<{ sessions: LiveInterviewSession[] }>("/live-interviews").then((d) => d.sessions),
+  get: (id: string) => request<LiveInterviewSession>(`/live-interviews/${id}`),
+  applications: () => request<{ applications: { id: string; title: string; company: string }[] }>("/live-interviews/applications").then((d) => d.applications),
+  attach: (id: string, applicationId: string) => request<LiveInterviewSession>(`/live-interviews/${id}/application`, { method: "PUT", body: { application_id: applicationId } }),
+  regenerate: (id: string) => request<LiveInterviewSession>(`/live-interviews/${id}/regenerate`, { method: "POST" }),
+};
+
 export const notifications = {
   list: (query: { unread_only?: boolean; page?: number; page_size?: number } = {}) =>
     request<Page<Notification> & { unread_count: number }>("/notifications", { query }),
@@ -344,7 +359,7 @@ export const admin = {
   }) => request<{ ai: AdminPlatformSettings["ai"] }>("/admin/settings/ai", { method: "PUT", body }),
   testAi: () => request<{ ok: boolean; reply: string }>("/admin/settings/ai/test", { method: "POST" }),
   updatePayments: (body: {
-    provider: "null" | "razorpay";
+    provider: "null" | "razorpay" | "stripe";
     key_id: string;
     key_secret?: string;
     webhook_secret?: string;
@@ -356,6 +371,13 @@ export const admin = {
     ),
   syncRazorpayPlans: () =>
     request<{ created: { code: string; provider_plan_id: string }[] }>("/admin/settings/payments/sync-plans", { method: "POST" }),
+  updateLiveInterview: (body: { enabled: boolean; display_name: string; price_cents: number }) =>
+    request<{ live_interview: NonNullable<AdminPlatformSettings["live_interview"]> }>("/admin/settings/live-interview", { method: "PUT", body }),
+  liveInterviews: () => request<{ sessions: LiveInterviewSession[] }>("/admin/live-interviews").then((d) => d.sessions),
+  supportThreads: () => request<{ threads: SupportThread[] }>("/admin/support/threads").then((d) => d.threads),
+  supportThread: (id: string) => request<{ thread: SupportThread; messages: SupportMessage[] }>(`/admin/support/threads/${id}`),
+  supportReply: (id: string, body: string) =>
+    request<{ message: SupportMessage }>(`/admin/support/threads/${id}/messages`, { method: "POST", body: { body } }),
   email: () => request<AdminEmailStatus>("/admin/email"),
   testEmail: (to: string) => request<TestEmailResult>("/admin/email/test", { method: "POST", body: { to: to || null } }),
   verifyEmail: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/verify-email`, { method: "POST" }),

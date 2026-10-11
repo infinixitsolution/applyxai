@@ -5,8 +5,8 @@ Endpoints for the desktop agent (`python -m agent`). Authenticated with the devi
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from backend.app.core.errors import AppError, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import AgentDevice, Application, ApplicationStatus, Job, User
 from backend.app.schemas.automation import AgentAiAnswerIn, AgentCoverLetterIn, AgentTailorIn, ConnectPollIn, ConnectStartIn, EventBatchIn, PairIn, PollIn
+from backend.app.schemas.live_interview import LiveInterviewStartIn
 from backend.app.services import agent_service, application_context, application_service, automation_service, dashboard_service, preferences_service, resume_ai_service, resume_service, run_config_service
 from backend.app.services import application_ai_service
 from backend.app.services.ai_service import AiTask, ai_available, complete
@@ -289,3 +290,77 @@ def ai_cover_letter(run_id: uuid.UUID, body: AgentCoverLetterIn, request: Reques
     )
     letter = complete(db, AiTask.APP_ANSWER, system=system, user=user_prompt, feature=feature, max_tokens=700)
     return ok({"cover_letter": letter.strip()})
+
+
+def _agent_user(db: Session, device: AgentDevice) -> User:
+    user = db.get(User, device.user_id)
+    if user is None:
+        raise AppError("NOT_FOUND", "User not found", 404)
+    return user
+
+
+@router.get("/live-interview/applications", summary="Applications the candidate can attach to a live interview")
+def live_interview_applications(device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    from backend.app.services import live_interview_service
+    return ok({"applications": live_interview_service.list_applications(db, device.user_id)})
+
+
+@router.post("/live-interview/start", summary="Start or resume a live interview with an 8-digit token")
+def live_interview_start(body: LiveInterviewStartIn, device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    from backend.app.services import live_interview_service
+    user = _agent_user(db, device)
+    result = live_interview_service.start_session(db, user, code=body.token, application_id=body.application_id)
+    db.commit()
+    return ok(result)
+
+
+@router.post("/live-interview/sessions/{session_id}/clip", summary="Transcribe one utterance and, for the interviewer, suggest an answer")
+def live_interview_clip(
+    session_id: uuid.UUID,
+    speaker: str = Form("interviewer"),
+    defer_answer: bool = Form(False),
+    file: UploadFile = File(...),
+    device: AgentDevice = Depends(get_current_device),
+    db: Session = Depends(get_db),
+    limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    from backend.app.services import live_interview_service
+    lane = f"{device.id}:{'interviewer' if speaker == 'interviewer' else 'candidate'}"
+    limiter.hit("30/minute", "agent-live-clip", lane)
+    limiter.hit("600/hour", "agent-live-clip-hourly", lane)
+    user = _agent_user(db, device)
+    data = file.file.read()
+    if len(data) > 8_000_000:
+        raise AppError("VALIDATION_ERROR", "That audio clip is too large.", 422)
+    result = live_interview_service.add_clip(
+        db, user, session_id, speaker=speaker, audio=data, filename=file.filename or "clip.wav",
+        defer_answer=defer_answer,
+    )
+    db.commit()
+    return ok(result)
+
+
+@router.post(
+    "/live-interview/sessions/{session_id}/answer-stream",
+    summary="Stream the answer to the latest interviewer question as plain text",
+)
+def live_interview_answer_stream(
+    session_id: uuid.UUID,
+    device: AgentDevice = Depends(get_current_device),
+    db: Session = Depends(get_db),
+    limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    from backend.app.services import live_interview_service
+    limiter.hit("30/minute", "agent-live-answer", str(device.id))
+    user = _agent_user(db, device)
+    pieces = live_interview_service.stream_answer(db, user, session_id)
+    return StreamingResponse(pieces, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/live-interview/sessions/{session_id}/end", summary="End the live interview and build the report")
+def live_interview_end(session_id: uuid.UUID, device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    from backend.app.services import live_interview_service
+    user = _agent_user(db, device)
+    result = live_interview_service.end_session(db, user, session_id)
+    db.commit()
+    return ok(result)

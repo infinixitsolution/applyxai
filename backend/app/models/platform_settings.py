@@ -5,6 +5,7 @@ from backend.app.core.platform_defaults import (
     DEFAULT_AI,
     DEFAULT_CMS,
     DEFAULT_EMAIL_TEMPLATES,
+    DEFAULT_LIVE_INTERVIEW,
     DEFAULT_NOTIFICATIONS,
     DEFAULT_PAYMENTS,
     PLATFORM_SETTINGS_KEY,

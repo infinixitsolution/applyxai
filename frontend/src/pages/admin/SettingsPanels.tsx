@@ -24,6 +24,7 @@ const TABS = [
   { id: "templates", label: "Templates" },
   { id: "ai", label: "AI" },
   { id: "payments", label: "Payments" },
+  { id: "live", label: "Live interview" },
   { id: "integrations", label: "Integrations" },
   { id: "operations", label: "Operations" },
 ] as const;
@@ -64,6 +65,7 @@ export function AdminSettingsPage() {
         )}
         {tab === "ai" && <AiTab ai={data.ai} />}
         {tab === "payments" && <PaymentsTab payments={data.payments} />}
+        {tab === "live" && <LiveInterviewTab offer={data.live_interview} />}
         {tab === "integrations" && <IntegrationsTab infra={data.infrastructure} smtp={data.smtp} ai={data.ai} payments={data.payments} />}
         {tab === "operations" && <OperationsTab />}
       </>
@@ -992,10 +994,61 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
   );
 }
 
+function LiveInterviewTab({ offer }: { offer: AdminPlatformSettings["live_interview"] }) {
+  const queryClient = useQueryClient();
+  const initial = offer ?? { enabled: false, display_name: "Live interview", price_cents: 49900, currency: "INR" };
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [name, setName] = useState(initial.display_name);
+  const [rupees, setRupees] = useState(String(initial.price_cents / 100));
+  const [saved, setSaved] = useState(false);
+  const sessions = useQuery({ queryKey: ["admin", "live-sessions"], queryFn: admin.liveInterviews });
+  const save = useMutation({
+    mutationFn: () => admin.updateLiveInterview({
+      enabled,
+      display_name: name.trim() || "Live interview",
+      price_cents: Math.round(Number(rupees) * 100),
+    }),
+    onSuccess: async () => {
+      setSaved(true);
+      await queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+    },
+  });
+  return (
+    <div className="space-y-4">
+      <Card title="Live interview package">
+        <p className="mb-4 text-sm text-slate-600">
+          Charged per interview. This is not included in subscription plans. Candidates request a token in Support, pay, and receive an 8-digit code.
+        </p>
+        <div className="grid max-w-lg gap-4">
+          <Toggle label="Available to candidates" checked={enabled} onChange={setEnabled} />
+          <TextInput label="Name" value={name} onChange={setName} />
+          <TextInput label="Price per interview (INR)" value={rupees} onChange={setRupees} hint="One payment covers one interview." />
+        </div>
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+        <div className="mt-4">
+          <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
+        </div>
+      </Card>
+      <Card title="Recent sessions">
+        {sessions.isPending ? <Spinner /> : sessions.error ? <Alert kind="error">{errorMessage(sessions.error)}</Alert> : (
+          <ul className="divide-y divide-slate-100 text-sm">
+            {sessions.data?.length ? sessions.data.map((s) => (
+              <li key={s.id} className="flex justify-between gap-3 py-2">
+                <span>{s.email} · {s.job_title || "Live interview"}{s.company ? ` at ${s.company}` : ""}</span>
+                <span className="text-slate-500">{s.status}{s.token ? ` · ${s.token}` : ""}</span>
+              </li>
+            )) : <li className="py-2 text-slate-500">No sessions yet.</li>}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"] }) {
   const qc = useQueryClient();
-  const webhookUrl = `${agentServerUrl()}/api/billing/webhook/razorpay`;
-  const [provider, setProvider] = useState<"null" | "razorpay">(payments.provider);
+  const [provider, setProvider] = useState<"null" | "razorpay" | "stripe">(payments.provider);
+  const webhookUrl = `${agentServerUrl()}/api/billing/webhook/${provider === "stripe" ? "stripe" : "razorpay"}`;
   const [keyId, setKeyId] = useState(payments.key_id);
   const [keySecret, setKeySecret] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
@@ -1046,15 +1099,21 @@ function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"]
           <select
             className="w-full max-w-md rounded-lg border border-slate-300 px-3 py-2"
             value={provider}
-            onChange={(e) => setProvider(e.target.value as "null" | "razorpay")}
+            onChange={(e) => setProvider(e.target.value as "null" | "razorpay" | "stripe")}
           >
             <option value="null">Development — activate plans without charging</option>
             <option value="razorpay">Razorpay — real checkout</option>
+            <option value="stripe">Stripe — live interview payment links</option>
           </select>
         </label>
-        {provider === "razorpay" && (
+        {provider === "stripe" && (
+          <p className="mt-3 text-sm text-slate-600">
+            Stripe charges the live interview token. Subscription checkout still needs Razorpay.
+          </p>
+        )}
+        {(provider === "razorpay" || provider === "stripe") && (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <TextInput label="Key ID" value={keyId} onChange={setKeyId} maxLength={64} placeholder="rzp_test_…" />
+            <TextInput label={provider === "stripe" ? "Publishable key" : "Key ID"} value={keyId} onChange={setKeyId} maxLength={120} placeholder={provider === "stripe" ? "pk_test_…" : "rzp_test_…"} />
             <TextInput
               label="Key secret"
               type="password"
@@ -1080,13 +1139,17 @@ function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"]
         <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
         {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
       </Card>
-      {provider === "razorpay" && (
+      {(provider === "razorpay" || provider === "stripe") && (
         <>
           <Card title="Webhook URL">
-            <p className="text-sm text-slate-600">In Razorpay Dashboard → Webhooks, subscribe to subscription events and point here:</p>
+            <p className="text-sm text-slate-600">
+              {provider === "stripe"
+                ? "In Stripe Dashboard → Webhooks, subscribe to checkout.session.completed and point here:"
+                : "In Razorpay Dashboard → Webhooks, subscribe to subscription events and point here:"}
+            </p>
             <code className="mt-2 block break-all rounded-lg bg-slate-100 p-3 text-xs">{webhookUrl}</code>
           </Card>
-          <Card title="Plans at Razorpay">
+          {provider === "razorpay" && <Card title="Plans at Razorpay">
             <p className="mb-3 text-sm text-slate-600">After saving keys, sync paid plans once (or after price changes on new plan codes).</p>
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" loading={test.isPending} onClick={() => test.mutate()}>Test API keys</Button>
@@ -1108,7 +1171,7 @@ function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"]
               </Alert>
             )}
             {sync.error && <Alert kind="error">{errorMessage(sync.error)}</Alert>}
-          </Card>
+          </Card>}
         </>
       )}
     </div>

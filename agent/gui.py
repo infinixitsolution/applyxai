@@ -49,7 +49,7 @@ try:
     AGENT_MODULES_AVAILABLE = True
 except ImportError:
     AGENT_MODULES_AVAILABLE = False
-    AGENT_VERSION = "1.1.5"
+    AGENT_VERSION = "1.1.8"
 
 
 class AgentGUI:
@@ -181,6 +181,7 @@ class AgentGUI:
         for key, label, icon in (
             ("home", "Home", "⌂"),
             ("automation", "Automation", "⚡"),
+            ("live", "Live interview", "🎤"),
             ("log", "Activity Log", "☰"),
             ("linkedin", "LinkedIn", "in"),
             ("settings", "Settings", "⚙"),
@@ -236,7 +237,7 @@ class AgentGUI:
                     child.configure(bg=bg, fg=BRAND if active else TEXT_SOFT)
         for frame in self._views.values():
             frame.grid_remove()
-        target = {"automation": "automation", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(
+        target = {"automation": "automation", "live": "live", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(
             key, "home",
         )
         self._views[target].grid(row=0, column=0, sticky="nsew")
@@ -245,6 +246,8 @@ class AgentGUI:
             self._refresh_stats()
         if key == "settings":
             self._load_settings_display()
+        if key == "live":
+            self._load_live_applications()
 
     def _build_top_bar(self, parent):
         bar = tk.Frame(parent, bg=PAGE)
@@ -314,6 +317,11 @@ class AgentGUI:
         self._linkedin_nav_host.grid(row=0, column=0, sticky="n", padx=24, pady=24)
         self._build_linkedin_card(self._linkedin_nav_host)
 
+        live_view = tk.Frame(stack, bg=PAGE)
+        live_view.columnconfigure(0, weight=1)
+        self._views["live"] = live_view
+        self._build_live_page(live_view)
+
         settings_view = tk.Frame(stack, bg=PAGE)
         settings_view.columnconfigure(0, weight=1)
         self._views["settings"] = settings_view
@@ -321,7 +329,7 @@ class AgentGUI:
             settings_view,
             "Settings",
             "⚙",
-            "Local agent data on this PC (passwords are never shown here).",
+            "Connection for this computer.",
         )
         scard.master.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         scard.rowconfigure(2, weight=1)
@@ -340,8 +348,8 @@ class AgentGUI:
             side=tk.LEFT,
         )
         tk.Label(
-            scard, text=f"Version {AGENT_VERSION} · Folder: {self.home}", bg=SURFACE, fg=MUTED,
-            font=("Segoe UI", 9), wraplength=720, justify=tk.LEFT,
+            scard, text=f"Version {AGENT_VERSION}", bg=SURFACE, fg=MUTED,
+            font=("Segoe UI", 9),
         ).grid(row=4, column=0, sticky=tk.W, pady=(12, 0))
 
     def _build_stats_row(self, parent, row: int) -> dict:
@@ -950,34 +958,267 @@ class AgentGUI:
         except Exception as exc:
             self._log(f"Stats refresh failed: {exc}")
 
-    def _load_settings_display(self) -> None:
-        lines: list[str] = [f"Data folder: {self.home}", ""]
-        home = Path(self.home)
-        for name in ("user_config.json", "config.json", "paired.json"):
-            path = home / name
-            lines.append(f"--- {name} ---")
-            if not path.is_file():
-                lines.append("(not created yet)")
-                lines.append("")
-                continue
+    def _build_live_page(self, parent) -> None:
+        self._live_session_id = ""
+        self._live_capture = None
+        self._live_popup = None
+        self._live_busy = False
+        card = self._card(
+            parent,
+            "Live interview",
+            "🎤",
+            "Paste the token from Support, pick the auto-applied job, then Start. A chat button appears in the bottom-right corner; click it to show or hide the questions and English answers.",
+            expand=True,
+        )
+        card.rowconfigure(2, weight=0)
+        card.rowconfigure(5, weight=1)
+        card.master.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        parent.rowconfigure(0, weight=1)
+        form = tk.Frame(card, bg=SURFACE)
+        form.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        form.columnconfigure(1, weight=1)
+        tk.Label(form, text="Token", bg=SURFACE, fg=TEXT, font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=4)
+        self._live_token = tk.Entry(form, font=("Segoe UI", 12), width=16)
+        self._live_token.grid(row=0, column=1, sticky="w", padx=(12, 0))
+        tk.Label(form, text="Application", bg=SURFACE, fg=TEXT, font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", pady=4)
+        self._live_apps: list[dict] = []
+        self._live_app = ttk.Combobox(form, state="readonly", width=48)
+        self._live_app.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=4)
+        self._live_app["values"] = ("No application",)
+        self._live_app.current(0)
+        actions = tk.Frame(card, bg=SURFACE)
+        actions.grid(row=3, column=0, sticky="w", pady=(16, 0))
+        tk.Button(
+            actions, text="Start interview", command=self._live_start,
+            bg=BRAND, fg="#ffffff", activebackground=BRAND_HOVER, relief="flat", padx=14, pady=8,
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            actions, text="End interview", command=self._live_end,
+            bg=SURFACE, fg=TEXT, relief="flat", padx=14, pady=8,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        self._live_status = tk.Label(card, text="", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9), wraplength=640, justify=tk.LEFT)
+        self._live_status.grid(row=4, column=0, sticky="w", pady=(12, 0))
+        self._live_feed = scrolledtext.ScrolledText(
+            card, height=14, wrap=tk.WORD, font=("Segoe UI", 11), bg=LOG_BG, fg=TEXT, relief="flat", padx=10, pady=8,
+        )
+        self._live_feed.grid(row=5, column=0, sticky="nsew", pady=(12, 0))
+        self._live_feed.tag_configure("who", font=("Segoe UI", 8, "bold"), foreground=BRAND)
+        self._live_feed.tag_configure("answer", foreground="#166534")
+        self._live_feed.config(state=tk.DISABLED)
+        card.rowconfigure(5, weight=1)
+
+    def _load_live_applications(self) -> None:
+        if not AGENT_MODULES_AVAILABLE:
+            return
+        threading.Thread(target=self._do_load_live_applications, daemon=True).start()
+
+    def _do_load_live_applications(self) -> None:
+        try:
+            from agent import config
+            from agent.client import ApiClient
+            cfg = config.load(Path(self.home))
+            if cfg is None:
+                return
+            data = ApiClient(cfg.server, cfg.token).live_interview_applications()
+            apps = data.get("applications") or []
+            self.root.after(0, lambda: self._apply_live_apps(apps))
+        except Exception as exc:
+            self.root.after(0, lambda: self._apply_live_apps([], str(exc)))
+
+    def _apply_live_apps(self, apps: list, error: str = "") -> None:
+        self._live_apps = list(apps)
+        labels = ["No application"] + [f"{a.get('title') or 'Role'} · {a.get('company') or ''}" for a in apps]
+        self._live_app["values"] = labels
+        self._live_app.current(1 if apps else 0)
+        if error:
+            self._live_status.config(text=error, fg=DANGER)
+        elif apps:
+            self._live_status.config(text=f"{len(apps)} auto-applied jobs. Pick the one this interview is for.", fg=MUTED)
+
+    def _live_client(self):
+        from agent import config
+        from agent.client import ApiClient
+        cfg = config.load(Path(self.home))
+        if cfg is None:
+            raise RuntimeError("Connect this computer in Settings before starting a live interview.")
+        return ApiClient(cfg.server, cfg.token)
+
+    def _live_start(self) -> None:
+        if self._live_busy:
+            return
+        token = self._live_token.get().strip()
+        if len("".join(ch for ch in token if ch.isdigit())) != 8:
+            self._live_status.config(text="Enter the 8-digit token from Support chat.", fg=DANGER)
+            return
+        self._live_busy = True
+        self._live_status.config(text="Starting the session…", fg=MUTED)
+        threading.Thread(target=self._do_live_start, args=(token,), daemon=True).start()
+
+    def _selected_application_id(self) -> str | None:
+        index = self._live_app.current()
+        if index <= 0 or index - 1 >= len(self._live_apps):
+            return None
+        return str(self._live_apps[index - 1].get("id") or "") or None
+
+    def _do_live_start(self, token: str) -> None:
+        from agent.live_interview import ConversationPopup
+        try:
+            session = self._live_client().live_interview_start(token, self._selected_application_id())
+        except Exception as exc:
+            self._live_busy = False
+            self.root.after(0, lambda: self._live_status.config(text=str(exc), fg=DANGER))
+            return
+        session_id = str(session.get("id") or "")
+
+        def open_ui():
+            self._live_session_id = session_id
+            self._live_audio_stop = threading.Event()
+            if self._live_popup:
+                self._live_popup.close()
+            self._live_popup = ConversationPopup(self.root, started_at=session.get("started_at"))
+            self._show_live_transcript(session.get("transcript") or [])
+            if not session.get("transcript"):
+                self._live_popup.set_waiting()
+            self._live_busy = False
+            self._live_status.config(
+                text="Session started. Waiting for the interview audio…",
+                fg=MUTED,
+            )
+            threading.Thread(target=self._attach_live_audio, daemon=True).start()
+
+        self.root.after(0, open_ui)
+
+    def _attach_live_audio(self) -> None:
+        import time
+        from agent.live_interview import LiveCapture
+
+        stop = getattr(self, "_live_audio_stop", None)
+        while self._live_session_id and (stop is None or not stop.is_set()):
             try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if name == "user_config.json" and isinstance(raw.get("secrets"), dict):
-                    raw = {**raw, "secrets": {**raw["secrets"], "password": "(saved locally — hidden)"}}
-                lines.append(json.dumps(raw, indent=2))
+                capture = LiveCapture(self._on_live_clip, on_error=self._live_capture_error)
+                capture.start()
             except Exception as exc:
-                lines.append(f"(could not read: {exc})")
-            lines.append("")
+                message = f"Waiting for the interview audio. {exc}"
+                self.root.after(0, lambda m=message: self._live_status.config(text=m, fg=MUTED))
+                if self._live_popup:
+                    self.root.after(0, self._live_popup.set_waiting)
+                time.sleep(2)
+                continue
+            self._live_capture = capture
+            def listening():
+                self._live_status.config(
+                    text="Listening. Use the chat button in the bottom-right corner to show or hide the conversation.",
+                    fg=SUCCESS_FG,
+                )
+                if self._live_popup:
+                    self._live_popup.set_listening()
+            self.root.after(0, listening)
+            return
+
+    def _on_live_clip(self, speaker: str, wav: bytes) -> None:
+        session_id = self._live_session_id
+        if not session_id:
+            return
+        try:
+            data = self._live_client().live_interview_clip(session_id, speaker, wav)
+        except Exception as exc:
+            self._live_problem(str(exc))
+            return
+        transcript = data.get("transcript") or []
+        self.root.after(0, lambda: self._show_live_transcript(transcript))
+        if data.get("answer_pending"):
+            self._stream_live_answer(session_id)
+
+    def _live_problem(self, message: str) -> None:
+        def show():
+            self._live_status.config(text=message, fg=DANGER)
+            if self._live_popup:
+                self._live_popup.set_problem(message)
+
+        self.root.after(0, show)
+
+    def _stream_live_answer(self, session_id: str) -> None:
+        popup = lambda: self._live_popup  # noqa: E731
+        self.root.after(0, lambda: popup() and popup().begin_answer())
+        text = ""
+        try:
+            for piece in self._live_client().live_interview_answer_stream(session_id):
+                text += piece
+                self.root.after(0, lambda value=text: popup() and popup().update_answer(value))
+        except Exception as exc:
+            self._live_problem(str(exc))
+        self.root.after(0, lambda: popup() and popup().finish_answer())
+
+    def _live_capture_error(self, message: str) -> None:
+        self.root.after(0, lambda: self._live_status.config(text=message, fg=DANGER))
+
+    def _show_live_transcript(self, transcript: list) -> None:
+        if self._live_popup:
+            self._live_popup.set_lines(transcript)
+        feed = getattr(self, "_live_feed", None)
+        if feed is None:
+            return
+        labels = {"interviewer": "Interviewer", "suggestion": "Say this", "candidate": "You said"}
+        feed.config(state=tk.NORMAL)
+        feed.delete("1.0", tk.END)
+        for turn in transcript:
+            role = str(turn.get("role") or "")
+            feed.insert(tk.END, (labels.get(role, role) or "Note") + "\n", "who")
+            tag = "answer" if role == "suggestion" else ""
+            feed.insert(tk.END, str(turn.get("text") or "").strip() + "\n\n", tag)
+        feed.config(state=tk.DISABLED)
+        feed.see(tk.END)
+
+    def _live_end(self) -> None:
+        session_id = getattr(self, "_live_session_id", "")
+        stop = getattr(self, "_live_audio_stop", None)
+        if stop is not None:
+            stop.set()
+        if self._live_capture:
+            self._live_capture.stop()
+            self._live_capture = None
+        if not session_id:
+            self._live_status.config(text="No interview is running.", fg=MUTED)
+            return
+        self._live_status.config(text="Saving the report…", fg=MUTED)
+        threading.Thread(target=self._do_live_end, args=(session_id,), daemon=True).start()
+
+    def _do_live_end(self, session_id: str) -> None:
+        try:
+            self._live_client().live_interview_end(session_id)
+            message = "Interview saved. Open Live interviews on the website for the report."
+            color = SUCCESS_FG
+        except Exception as exc:
+            message = str(exc)
+            color = DANGER
+
+        def finish():
+            self._live_session_id = ""
+            if self._live_popup:
+                self._live_popup.close()
+                self._live_popup = None
+            self._live_status.config(text=message, fg=color)
+
+        self.root.after(0, finish)
+
+    def _load_settings_display(self) -> None:
+        lines = [f"Version {AGENT_VERSION}", ""]
+        home = Path(self.home)
+        connected = False
         if AGENT_MODULES_AVAILABLE:
             try:
                 from agent import config as agent_config
 
                 cfg = agent_config.load(home)
                 if cfg:
-                    lines.append("--- connection ---")
-                    lines.append(json.dumps({"server": cfg.server, "name": cfg.name, "user_id": cfg.user_id}, indent=2))
+                    connected = True
+                    lines.append(f"Connected to {cfg.server}")
+                    if cfg.name:
+                        lines.append(f"This computer: {cfg.name}")
             except Exception:
                 pass
+        if not connected:
+            lines.append("This computer is not connected. Use Connect on the home page.")
         text = "\n".join(lines)
         self.settings_text.config(state=tk.NORMAL)
         self.settings_text.delete("1.0", tk.END)

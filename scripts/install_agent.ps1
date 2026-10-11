@@ -79,6 +79,15 @@ $Shortcut.WorkingDirectory = $InstallPath
 $Shortcut.Description = "ApplyXAI Desktop Agent"
 $Shortcut.Save()
 
+$publicDesktop = Join-Path $env:PUBLIC "Desktop\ApplyXAI Agent.lnk"
+if (Test-Path -LiteralPath $publicDesktop) {
+    $Shortcut = $WshShell.CreateShortcut($publicDesktop)
+    $Shortcut.TargetPath = Join-Path $InstallPath $exeName
+    $Shortcut.WorkingDirectory = $InstallPath
+    $Shortcut.Description = "ApplyXAI Desktop Agent"
+    $Shortcut.Save()
+}
+
 # Create desktop shortcut if requested
 if ($CreateDesktopShortcut) {
     Write-Host "Creating desktop shortcut..." -ForegroundColor Yellow
@@ -132,7 +141,7 @@ Write-Host "Registering in Programs and Features..." -ForegroundColor Yellow
 $regPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ApplyXAI Agent"
 New-Item -Path $regPath -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "DisplayName" -Value "ApplyXAI Agent" -Force | Out-Null
-New-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.1.0" -Force | Out-Null
+New-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.1.8" -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "Publisher" -Value "ApplyXAI" -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "InstallLocation" -Value $InstallPath -Force | Out-Null
 New-ItemProperty -Path $regPath -Name "UninstallString" -Value "powershell.exe -ExecutionPolicy Bypass -File `"$InstallPath\uninstall.ps1`"" -Force | Out-Null

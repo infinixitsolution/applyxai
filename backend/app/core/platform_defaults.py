@@ -2,6 +2,13 @@
 
 PLATFORM_SETTINGS_KEY = "default"
 
+DEFAULT_LIVE_INTERVIEW: dict = {
+    "enabled": True,
+    "display_name": "Live interview",
+    "price_cents": 49900,
+    "currency": "INR",
+}
+
 DEFAULT_CMS: dict = {
     "branding": {
         "app_name": "ApplyXAI",

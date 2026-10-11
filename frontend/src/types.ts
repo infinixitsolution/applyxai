@@ -674,7 +674,7 @@ export interface AdminPlatformSettings {
     mock_interview_presenter?: MockInterviewPresenterSettings;
   };
   payments: {
-    provider: "null" | "razorpay";
+    provider: "null" | "razorpay" | "stripe";
     key_id: string;
     key_secret_configured: boolean;
     webhook_secret_configured: boolean;
@@ -684,7 +684,66 @@ export interface AdminPlatformSettings {
     live_checkout: boolean;
     test_checkout: boolean;
   };
+  live_interview?: {
+    enabled: boolean;
+    display_name: string;
+    price_cents: number;
+    currency: string;
+  };
   unverified_users: number;
+}
+
+export interface SupportMessage {
+  id: string;
+  sender: "user" | "admin" | "system";
+  kind: "text" | "payment_link" | "token";
+  body: string;
+  meta: { url?: string; token?: string; amount_cents?: number; token_status?: "unused" | "reserved" | "used" };
+  created_at: string | null;
+}
+
+export interface SupportThread {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string;
+  last_message_at: string | null;
+}
+
+export interface LiveInterviewTurn {
+  role: "interviewer" | "candidate" | "suggestion";
+  text: string;
+  at?: string;
+}
+
+export interface LiveInterviewReport {
+  overall_score?: number | null;
+  summary?: string;
+  knowledge_summary?: string;
+  rubric_version?: number;
+  rubric_overall?: number;
+  rubric_scores?: MockInterviewRubricScore[];
+  rubric_categories?: MockInterviewRubricCategory[];
+  dimensions?: { key?: string; label?: string; score?: number; notes?: string }[];
+  strengths?: string[];
+  suggestions?: string[];
+  question_breakdown?: { question?: string; answer_quality?: string; notes?: string }[];
+  sample_answers?: { question?: string; suggestion?: string }[];
+}
+
+export interface LiveInterviewSession {
+  id: string;
+  status: "active" | "completed";
+  job_title: string;
+  company: string;
+  application_id: string | null;
+  token?: string;
+  transcript: LiveInterviewTurn[];
+  feedback: LiveInterviewReport | null;
+  started_at: string | null;
+  ended_at: string | null;
+  email?: string;
+  token_status?: string;
 }
 
 export type HumanQuestionMatch = "contains" | "exact";

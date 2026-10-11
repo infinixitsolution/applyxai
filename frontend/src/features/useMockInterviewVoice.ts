@@ -24,9 +24,9 @@ function speechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 }
 
 /** Silence after any speech (including mid-sentence pauses) before auto-send. */
-const UTTERANCE_PAUSE_MS = 2600;
+const UTTERANCE_PAUSE_MS = 1600;
 /** Extra wait when we only have a tiny fragment (browser split an answer early). */
-const SHORT_FRAGMENT_PAUSE_MS = 4000;
+const SHORT_FRAGMENT_PAUSE_MS = 2800;
 const MIN_COMFORTABLE_CHARS = 28;
 
 export function useMockInterviewVoice(options: {

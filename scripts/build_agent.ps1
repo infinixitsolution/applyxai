@@ -114,8 +114,14 @@ If Chrome or Windows warns about an unsigned file, choose Keep / Run anyway.
 "@
 Set-Content -Path (Join-Path $ZipStage "README.txt") -Value $Readme -Encoding UTF8
 $SetupExe = Join-Path $DistDir "ApplyXAI-Agent-Setup.exe"
-$GuiExe = Join-Path $DistDir "ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
-$CliExe = Join-Path $DistDir "ApplyXAI-Agent\ApplyXAI-Agent.exe"
+$GuiExe = Join-Path $DistDir "ApplyXAI-Agent-GUI.exe"
+if (-not (Test-Path -LiteralPath $GuiExe)) {
+    $GuiExe = Join-Path $DistDir "ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
+}
+$CliExe = Join-Path $DistDir "ApplyXAI-Agent.exe"
+if (-not (Test-Path -LiteralPath $CliExe)) {
+    $CliExe = Join-Path $DistDir "ApplyXAI-Agent\ApplyXAI-Agent.exe"
+}
 if (Test-Path -LiteralPath $SetupExe) {
     Copy-Item -LiteralPath $SetupExe -Destination $ZipStage
 } else {
@@ -131,17 +137,17 @@ Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Green
 Write-Host ""
 Write-Host "Artifacts:"
-Write-Host "  CLI: $DistDir\ApplyXAI-Agent\ApplyXAI-Agent.exe"
-Write-Host "  GUI: $DistDir\ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
+Write-Host "  CLI: $DistDir\ApplyXAI-Agent.exe"
+Write-Host "  GUI: $DistDir\ApplyXAI-Agent-GUI.exe"
 if ($InnoSetup) {
     Write-Host "  Installer: $DistDir\ApplyXAI-Agent-Setup.exe"
 }
 Write-Host "  ZIP:   $DistDir\ApplyXAI-Agent-Windows.zip"
 Write-Host ""
 Write-Host "To test the CLI:"
-Write-Host "  cd $DistDir\ApplyXAI-Agent"
+Write-Host "  cd $DistDir"
 Write-Host "  .\ApplyXAI-Agent.exe --help"
 Write-Host ""
 Write-Host "To test the GUI:"
-Write-Host "  cd $DistDir\ApplyXAI-Agent-GUI"
+Write-Host "  cd $DistDir"
 Write-Host "  .\ApplyXAI-Agent-GUI.exe"

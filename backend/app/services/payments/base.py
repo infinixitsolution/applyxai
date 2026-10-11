@@ -45,11 +45,20 @@ class RemotePayment:
 
 
 @dataclass
+class RemotePaymentLink:
+    id: str
+    url: str
+    status: str  # created | paid
+
+
+@dataclass
 class WebhookEvent:
     id: str
     type: str
     subscription_id: str | None = None
     payment: RemotePayment | None = None
+    payment_link_id: str | None = None
+    order_id: str | None = None
 
 
 @dataclass
@@ -77,6 +86,11 @@ class PaymentProvider(Protocol):
 
     def verify_checkout(self, payment_id: str, subscription_id: str, signature: str) -> CheckoutConfirmation:
         """Check the signature the provider's checkout returned. Raises PaymentError."""
+
+    def create_payment_link(
+        self, *, amount_cents: int, currency: str, description: str, customer_name: str, customer_email: str, order_id: str,
+    ) -> RemotePaymentLink:
+        """One-time payment link. status 'paid' means the caller should issue the token now."""
 
     def parse_webhook(self, headers: dict[str, str], body: bytes) -> WebhookEvent:
         """Verify the signature, then parse. Raises PaymentError."""

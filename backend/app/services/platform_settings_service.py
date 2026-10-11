@@ -19,12 +19,15 @@ from backend.app.core.platform_defaults import (
     DEFAULT_AI,
     DEFAULT_CMS,
     DEFAULT_EMAIL_TEMPLATES,
+    DEFAULT_LIVE_INTERVIEW,
     DEFAULT_NOTIFICATIONS,
     DEFAULT_PAYMENTS,
     PLATFORM_SETTINGS_KEY,
 )
 from backend.app.models import PlatformSettings
-from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, NotificationsIn, PaymentsIn, SmtpIn
+from backend.app.schemas.platform_settings import (
+    AiIn, AuthEmailIn, CmsIn, LiveInterviewSettingsIn, NotificationsIn, PaymentsIn, SmtpIn,
+)
 
 logger = logging.getLogger("applyxai.settings")
 
@@ -311,6 +314,7 @@ def build_admin_view(db: Session) -> dict:
         "email_templates": get_email_templates(db),
         "ai": _admin_ai_view(db),
         "payments": _admin_payments_view(db),
+        "live_interview": get_live_interview(db),
         "infrastructure": {
             "app_env": settings.APP_ENV,
             "app_version": settings.APP_VERSION,
@@ -399,6 +403,32 @@ def _admin_payments_view(db: Session) -> dict:
         "live_checkout": eff.configured and mode == "live",
         "test_checkout": eff.configured and mode == "test",
     }
+
+
+def get_live_interview(db: Session) -> dict:
+    row = _row(db)
+    stored = row.live_interview if isinstance(getattr(row, "live_interview", None), dict) else {}
+    merged = {**DEFAULT_LIVE_INTERVIEW, **stored}
+    merged["enabled"] = bool(merged.get("enabled"))
+    merged["display_name"] = str(merged.get("display_name") or DEFAULT_LIVE_INTERVIEW["display_name"])[:80]
+    try:
+        merged["price_cents"] = int(merged.get("price_cents") or 0)
+    except (TypeError, ValueError):
+        merged["price_cents"] = 0
+    merged["currency"] = "INR"
+    return merged
+
+
+def update_live_interview(db: Session, payload: LiveInterviewSettingsIn) -> dict:
+    row = _row(db)
+    row.live_interview = {
+        "enabled": payload.enabled,
+        "display_name": payload.display_name.strip(),
+        "price_cents": payload.price_cents,
+        "currency": "INR",
+    }
+    invalidate_caches()
+    return get_live_interview(db)
 
 
 def update_payments(db: Session, payload: PaymentsIn) -> dict:

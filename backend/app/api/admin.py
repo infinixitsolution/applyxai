@@ -28,10 +28,13 @@ from backend.app.schemas.admin import (
     UserUpdateIn,
 )
 from backend.app.schemas.institute import PasswordIn
-from backend.app.schemas.platform_settings import AiIn, AuthEmailIn, CmsIn, EmailTemplatesIn, NotificationsIn, PaymentsIn, SmtpIn
+from backend.app.schemas.live_interview import SupportMessageIn
+from backend.app.schemas.platform_settings import (
+    AiIn, AuthEmailIn, CmsIn, EmailTemplatesIn, LiveInterviewSettingsIn, NotificationsIn, PaymentsIn, SmtpIn,
+)
 from backend.app.services import ai_service
 from backend.app.services.ai_service import AiTask
-from backend.app.services import admin_service, auth_service, platform_settings_service as ps
+from backend.app.services import admin_service, auth_service, live_interview_service, platform_settings_service as ps, support_service
 from backend.app.services.email_service import EmailSender, sample_email, verification_email
 from backend.app.services import billing_service
 from backend.app.services.payments import PaymentProvider, get_payment_provider, resolve_payment_provider
@@ -232,6 +235,44 @@ def notifications_broadcast(body: BroadcastNotificationsIn, admin: User = Depend
     result = admin_service.broadcast_notifications(
         db, admin, title=body.title.strip(), body=body.body.strip(), link=body.link.strip(), user_ids=ids,
     )
+    db.commit()
+    return ok(result)
+
+
+@router.put("/settings/live-interview", summary="Per-interview live coach price")
+def put_settings_live_interview(body: LiveInterviewSettingsIn, admin: User = Depends(require_admin),
+                                db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("30/hour", "admin-settings", str(admin.id))
+    saved = ps.update_live_interview(db, body)
+    admin_service.audit_settings(db, admin, "settings.live_interview", {"price_cents": saved["price_cents"], "enabled": saved["enabled"]})
+    db.commit()
+    return ok({"live_interview": saved})
+
+
+@router.get("/live-interviews", summary="Live interview sessions")
+def admin_live_interviews(db: Session = Depends(get_db)):
+    return ok({"sessions": live_interview_service.admin_sessions(db)})
+
+
+@router.get("/support/threads", summary="Support inbox")
+def admin_support_threads(db: Session = Depends(get_db)):
+    return ok({"threads": support_service.list_threads(db)})
+
+
+@router.get("/support/threads/{thread_id}", summary="One support conversation")
+def admin_support_thread(thread_id: uuid.UUID, db: Session = Depends(get_db)):
+    from backend.app.models import SupportThread
+    thread = db.get(SupportThread, thread_id)
+    if thread is None:
+        raise AppError("NOT_FOUND", "That conversation was not found.", 404)
+    return ok({"thread": support_service.thread_out(db, thread), "messages": support_service.messages_for(db, thread)})
+
+
+@router.post("/support/threads/{thread_id}/messages", summary="Reply in a support conversation")
+def admin_support_reply(thread_id: uuid.UUID, body: SupportMessageIn, admin: User = Depends(require_admin),
+                        db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("60/hour", "admin-support", str(admin.id))
+    result = support_service.post_admin_message(db, thread_id, body.body)
     db.commit()
     return ok(result)
 

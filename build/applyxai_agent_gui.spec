@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # Repository root
 REPO_ROOT = Path(SPECPATH).parent
@@ -29,6 +29,9 @@ HIDDEN_IMPORTS = [
     "agent.config",
     "agent.supervisor",
     "agent.gui",
+    "agent.live_interview",
+    "soundcard",
+    "numpy",
     "agent.gui_theme",
     "agent.branding_paths",
     "agent.connect_flow",
@@ -76,6 +79,8 @@ HIDDEN_IMPORTS = [
 
 for _pkg in ("langchain", "langchain_openai", "langchain_google_genai", "langgraph"):
     HIDDEN_IMPORTS.extend(collect_submodules(_pkg))
+_sc_datas, _sc_bins, _sc_hidden = collect_all("soundcard")
+HIDDEN_IMPORTS.extend(_sc_hidden)
 HIDDEN_IMPORTS = sorted(set(HIDDEN_IMPORTS))
 
 # Data files to include
@@ -123,12 +128,13 @@ if not (_tcl86 / "init.tcl").is_file() or not _tk86.is_dir():
     raise SystemExit(f"ERROR: Tcl/Tk not found under {_tcl_root}. Install full Python with tkinter.")
 datas.append((str(_tcl86), "_tcl_data"))
 datas.append((str(_tk86), "_tk_data"))
+datas.extend(_sc_datas)
 
 # Main analysis
 a = Analysis(
     [str(REPO_ROOT / "agent" / "gui.py")],
     pathex=[str(REPO_ROOT)],
-    binaries=[],
+    binaries=_sc_bins,
     datas=datas,
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
-  Bot, Briefcase, Building, Building2, CreditCard, FileText, Handshake, LayoutDashboard, Link2, ListChecks, LogOut, Mic,
+  Bot, Briefcase, Building, Building2, CreditCard, FileText, Handshake, Headphones, LayoutDashboard, Link2, ListChecks, LogOut, MessageCircle, Mic,
   Megaphone, Menu, Package, Receipt, ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -18,6 +18,8 @@ const APP_NAV = [
   { to: "/app/jobs", label: "Jobs", icon: Briefcase },
   { to: "/app/applications", label: "Applications", icon: ListChecks },
   { to: "/app/mock-interview", label: "Mock interview", icon: Mic },
+  { to: "/app/live-interviews", label: "Live interviews", icon: Headphones },
+  { to: "/app/support", label: "Support", icon: MessageCircle },
   { to: "/app/automation", label: "Automation", icon: Bot },
   { to: "/app/resumes", label: "Resumes", icon: FileText },
   { to: "/app/preferences", label: "Preferences", icon: SlidersHorizontal },
@@ -36,6 +38,7 @@ const ADMIN_NAV = [
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
   { to: "/admin/companies", label: "Companies", icon: Building },
   { to: "/admin/plans", label: "Plans", icon: Package },
+  { to: "/admin/support", label: "Support", icon: MessageCircle },
   { to: "/admin/system", label: "Settings", icon: ServerCog },
 ];
 

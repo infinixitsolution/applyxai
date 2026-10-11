@@ -383,6 +383,10 @@ def handle_webhook(db: Session, provider: PaymentProvider, headers: dict[str, st
             record_payment(db, provider, sub.user_id, sub, event.payment)
     else:
         logger.info("Webhook %s (%s) matches no subscription; recorded only", event_id, event.type)
+    if event.order_id:
+        from backend.app.services.support_service import fulfill_order
+
+        fulfill_order(db, event.order_id)
     db.add(record)
     db.flush()
     return {"duplicate": False, "matched": sub is not None}

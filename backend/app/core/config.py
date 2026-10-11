@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     DESKTOP_AGENT_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Setup.exe"
     DESKTOP_AGENT_GUI_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-GUI.exe"
     DESKTOP_AGENT_ZIP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Windows.zip"
-    AGENT_LATEST_VERSION: str = "1.1.5"
+    AGENT_LATEST_VERSION: str = "1.1.8"
     AGENT_DOWNLOAD_URL: str = ""
 
     # Where the SPA lives; used to build links in verification / reset emails.

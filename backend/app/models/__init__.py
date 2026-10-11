@@ -26,6 +26,9 @@ from backend.app.models.partner import Partner, PartnerAttribution, PartnerCampa
 from backend.app.models.institute import Institute, InstituteAssignment, InstituteInvite, InstituteMember, InstituteSeat
 from backend.app.models.mock_interview import MockInterviewMessage, MockInterviewSession
 from backend.app.models.mock_interview_feedback_job import MockInterviewFeedbackJob
+from backend.app.models.live_interview import (
+    LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, SupportMessage, SupportThread,
+)
 
 __all__ = [
     "Base",

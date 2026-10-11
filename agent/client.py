@@ -1,5 +1,7 @@
 """HTTP client for the /api/agent endpoints. Unwraps the {success, data | error} envelope."""
 
+import re
+
 import requests
 
 from agent import AGENT_VERSION
@@ -22,7 +24,8 @@ class NetworkError(Exception):
 
 class ApiClient:
     def __init__(self, server: str, token: str = "", *, session=None, timeout: float = TIMEOUT, verify_ssl: bool = True):
-        self.server = server.rstrip("/")
+        # Windows tries ::1 first for "localhost"; dev servers listen on IPv4 only, which costs ~2 s per request.
+        self.server = re.sub(r"^http://localhost(?=[:/]|$)", "http://127.0.0.1", server.rstrip("/"))
         self._token = token
         self._session = session or requests.Session()
         self._timeout = timeout
@@ -39,13 +42,15 @@ class ApiClient:
     def __repr__(self) -> str:
         return f"ApiClient(server={self.server!r})"
 
-    def _send(self, method: str, path: str, *, json=None, raw: bool = False):
+    def _send(self, method: str, path: str, *, json=None, raw: bool = False, files=None, data=None, timeout: float | None = None):
         headers = {"User-Agent": f"ApplyXAI-Agent/{AGENT_VERSION}"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         try:
-            resp = self._session.request(method, f"{self.server}/api{path}", json=json, headers=headers,
-                                         timeout=self._timeout, verify=self._verify_ssl)
+            resp = self._session.request(
+                method, f"{self.server}/api{path}", json=None if files else json, data=data, files=files,
+                headers=headers, timeout=timeout or self._timeout, verify=self._verify_ssl,
+            )
         except (requests.RequestException, OSError) as exc:
             raise NetworkError(f"Couldn't reach {self.server}: {type(exc).__name__}") from None
         if raw and resp.status_code == 200:
@@ -118,3 +123,60 @@ class ApiClient:
             "company": company,
         })
         return str(data.get("answer") or "")
+
+    def live_interview_applications(self) -> dict:
+        try:
+            return self._send("GET", "/agent/live-interview/applications")
+        except ApiError as exc:
+            if exc.status == 404:
+                raise ApiError(
+                    exc.status, exc.code,
+                    "Couldn't load auto-applied jobs. This server does not have live interview yet.",
+                ) from None
+            raise
+
+    def live_interview_start(self, token: str, application_id: str | None = None) -> dict:
+        body = {"token": token}
+        if application_id:
+            body["application_id"] = application_id
+        return self._send("POST", "/agent/live-interview/start", json=body)
+
+    def live_interview_clip(self, session_id: str, speaker: str, wav: bytes) -> dict:
+        """With answer_pending in the reply, read the answer from live_interview_answer_stream."""
+        return self._send(
+            "POST", f"/agent/live-interview/sessions/{session_id}/clip",
+            files={"file": ("clip.wav", wav, "audio/wav")},
+            data={"speaker": speaker, "defer_answer": "true"},
+            timeout=120,
+        )
+
+    def live_interview_answer_stream(self, session_id: str):
+        """Yield the answer text as the server writes it."""
+        headers = {"User-Agent": f"ApplyXAI-Agent/{AGENT_VERSION}"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        try:
+            resp = self._session.post(
+                f"{self.server}/api/agent/live-interview/sessions/{session_id}/answer-stream",
+                headers=headers, timeout=(10, 120), verify=self._verify_ssl, stream=True,
+            )
+        except (requests.RequestException, OSError) as exc:
+            raise NetworkError(f"Couldn't reach {self.server}: {type(exc).__name__}") from None
+        with resp:
+            if resp.status_code != 200:
+                try:
+                    error = (resp.json() or {}).get("error") or {}
+                except ValueError:
+                    error = {}
+                raise ApiError(resp.status_code, error.get("code", "HTTP_ERROR"),
+                               error.get("message", f"HTTP {resp.status_code}"), error.get("details"))
+            resp.encoding = "utf-8"
+            try:
+                for piece in resp.iter_content(chunk_size=None, decode_unicode=True):
+                    if piece:
+                        yield piece
+            except (requests.RequestException, OSError) as exc:
+                raise NetworkError(f"The answer stream stopped: {type(exc).__name__}") from None
+
+    def live_interview_end(self, session_id: str) -> dict:
+        return self._send("POST", f"/agent/live-interview/sessions/{session_id}/end", json={}, timeout=120)

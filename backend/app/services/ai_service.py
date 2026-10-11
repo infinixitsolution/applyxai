@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -35,6 +37,14 @@ def _raise_for_provider_response(resp: httpx.Response, *, context: str = "API") 
     raise AppError("AI_ERROR", f"The AI provider returned an error ({resp.status_code}).", 502)
 _EMBED_TIMEOUT = 60.0
 _AUDIO_TIMEOUT = 120.0
+# The fastest OpenAI transcription model; whisper-1 is the fallback for keys or proxies without it.
+_TRANSCRIBE_MODELS = ("gpt-4o-mini-transcribe", "whisper-1")
+
+# One pooled client keeps TLS connections to the provider open between calls (saves ~0.5 s per request).
+_http = httpx.Client(
+    timeout=_CHAT_TIMEOUT,
+    limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=120.0),
+)
 
 
 class AiTask(str, Enum):
@@ -87,6 +97,44 @@ def complete(
     return complete_messages(db, task, messages=messages, feature=feature, temperature=temperature, max_tokens=max_tokens)
 
 
+def stream_complete(
+    db: Session | None,
+    task: AiTask,
+    *,
+    system: str,
+    user: str,
+    feature: str = "applications",
+    temperature: float | None = 0.2,
+    max_tokens: int = 1500,
+) -> Iterator[str]:
+    """Yield the reply in pieces as the provider writes it. Gemini returns it in one piece."""
+    cfg = get_effective_ai(db)
+    if not cfg.feature_on(feature):
+        raise AppError("AI_DISABLED", "Platform AI is not enabled or configured for this feature.", 503)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    model = _model_for_task(cfg, task)
+    if cfg.provider == "gemini":
+        yield _gemini_messages(cfg, model, messages, temperature, max_tokens)
+        return
+    body: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
+    if temperature is not None:
+        body["temperature"] = temperature
+    headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
+    with _http.stream("POST", f"{cfg.base_url}/chat/completions", headers=headers, json=body) as resp:
+        if resp.status_code >= 400:
+            resp.read()
+            _raise_for_provider_response(resp, context="chat")
+        for line in resp.iter_lines():
+            if not line.startswith("data: ") or line == "data: [DONE]":
+                continue
+            try:
+                delta = json.loads(line[6:])["choices"][0]["delta"].get("content")
+            except (ValueError, KeyError, IndexError, TypeError):
+                continue
+            if delta:
+                yield delta
+
+
 def _message_has_vision(messages: list[dict[str, Any]]) -> bool:
     for msg in messages:
         content = msg.get("content")
@@ -121,7 +169,15 @@ def complete_messages(
     return _openai_messages(cfg, model, messages, temperature, max_tokens)
 
 
-def transcribe_audio(db: Session | None, *, audio_bytes: bytes, filename: str, feature: str = "mock_interview") -> str:
+def transcribe_audio(
+    db: Session | None,
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    feature: str = "mock_interview",
+    language: str | None = None,
+    prompt: str | None = None,
+) -> str:
     cfg = get_effective_ai(db)
     if not cfg.feature_on(feature):
         raise AppError("AI_DISABLED", "Platform AI is not enabled or configured for this feature.", 503)
@@ -129,10 +185,16 @@ def transcribe_audio(db: Session | None, *, audio_bytes: bytes, filename: str, f
         raise AppError("AI_UNSUPPORTED", "Audio transcription requires an OpenAI-compatible provider.", 503)
     url = f"{cfg.base_url}/audio/transcriptions"
     headers = {"Authorization": f"Bearer {cfg.api_key}"}
-    files = {"file": (filename, audio_bytes)}
-    data = {"model": "whisper-1"}
-    with httpx.Client(timeout=_AUDIO_TIMEOUT) as client:
-        resp = client.post(url, headers=headers, files=files, data=data)
+    resp = None
+    for model in _TRANSCRIBE_MODELS:
+        data = {"model": model, "temperature": "0"}
+        if language:
+            data["language"] = language
+        if prompt:
+            data["prompt"] = prompt[:800]
+        resp = _http.post(url, headers=headers, files={"file": (filename, audio_bytes)}, data=data, timeout=_AUDIO_TIMEOUT)
+        if resp.status_code not in (400, 403, 404):
+            break
     if resp.status_code >= 400:
         _raise_for_provider_response(resp, context="transcription")
     try:
@@ -166,8 +228,7 @@ def synthesize_speech(
         body["instructions"] = instructions.strip()[:4096]
     if speed is not None:
         body["speed"] = max(0.25, min(4.0, float(speed)))
-    with httpx.Client(timeout=_AUDIO_TIMEOUT) as client:
-        resp = client.post(url, headers=headers, json=body)
+    resp = _http.post(url, headers=headers, json=body, timeout=_AUDIO_TIMEOUT)
     if resp.status_code >= 400:
         _raise_for_provider_response(resp, context="speech")
     return resp.content
@@ -181,8 +242,7 @@ def embed(db: Session | None, texts: list[str], *, feature: str = "resume") -> l
     url = f"{cfg.base_url}/embeddings"
     headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
     body = {"model": model, "input": texts}
-    with httpx.Client(timeout=_EMBED_TIMEOUT) as client:
-        resp = client.post(url, headers=headers, json=body)
+    resp = _http.post(url, headers=headers, json=body, timeout=_EMBED_TIMEOUT)
     if resp.status_code >= 400:
         logger.warning("Embedding API error %s: %s", resp.status_code, resp.text[:500])
         raise AppError("AI_ERROR", "The AI provider rejected the embedding request.", 502)
@@ -199,8 +259,7 @@ def _openai_messages(
     body: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens}
     if temperature is not None:
         body["temperature"] = temperature
-    with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
-        resp = client.post(url, headers=headers, json=body)
+    resp = _http.post(url, headers=headers, json=body)
     if resp.status_code >= 400:
         _raise_for_provider_response(resp, context="chat")
     data = resp.json()
@@ -251,8 +310,7 @@ def _gemini_complete(
     body: dict[str, Any] = {"contents": contents, "generationConfig": gen}
     if system.strip():
         body["systemInstruction"] = {"parts": [{"text": system}]}
-    with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
-        resp = client.post(url, params=params, json=body)
+    resp = _http.post(url, params=params, json=body)
     if resp.status_code >= 400:
         _raise_for_provider_response(resp, context="Gemini")
     data = resp.json()

@@ -27,6 +27,9 @@ import { ApplicationsPage } from "./pages/app/Applications";
 import { AgentConnectPage } from "./pages/app/AgentConnect";
 import { AutomationPage } from "./pages/app/Automation";
 import { BillingPage } from "./pages/app/Billing";
+import { LiveInterviewReportPage, LiveInterviewsPage } from "./pages/app/LiveInterviews";
+import { SupportPage } from "./pages/app/Support";
+import { AdminSupportPage } from "./pages/admin/Support";
 import { DashboardPage } from "./pages/app/Dashboard";
 import { JobsPage } from "./pages/app/Jobs";
 const MockInterviewSetupPage = lazy(() =>
@@ -135,6 +138,9 @@ export function App() {
         <Route path="preferences" element={<PreferencesPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="billing" element={<BillingPage />} />
+        <Route path="support" element={<SupportPage />} />
+        <Route path="live-interviews" element={<LiveInterviewsPage />} />
+        <Route path="live-interviews/:id/report" element={<LiveInterviewReportPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="*" element={<NotFoundPage />} />
@@ -154,6 +160,7 @@ export function App() {
         <Route path="companies" element={<AdminCompaniesPage />} />
         <Route path="companies/:company" element={<AdminCompanyPage />} />
         <Route path="plans" element={<AdminPlansPage />} />
+        <Route path="support" element={<AdminSupportPage />} />
         <Route path="system" element={<AdminSystemPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

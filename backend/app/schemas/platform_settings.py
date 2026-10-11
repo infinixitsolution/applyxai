@@ -182,6 +182,12 @@ class AiModelsIn(BaseModel):
     embedding: str = Field(min_length=1, max_length=120)
 
 
+class LiveInterviewSettingsIn(BaseModel):
+    enabled: bool = False
+    display_name: str = Field(min_length=1, max_length=80)
+    price_cents: int = Field(ge=100, le=10_000_000)
+
+
 class PaymentsIn(BaseModel):
     provider: Literal["null", "razorpay", "stripe"] = "null"
     key_id: str = Field(default="", max_length=64)

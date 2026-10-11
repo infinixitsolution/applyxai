@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger("applyxai")
 
 from backend.app.api import (
-    admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, mock_interviews,
-    notifications, partner, plans, profile, referrals, resumes, site,
+    admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, live_interviews,
+    mock_interviews, notifications, partner, plans, profile, referrals, resumes, site, support,
 )
 from backend.app.core.config import settings
 from backend.app.core.csrf import CSRFMiddleware
@@ -73,6 +73,8 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router, prefix="/api")
     app.include_router(applications.router, prefix="/api")
     app.include_router(mock_interviews.router, prefix="/api")
+    app.include_router(live_interviews.router, prefix="/api")
+    app.include_router(support.router, prefix="/api")
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(notifications.router, prefix="/api")
     app.include_router(plans.router, prefix="/api")

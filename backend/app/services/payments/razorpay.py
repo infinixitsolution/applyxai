@@ -18,7 +18,7 @@ import httpx
 from backend.app.core.config import settings
 from backend.app.models import Plan, SubscriptionStatus, User
 from backend.app.services.payments.base import (
-    CheckoutConfirmation, PaymentError, RemotePayment, RemoteSubscription, WebhookEvent,
+    CheckoutConfirmation, PaymentError, RemotePayment, RemotePaymentLink, RemoteSubscription, WebhookEvent,
 )
 
 logger = logging.getLogger("applyxai.billing")
@@ -172,6 +172,24 @@ class RazorpayProvider:
             out["message"] = "Live keys verified. Checkout will charge real payment methods."
         return out
 
+    def create_payment_link(
+        self, *, amount_cents: int, currency: str, description: str, customer_name: str, customer_email: str, order_id: str,
+    ) -> RemotePaymentLink:
+        data = self._call("POST", "/payment_links", {
+            "amount": int(amount_cents),
+            "currency": currency or "INR",
+            "description": description[:255] or "Live interview",
+            "customer": {"name": (customer_name or "Candidate")[:80], "email": customer_email},
+            "notify": {"sms": False, "email": False},
+            "reminder_enable": False,
+            "notes": {"order_id": order_id, "purpose": "live_interview"},
+        })
+        return RemotePaymentLink(
+            id=str(data.get("id") or ""),
+            url=str(data.get("short_url") or ""),
+            status="created",
+        )
+
     def verify_checkout(self, payment_id: str, subscription_id: str, signature: str) -> CheckoutConfirmation:
         expected = _sign(self._secret, f"{payment_id}|{subscription_id}".encode())
         if not signature or not hmac.compare_digest(expected, signature):
@@ -189,11 +207,20 @@ class RazorpayProvider:
             payload = data.get("payload") or {}
             sub = ((payload.get("subscription") or {}).get("entity")) or {}
             pay = ((payload.get("payment") or {}).get("entity")) or {}
+            link = ((payload.get("payment_link") or {}).get("entity")) or {}
+            notes = link.get("notes") or pay.get("notes") or {}
+            if not isinstance(notes, dict):
+                notes = {}
+            order_id = str(notes.get("order_id") or "") or None
+            if notes.get("purpose") != "live_interview":
+                order_id = order_id if link.get("id") else None
             return WebhookEvent(
                 id=headers.get("x-razorpay-event-id") or hashlib.sha256(body).hexdigest(),
                 type=str(data.get("event", ""))[:64],
                 subscription_id=str(sub["id"]) if sub.get("id") else None,
                 payment=_payment(pay) if pay.get("id") else None,
+                payment_link_id=str(link["id"]) if link.get("id") else None,
+                order_id=order_id if (link.get("id") or notes.get("purpose") == "live_interview") else None,
             )
         except (ValueError, TypeError, AttributeError, KeyError):
             raise PaymentError("INVALID_WEBHOOK", "Malformed webhook payload.", 400) from None
