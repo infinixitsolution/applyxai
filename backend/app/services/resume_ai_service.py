@@ -555,6 +555,22 @@ def _experience_years_label(db: Session, user_id: uuid.UUID) -> str:
     return "0 years"
 
 
+def _skills_for_resume_name(
+    *,
+    master_skills: list[str],
+    patch: dict | None,
+    job_title: str,
+) -> str | list:
+    order = (patch or {}).get("skills_order") or []
+    if order:
+        return [str(s) for s in order[:4]]
+    if master_skills:
+        return [str(s) for s in master_skills[:4]]
+    if job_title:
+        return job_title
+    return "General"
+
+
 def build_resume_version_name(
     db: Session,
     user: User,
@@ -564,23 +580,24 @@ def build_resume_version_name(
     job_title: str = "",
     company: str = "",
 ) -> str:
-    """Display name from the job when we have one: {name}_{role}_{company}_{years}."""
+    """Stem for display: {candidate}_{skills}_{experience} (version added on save)."""
+    from automation.resume_naming import build_resume_stem, format_experience
+
     person = _name_segment(" ".join(p for p in (user.first_name, user.last_name) if p), fallback="Resume")
-    role = _name_segment(job_title, fallback="")
-    if not role:
-        order = (patch or {}).get("skills_order") or []
-        role = _name_segment(str(order[0]), fallback="") if order else ""
-    if not role and master_skills:
-        role = _name_segment(str(master_skills[0]), fallback="General")
-    if not role:
-        role = "General"
-    org = _name_segment(company, fallback="")
+    skills = _skills_for_resume_name(master_skills=master_skills, patch=patch, job_title=job_title)
     years = _experience_years_label(db, user.id)
-    parts = [person, role]
-    if org:
-        parts.append(org)
-    parts.append(years)
-    return "_".join(parts)[:255]
+    return build_resume_stem(candidate=person, skills=skills, experience=format_experience(years))[:255]
+
+
+def _next_user_resume_version(db: Session, user_id: uuid.UUID) -> int:
+    from automation.resume_naming import max_version_in_names
+
+    from backend.app.models import Resume
+
+    names: list[str] = []
+    for row in db.scalars(select(Resume).where(Resume.user_id == user_id)):
+        names.extend([row.filename or "", row.name or ""])
+    return max_version_in_names(*names) + 1
 
 
 def render_docx(source_path: Path, patch: dict, out_path: Path, *, resume_text: str, template_id: str) -> None:
@@ -608,18 +625,31 @@ async def tailor_and_save(
     patch = preview_data.get("patch") or {}
     source = resume_service.get_resume(db, user, resume_id)
     masters = list(source.master_skills or [])
-    version_name = build_resume_version_name(
+    from automation.resume_naming import build_resume_filename, format_experience
+
+    version_stem = build_resume_version_name(
         db, user, master_skills=masters, patch=patch, job_title=job_title, company=company,
     )
+    person = _name_segment(" ".join(p for p in (user.first_name, user.last_name) if p), fallback="Resume")
+    skills = _skills_for_resume_name(master_skills=masters, patch=patch, job_title=job_title)
+    years = _experience_years_label(db, user.id)
+    version_num = _next_user_resume_version(db, user.id)
+    file_name = build_resume_filename(
+        candidate=person,
+        skills=skills,
+        experience=format_experience(years),
+        version=version_num,
+        ext=".docx",
+    )
+    display_name = f"{version_stem}_v-{version_num}"
     src_path = resume_service.absolute_path(source)
     resume_text = resume_text_service.extract_text(src_path, source.file_type)
     tmp = src_path.parent / f"tailored-{uuid.uuid4().hex}.docx"
     style_id = template_id or preferred_template_for_user(db, user)
     render_docx(src_path, patch, tmp, resume_text=resume_text, template_id=style_id)
     data = tmp.read_bytes()
-    file_stub = re.sub(r"[^\w\s.-]+", "", version_name).strip().replace(" ", "_") or "resume"
-    upload = UploadFile(filename=f"{file_stub}.docx", file=io.BytesIO(data))
-    new_resume = await resume_service.upload_resume(db, user, upload, name=version_name, counts_against_plan=False)
+    upload = UploadFile(filename=file_name, file=io.BytesIO(data))
+    new_resume = await resume_service.upload_resume(db, user, upload, name=display_name, counts_against_plan=False)
     new_resume.ai_metadata = {
         "generated_by": "ai",
         "job_id": job_id,

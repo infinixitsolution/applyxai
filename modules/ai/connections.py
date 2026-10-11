@@ -224,6 +224,11 @@ def _build_answer_graph(model):
         options = state.get("options")
         if options:
             prompt += "\n\nAnswer with exactly one of these options:\n" + "\n".join(f"- {o}" for o in options)
+        if (state.get("question_type") or "").lower() in ("number", "tel"):
+            prompt += (
+                "\n\nThis field accepts numbers only. Reply with digits only — "
+                "no words, units, or sentences."
+            )
         return {"prompt": prompt}
 
     def generate(state: _AnswerState) -> dict:
@@ -231,7 +236,14 @@ def _build_answer_graph(model):
         return {"raw": _msg_text(message).strip()}
 
     def format_text(state: _AnswerState) -> dict:
-        return {"answer": (state.get("raw") or "").strip()}
+        from automation.answer_format import infer_answer_format, normalize_numeric_answer
+
+        raw = (state.get("raw") or "").strip()
+        qtype = (state.get("question_type") or "text").lower()
+        question = state.get("question") or ""
+        if qtype in ("number", "tel") or infer_answer_format(question, qtype) == "number":
+            raw = normalize_numeric_answer(question, raw)
+        return {"answer": raw}
 
     def select_option(state: _AnswerState) -> dict:
         raw = (state.get("raw") or "").strip()

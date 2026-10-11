@@ -21,14 +21,8 @@ import { formatBytes, formatDate, isUnlimitedUsageCap } from "../lib/format";
 import { errorMessage } from "../services/api";
 import { automation, dashboard, resumes as resumesApi } from "../services/endpoints";
 import type { Resume } from "../types";
+import { splitResumeLibrary } from "../lib/resumeLibrary";
 import { ResumeManager } from "./ResumeManager";
-
-function generatedCount(resumes: Resume[]): number {
-  return resumes.filter((r) => {
-    const by = (r.ai_metadata?.generated_by as string | undefined) ?? "";
-    return by === "ai" || by === "style" || by === "automation";
-  }).length;
-}
 
 export function ResumesDashboard() {
   const { data, isLoading, error } = useQuery({ queryKey: ["resumes"], queryFn: resumesApi.list });
@@ -38,9 +32,12 @@ export function ResumesDashboard() {
   const usage = dashQuery.data?.usage;
   const tailor = autoQuery.data?.resume_tailor;
   const list = data?.resumes ?? [];
-  const defaultResume = list.find((r) => r.is_default) ?? list[0];
+  const { built, uploads } = splitResumeLibrary(list);
+  const builtCount = data?.built_count ?? built.length;
+  const libraryCount = data?.library_count ?? uploads.length;
+  const defaultResume = uploads.find((r) => r.is_default) ?? uploads[0];
   const limit = data?.limit ?? 0;
-  const atLimit = list.length >= limit && limit > 0;
+  const atLimit = libraryCount >= limit && limit > 0;
 
   return (
     <>
@@ -69,7 +66,8 @@ export function ResumesDashboard() {
             <>
           <ResumesHero
             defaultResume={defaultResume}
-            count={list.length}
+            count={libraryCount}
+            builtCount={builtCount}
             limit={limit}
             atLimit={atLimit}
             tailorReady={tailor?.can_tailor}
@@ -80,8 +78,12 @@ export function ResumesDashboard() {
             <StatCard
               icon={<FileText className="h-4 w-4" aria-hidden />}
               label="Resume slots"
-              value={`${list.length} / ${isUnlimitedUsageCap(limit, "resumes") ? "∞" : limit}`}
-              sub={atLimit ? "Limit reached" : `${limit - list.length} slot${limit - list.length === 1 ? "" : "s"} free`}
+              value={`${libraryCount} / ${isUnlimitedUsageCap(limit, "resumes") ? "∞" : limit}`}
+              sub={
+                atLimit
+                  ? "Upload limit reached"
+                  : `${Math.max(0, limit - libraryCount)} upload slot${limit - libraryCount === 1 ? "" : "s"} free`
+              }
             />
             <StatCard
               icon={<Star className="h-4 w-4" aria-hidden />}
@@ -97,9 +99,15 @@ export function ResumesDashboard() {
             />
             <StatCard
               icon={<Upload className="h-4 w-4" aria-hidden />}
-              label="AI / styled copies"
-              value={generatedCount(list)}
-              sub={tailor?.resume_ai_available ? "Tailor & style enabled" : "AI tailoring needs admin setup"}
+              label="Built resumes"
+              value={builtCount}
+              sub={
+                builtCount > 0
+                  ? "Tailored & automation copies (unlimited)"
+                  : tailor?.resume_ai_available
+                    ? "Run tailor or auto apply to build"
+                    : "AI tailoring needs admin setup"
+              }
             />
           </div>
 
@@ -182,6 +190,7 @@ export function ResumesDashboard() {
 function ResumesHero({
   defaultResume,
   count,
+  builtCount,
   limit,
   atLimit,
   tailorReady,
@@ -189,6 +198,7 @@ function ResumesHero({
 }: {
   defaultResume?: Resume;
   count: number;
+  builtCount: number;
   limit: number;
   atLimit: boolean;
   tailorReady?: boolean;
@@ -197,9 +207,12 @@ function ResumesHero({
   let headline = "Your resume workspace";
   let detail = "Upload CVs, pick a visual style, and build job-specific versions for LinkedIn Easy Apply.";
 
-  if (count === 0) {
+  if (count === 0 && builtCount === 0) {
     headline = "Add your first resume";
     detail = "Automation needs at least one file — usually your main CV as the default.";
+  } else if (count === 0 && builtCount > 0) {
+    headline = `${builtCount} built resume${builtCount === 1 ? "" : "s"}`;
+    detail = "Download copies from automation and manual tailor. Upload a master CV to set a default for runs.";
   } else if (atLimit) {
     headline = "Resume limit reached";
     detail = "Delete an old copy or upgrade your plan before uploading or saving styled versions.";
@@ -208,10 +221,10 @@ function ResumesHero({
     detail = "Master skills power AI tailoring during automation runs (tailor_if_gate mode).";
   } else if (tailorReady && defaultResume) {
     headline = "Ready to tailor on automation runs";
-    detail = `"${defaultResume.name}" is your default · ${count} of ${limit} slots used.`;
+    detail = `"${defaultResume.name}" is your default · ${count} upload${count === 1 ? "" : "s"} · ${builtCount} built.`;
   } else if (defaultResume) {
     headline = defaultResume.name;
-    detail = `Default resume · ${count} file${count === 1 ? "" : "s"} in your library.`;
+    detail = `Default resume · ${count} uploaded · ${builtCount} built resume${builtCount === 1 ? "" : "s"} shown below.`;
   }
 
   return (

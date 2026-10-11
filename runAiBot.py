@@ -829,14 +829,27 @@ const enforce = () => {
   });
   root.querySelectorAll('button').forEach((button) => {
     const label = (button.innerText || '').toLowerCase();
-    if (label.includes('more resume')) button.style.setProperty('display', 'none', 'important');
+    if (label.includes('more resume') || label.includes('see fewer') || label.includes('see more')) {
+      button.style.setProperty('display', 'none', 'important');
+    }
   });
-  const radio = keep.querySelector("input[type='radio'], [role='radio']");
-  if (radio && radio.tagName === 'INPUT' && !radio.checked) radio.click();
-  if (radio && radio.tagName !== 'INPUT' && radio.getAttribute('aria-checked') !== 'true') radio.click();
-  const checked = radio
-    ? (radio.tagName === 'INPUT' ? radio.checked : radio.getAttribute('aria-checked') === 'true')
-    : true;
+  const selectKeep = () => {
+    const radio = keep.querySelector("input[type='radio'], [role='radio']");
+    if (radio && radio.tagName === 'INPUT' && !radio.checked) {
+      radio.click();
+      radio.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (radio && radio.tagName !== 'INPUT' && radio.getAttribute('aria-checked') !== 'true') {
+      radio.click();
+    } else if (!radio || (radio.tagName === 'INPUT' ? !radio.checked : radio.getAttribute('aria-checked') !== 'true')) {
+      keep.click();
+    }
+    const picked = keep.querySelector("input[type='radio'], [role='radio']");
+    if (!picked) return true;
+    return picked.tagName === 'INPUT'
+      ? !!picked.checked
+      : picked.getAttribute('aria-checked') === 'true';
+  };
+  const checked = selectKeep();
   return !!checked && !!wantedNorm;
 };
 const selected = enforce();
@@ -884,21 +897,26 @@ def _resume_rows(modal: WebElement) -> list[dict]:
         return []
 
 
+def _resume_label_sets(rows: list[dict]) -> tuple[list[str], list[str]]:
+    labels = [str(row.get("text") or "") for row in rows]
+    fulls = [str(row.get("full") or "") for row in rows]
+    return labels, fulls
+
+
 def _keep_only_prepared_resume(modal: WebElement, filename: str, before_labels: list[str]) -> bool:
     """Select the JD resume and hide every other resume on this Easy Apply step."""
-    from automation.job_resume import choose_resume_card
+    from automation.job_resume import choose_resume_after_upload
 
     _expand_resume_list(modal)
     rows = _resume_rows(modal)
     if not rows:
         return False
-    labels = [str(row.get("text") or "") for row in rows]
-    choice = choose_resume_card(labels, filename, before_labels)
+    labels, fulls = _resume_label_sets(rows)
+    choice = choose_resume_after_upload(labels, filename, before_labels, full_texts=fulls)
     if choice is None:
-        full_labels = [str(row.get("full") or "") for row in rows]
-        choice = choose_resume_card(full_labels, filename, before_labels)
+        choice = choose_resume_after_upload(fulls, filename, before_labels, full_texts=fulls)
         if choice is not None:
-            labels = full_labels
+            labels = fulls
     if choice is None:
         print_lg(f'Prepared resume "{filename}" is not in LinkedIn\'s list, so no older resume was used.')
         return False
@@ -915,11 +933,13 @@ def _keep_only_prepared_resume(modal: WebElement, filename: str, before_labels: 
     return True
 
 
-def _wait_until_prepared_resume(modal: WebElement, filename: str, before_labels: list[str], timeout: float = 30) -> bool:
-    """True once the prepared file appears as its own card, not merely because an older resume is listed."""
-    from automation.job_resume import choose_resume_card, normalize_resume_label, resume_label_score
+def _wait_until_prepared_resume(modal: WebElement, filename: str, before_labels: list[str], timeout: float = 45) -> bool:
+    """True once LinkedIn lists the upload (extra row, matching name, or newest 'Uploaded on')."""
+    from automation.job_resume import choose_resume_after_upload, normalize_resume_label, resume_label_score
 
     before_norm = {normalize_resume_label(label) for label in before_labels}
+    before_count = len(before_labels)
+    stem = os.path.splitext(filename)[0].lower()
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -932,17 +952,19 @@ def _wait_until_prepared_resume(modal: WebElement, filename: str, before_labels:
         _expand_resume_list(modal)
         rows = _resume_rows(modal)
         if rows:
-            labels = [str(row.get("text") or "") for row in rows]
-            choice = choose_resume_card(labels, filename, before_labels)
+            labels, fulls = _resume_label_sets(rows)
+            if len(rows) > before_count:
+                return True
+            choice = choose_resume_after_upload(labels, filename, before_labels, full_texts=fulls)
             if choice is not None:
                 chosen = labels[choice]
                 is_new = normalize_resume_label(chosen) not in before_norm
                 if is_new or resume_label_score(filename, chosen) >= 600:
                     return True
-        else:
-            stem = os.path.splitext(filename)[0].lower()
-            if stem and stem in text:
-                return True
+                if "uploaded on" in (fulls[choice] or "").lower():
+                    return True
+        elif stem and stem in text:
+            return True
         time.sleep(0.5)
     return False
 
@@ -957,17 +979,42 @@ def _xpath_literal(value: str) -> str:
 
 
 # Function to upload resume
-def upload_resume(modal: WebElement, resume: str) -> tuple[bool, str]:
-    path = os.path.abspath(resume) if resume else ""
-    name = os.path.basename(path) if path else ""
-    if not path or not os.path.isfile(path):
+def upload_resume(
+    modal: WebElement,
+    resume: str,
+    *,
+    job_id: str = "",
+    job_title: str = "",
+    company: str = "",
+    cache_dir: str = "",
+    candidate: str = "",
+    skills: str | list | None = None,
+    experience: str | int | None = None,
+) -> tuple[bool, str]:
+    raw_path = os.path.abspath(resume) if resume else ""
+    if not raw_path or not os.path.isfile(raw_path):
         print_lg(f'Resume file missing, keeping the previous LinkedIn resume: {resume}')
         return False, "Previous resume"
     try:
-        from automation.job_resume import choose_resume_card, resume_label_score
+        from automation.job_resume import choose_resume_after_upload, prepare_resume_for_job, resume_label_score
+        path = prepare_resume_for_job(
+            raw_path,
+            job_id=job_id,
+            job_title=job_title,
+            company=company,
+            cache_dir=cache_dir,
+            candidate=candidate,
+            skills=skills,
+            experience=experience,
+        )
+        name = os.path.basename(path)
+        print_lg(f'Resume for this job: {path}')
+        if path != raw_path:
+            print_lg(f'LinkedIn upload file: "{name}" (JD folder for job {job_id}).')
         _expand_resume_list(modal)
-        before_labels = [str(row.get("text") or "") for row in _resume_rows(modal)]
-        already = choose_resume_card(before_labels, name, before=[])
+        before_rows = _resume_rows(modal)
+        before_labels, before_fulls = _resume_label_sets(before_rows)
+        already = choose_resume_after_upload(before_labels, name, before=[], full_texts=before_fulls)
         if already is not None and resume_label_score(name, before_labels[already]) >= 600:
             if _keep_only_prepared_resume(modal, name, before_labels):
                 return True, name
@@ -987,8 +1034,31 @@ def upload_resume(modal: WebElement, resume: str) -> tuple[bool, str]:
         print_lg(f'Resume "{name}" is ready.')
         return True, name
     except Exception as e:
-        print_lg(f'Could not upload resume "{name}": {e}')
+        print_lg(f'Could not upload resume "{os.path.basename(raw_path)}": {e}')
         return False, "Previous resume"
+
+def _input_question_type(input_el, label_org: str) -> str:
+    from automation.answer_format import infer_answer_format
+
+    raw = (input_el.get_attribute("type") or "text").strip().lower()
+    if raw == "number":
+        return "number"
+    if raw == "tel":
+        return "tel"
+    if infer_answer_format(label_org, raw) == "number":
+        return "number"
+    return "text"
+
+
+def _coerce_numeric_if_needed(label_org: str, field_qtype: str, answer: str | None) -> str | None:
+    if answer in (None, ""):
+        return answer
+    from automation.answer_format import infer_answer_format, normalize_numeric_answer
+
+    if field_qtype == "number" or infer_answer_format(label_org, field_qtype) == "number":
+        return normalize_numeric_answer(label_org, str(answer))
+    return answer
+
 
 def _qa_extra_answer(
     label_org: str,
@@ -1210,6 +1280,7 @@ def answer_questions(
             try: label = label.find_element(By.CLASS_NAME,'visually-hidden')
             except: pass
             label_org = label.text if label else "Unknown"
+            field_qtype = _input_question_type(text, label_org)
             answer = "" # years_of_experience
             label = label_org.lower()
 
@@ -1275,21 +1346,28 @@ def answer_questions(
                 else: answer = answer_common_questions(label,answer)
                 if answer in (None, ""):
                     extra = _qa_extra_answer(
-                        label_org, label, "text", job_description=job_description,
+                        label_org, label, field_qtype, job_description=job_description,
                         job_title=job_title, job_company=job_company,
                     )
                     if extra:
                         answer = extra
                         print_lg(f'AI/custom answered "{label_org}": "{answer}"')
+                answer = _coerce_numeric_if_needed(label_org, field_qtype, answer)
                 if answer == "":
                     ai_answer = ""
                     if use_AI and aiClient and not ai_use_platform_proxy:
                         try:
-                            ai_answer = answer_question(aiClient, label_org, question_type="text", job_description=job_description, user_information_all=user_information_all)
+                            ai_answer = answer_question(
+                                aiClient,
+                                label_org,
+                                question_type=field_qtype,
+                                job_description=job_description,
+                                user_information_all=user_information_all,
+                            )
                         except Exception as e:
                             logger.warning("Failed to get AI answer! %s", e)
                     if ai_answer and isinstance(ai_answer, str) and ai_answer.strip():
-                        answer = ai_answer.strip()
+                        answer = _coerce_numeric_if_needed(label_org, field_qtype, ai_answer.strip())
                         print_lg(f'AI answered "{label_org}": "{answer}"')
                     elif answer == "":
                         # Leave it empty. It used to fall back to `years_of_experience`, so
@@ -1298,17 +1376,17 @@ def answer_questions(
                         # user's total years of experience - wrong data on a real
                         # application. Report it and let the stall guard skip the job.
                         print_lg(f'No answer for the text question "{label_org}". Leaving it empty - add it to config/questions.py.')
-                        randomly_answered_questions.add((label_org, "text"))
+                        randomly_answered_questions.add((label_org, field_qtype))
                         unanswered_questions.add(label_org)
-                        _seen(label_org, "text", needs_answer=True)
+                        _seen(label_org, field_qtype, needs_answer=True)
                 text.clear()
-                human_type(text, answer)
+                human_type(text, answer or "")
                 if do_actions:
                     sleep(2)
                     actions.send_keys(Keys.ARROW_DOWN)
                     actions.send_keys(Keys.ENTER).perform()
-            questions_list.add((label, text.get_attribute("value"), "text", prev_answer))
-            _seen(label_org, "text")
+            questions_list.add((label, text.get_attribute("value"), field_qtype, prev_answer))
+            _seen(label_org, field_qtype)
             continue
 
         # Check if it's a textarea question
@@ -1688,9 +1766,9 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     job_link = "https://www.linkedin.com/jobs/view/"+job_id
                     application_link = "Easy Applied"
                     date_applied = "Pending"
-    hr_link = "Unknown"
-    hr_name = "Unknown"
-    published_contacts = []
+                    hr_link = "Unknown"
+                    hr_name = "Unknown"
+                    published_contacts = []
                     connect_request = "In Development" # Still in development
                     date_listed = "Unknown"
                     skills = "Needs an AI" # Still in development
@@ -1774,6 +1852,9 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     uploaded = False
                     resume_upload_path = default_resume_path
                     applied_resume_id = None
+                    from automation.job_resume import prepare_resume_for_job, skills_for_filename
+
+                    resume_skills = skills_for_filename(skills, title)
                     if applyxai_resume_mode == "tailor_if_gate" and description and description != "Unknown":
                         from automation import job_resume
                         print_lg("Preparing a tailored resume. Easy Apply waits until that file is ready.")
@@ -1785,11 +1866,25 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             job_title=title,
                             company=company,
                             cache_dir=generated_resume_path,
+                            candidate=full_name,
+                            skills=resume_skills,
+                            experience=years_of_experience,
                         )
                         if applied_resume_id:
                             print_lg(f"Tailored resume saved ({os.path.basename(resume_upload_path)}).")
                         else:
                             print_lg("No tailored resume for this job. Easy Apply will use the default resume.")
+                    resume_upload_path = prepare_resume_for_job(
+                        resume_upload_path,
+                        job_id=job_id,
+                        job_title=title,
+                        company=company,
+                        cache_dir=generated_resume_path,
+                        candidate=full_name,
+                        skills=resume_skills,
+                        experience=years_of_experience,
+                    )
+                    print_lg(f"Job resume path: {resume_upload_path}")
                     if useNewResume:
                         from automation.job_resume import wait_until_file_ready
                         print_lg(f"Waiting until the resume file is ready: {os.path.basename(resume_upload_path)}")
@@ -1873,7 +1968,17 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                         if on_resume_step or _resume_file_input(modal) is not None:
                                             if on_resume_step:
                                                 print_lg("Resume step is open. Waiting until it is attached before continuing.")
-                                            uploaded, resume = upload_resume(modal, resume_upload_path)
+                                            uploaded, resume = upload_resume(
+                                                modal,
+                                                resume_upload_path,
+                                                job_id=job_id,
+                                                job_title=title,
+                                                company=company,
+                                                cache_dir=generated_resume_path,
+                                                candidate=full_name,
+                                                skills=resume_skills,
+                                                experience=years_of_experience,
+                                            )
                                         if on_resume_step and not uploaded:
                                             print_lg("Resume is not attached yet. Staying on this step.")
                                             buffer(2)

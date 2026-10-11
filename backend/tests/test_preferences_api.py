@@ -183,7 +183,104 @@ def test_resolve_pending_saves_human_questions(alice, db):
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert len(data["pending_form_questions"]) == 1
-    assert data["pending_form_questions"][0]["needs_answer"] is False
-    assert data["pending_form_questions"][0].get("has_saved_rule") is True
+    assert data["pending_form_questions"] == []
     assert any(hq["pattern"] == "Years of Kubernetes?" and hq["answer"] == "5 years" for hq in data["human_questions"])
+
+    preferences_service.capture_form_question(
+        db,
+        row.id,
+        {"label": "Years of Kubernetes?", "question_type": "text", "needs_answer": True},
+        {"title": "SRE", "company": "Acme"},
+    )
+    db.commit()
+    again = alice.get("/api/preferences/application").json()["data"]
+    assert again["pending_form_questions"] == []
+
+
+def test_reconcile_dedupes_same_label_different_types(alice, db):
+    from backend.app.models import User
+    from backend.app.services import preferences_service
+
+    row = db.query(User).filter_by(email="alice@example.com").one()
+    prefs = preferences_service._application_row(db, row)
+    prefs.pending_form_questions = [
+        {
+            "id": "a",
+            "_key": "text:visa?",
+            "label": "Visa sponsorship?",
+            "question_type": "text",
+            "needs_answer": True,
+            "last_seen_at": "2020-01-01T00:00:00+00:00",
+        },
+        {
+            "id": "b",
+            "_key": "radio:visa?",
+            "label": "Visa sponsorship?",
+            "question_type": "radio",
+            "needs_answer": True,
+            "last_seen_at": "2021-01-01T00:00:00+00:00",
+        },
+    ]
+    db.commit()
+    doc = alice.get("/api/preferences/application").json()["data"]
+    assert len(doc["pending_form_questions"]) == 1
+    assert doc["pending_form_questions"][0]["id"] == "b"
+
+
+def test_resolve_pending_matches_by_label_when_id_stale(alice, db):
+    from backend.app.models import User
+    from backend.app.services import preferences_service
+
+    h = csrf_headers(alice)
+    row = db.query(User).filter_by(email="alice@example.com").one()
+    preferences_service.capture_form_question(
+        db,
+        row.id,
+        {"label": "Years of Go?", "question_type": "text", "needs_answer": True},
+        {},
+    )
+    db.commit()
+    doc = alice.get("/api/preferences/application").json()["data"]
+    qid = doc["pending_form_questions"][0]["id"]
+    resp = alice.post(
+        "/api/preferences/application/resolve-pending",
+        json={"answers": [{"id": "00000000-0000-0000-0000-000000000099", "answer": "3 years", "label": "Years of Go?", "question_type": "text"}]},
+        headers=h,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["pending_form_questions"] == []
+
+
+def test_suggest_pending_ai(alice, db, monkeypatch):
+    from backend.app.models import User
+    from backend.app.services import preferences_service
+
+    h = csrf_headers(alice)
+    row = db.query(User).filter_by(email="alice@example.com").one()
+    preferences_service.capture_form_question(
+        db,
+        row.id,
+        {"label": "Years of Python?", "question_type": "text", "needs_answer": True},
+        {"title": "Dev", "company": "Acme"},
+    )
+    db.commit()
+    doc = alice.get("/api/preferences/application").json()["data"]
+    qid = doc["pending_form_questions"][0]["id"]
+
+    monkeypatch.setattr(
+        "backend.app.services.preferences_service.ai_available",
+        lambda _db, *, feature: feature in ("applications", "resume"),
+    )
+    monkeypatch.setattr(
+        "backend.app.services.application_ai_service.answer_application_question",
+        lambda *a, **k: "7 years",
+    )
+
+    resp = alice.post(
+        "/api/preferences/application/resolve-pending",
+        json={"mode": "ai_suggest", "ids": [qid]},
+        headers=h,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["suggestions"] == [{"id": qid, "answer": "7 years"}]

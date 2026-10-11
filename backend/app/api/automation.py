@@ -49,18 +49,45 @@ def list_devices(user: User = Depends(get_current_user), db: Session = Depends(g
     return ok({"devices": [agent_service.device_out(d) for d in agent_service.list_devices(db, user.id)]})
 
 
+def _desktop_agent_zip_meta():
+    zip_path = get_settings().DESKTOP_AGENT_ZIP_PATH
+    if not zip_path.is_file():
+        return None
+    return {"filename": zip_path.name, "size_bytes": zip_path.stat().st_size}
+
+
 @router.get("/desktop-agent/info", summary="Whether the desktop agent download is available on this server")
 def desktop_agent_info(user: User = Depends(get_current_user)):
     path, filename = _resolve_desktop_agent_file()
     if not path:
-        return ok({"available": False, "filename": None, "size_bytes": None})
-    return ok({"available": True, "filename": filename, "size_bytes": path.stat().st_size})
+        return ok({"available": False, "filename": None, "size_bytes": None, "zip": None})
+    return ok({
+        "available": True,
+        "filename": filename,
+        "size_bytes": path.stat().st_size,
+        "zip": _desktop_agent_zip_meta(),
+    })
 
 
 @router.get("/desktop-agent/download", summary="Download the Windows desktop agent installer")
 def download_desktop_agent(user: User = Depends(get_current_user),
-                           limiter: RateLimiter = Depends(get_rate_limiter)):
+                           limiter: RateLimiter = Depends(get_rate_limiter),
+                           format: str = Query("exe", pattern="^(exe|zip)$")):
     limiter.hit("20/hour", "desktop-agent-download", str(user.id))
+    if format == "zip":
+        zip_path = get_settings().DESKTOP_AGENT_ZIP_PATH
+        if not zip_path.is_file():
+            raise AppError(
+                "AGENT_DOWNLOAD_UNAVAILABLE",
+                "The ZIP package isn't on this server yet. Try the .exe download or contact support.",
+                404,
+            )
+        return FileResponse(
+            zip_path,
+            media_type="application/zip",
+            filename=zip_path.name,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        )
     path, filename = _resolve_desktop_agent_file()
     if not path:
         raise AppError(

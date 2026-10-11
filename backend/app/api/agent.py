@@ -16,7 +16,8 @@ from backend.app.core.errors import AppError, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import AgentDevice, Application, ApplicationStatus, Job, User
 from backend.app.schemas.automation import AgentAiAnswerIn, AgentCoverLetterIn, AgentTailorIn, ConnectPollIn, ConnectStartIn, EventBatchIn, PairIn, PollIn
-from backend.app.services import agent_service, application_context, application_service, automation_service, preferences_service, resume_ai_service, resume_service, run_config_service
+from backend.app.services import agent_service, application_context, application_service, automation_service, dashboard_service, preferences_service, resume_ai_service, resume_service, run_config_service
+from backend.app.services import application_ai_service
 from backend.app.services.ai_service import AiTask, ai_available, complete
 
 router = APIRouter(prefix="/agent", tags=["desktop agent"])
@@ -63,6 +64,16 @@ def connect_poll(body: ConnectPollIn, db: Session = Depends(get_db)):
 @router.get("/me", summary="This computer, as the server sees it")
 def me(device: AgentDevice = Depends(get_current_device)):
     return ok(agent_service.device_out(device))
+
+
+@router.get("/dashboard-stats", summary="Candidate dashboard stats for the paired account")
+def agent_dashboard_stats(device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    return ok(dashboard_service.stats(db, device.user_id))
+
+
+@router.get("/automation-overview", summary="Automation overview for the paired account")
+def agent_automation_overview(device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    return ok(automation_service.overview(db, device.user_id))
 
 
 @router.post("/unpair", summary="Disconnect this computer")
@@ -227,35 +238,19 @@ def ai_answer(run_id: uuid.UUID, body: AgentAiAnswerIn, request: Request,
     run = automation_service.agent_run(db, device, run_id)
     if not automation_service.is_active(run):
         raise AppError("RUN_INACTIVE", "This run is no longer active.", 409)
-    feature = "applications" if ai_available(db, feature="applications") else "resume" if ai_available(db, feature="resume") else ""
-    if not feature:
-        raise AppError("AI_DISABLED", "Platform AI is not enabled for applications.", 503)
-    user = db.get(User, run.user_id)
-    if user is None:
-        raise AppError("NOT_FOUND", "User not found", 404)
-    doc = preferences_service.application_document(db, user)
-    deny = (doc.get("ai_policy") or {}).get("deny_label_contains") or []
-    label = body.question.lower()
-    if any(d and d in label for d in deny):
-        raise AppError("AI_DENIED", "This question is not eligible for AI answers.", 403)
-    qtype = (body.question_type or "text").lower()
-    if qtype not in ("text", "textarea", "select", "radio"):
-        raise AppError("VALIDATION", "Unsupported question type.", 422)
-    ctx = application_context.build_context(
-        db, run.user_id, job_description=body.job_description, job_title=body.job_title, company=body.company,
-    )
-    system = (
-        "You help fill job application forms. Answer briefly and truthfully using only the candidate context. "
-        "Do not invent credentials, employers, or legal status. If unsure, say you prefer not to guess."
-    )
-    if qtype in ("select", "radio") and body.options:
-        opts = "\n".join(f"- {o}" for o in body.options[:40])
-        user = f"Context:\n{ctx}\n\nQuestion: {body.question}\n\nPick exactly one option (copy the option text verbatim):\n{opts}"
-        task = AiTask.APP_ANSWER_SELECT
-    else:
-        user = f"Context:\n{ctx}\n\nQuestion ({qtype}): {body.question}\n\nAnswer:"
-        task = AiTask.APP_ANSWER
-    answer = complete(db, task, system=system, user=user, feature=feature, max_tokens=800)
+    try:
+        answer = application_ai_service.answer_application_question(
+            db,
+            run.user_id,
+            question=body.question,
+            question_type=body.question_type or "text",
+            options=body.options,
+            job_description=body.job_description or "",
+            job_title=body.job_title or "",
+            company=body.company or "",
+        )
+    except AppError:
+        raise
     return ok({"answer": answer})
 
 
@@ -275,7 +270,12 @@ def ai_cover_letter(run_id: uuid.UUID, body: AgentCoverLetterIn, request: Reques
     if user is None:
         raise AppError("NOT_FOUND", "User not found", 404)
     ctx = application_context.build_context(
-        db, run.user_id, job_description=body.job_description, job_title=body.job_title, company=body.company,
+        db,
+        run.user_id,
+        job_description=body.job_description,
+        job_title=body.job_title,
+        company=body.company,
+        include_default_resume=True,
     )
     system = (
         "Write a cover letter this candidate could paste into a job application. "

@@ -11,8 +11,13 @@ if (-not (Test-Path -LiteralPath $Key)) {
 }
 
 $files = @()
-foreach ($name in @("ApplyXAI-Agent-GUI.exe", "ApplyXAI-Agent.exe", "ApplyXAI-Agent-Setup.exe")) {
+foreach ($name in @("ApplyXAI-Agent-GUI.exe", "ApplyXAI-Agent.exe", "ApplyXAI-Agent-Setup.exe", "ApplyXAI-Agent-Windows.zip")) {
     $p = Join-Path (Join-Path $RepoRoot "dist") $name
+    if (Test-Path -LiteralPath $p) { $files += Get-Item -LiteralPath $p }
+}
+$guiFolder = Join-Path (Join-Path $RepoRoot "dist") "ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
+$cliFolder = Join-Path (Join-Path $RepoRoot "dist") "ApplyXAI-Agent\ApplyXAI-Agent.exe"
+foreach ($p in @($guiFolder, $cliFolder)) {
     if (Test-Path -LiteralPath $p) { $files += Get-Item -LiteralPath $p }
 }
 

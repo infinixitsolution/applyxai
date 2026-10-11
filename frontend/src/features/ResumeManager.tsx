@@ -7,6 +7,13 @@ import { ConfirmDialog, Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { Alert, Badge, Button, EmptyState, Spinner } from "../components/ui";
 import { formatBytes, formatDate } from "../lib/format";
+import {
+  builtResumeJobLine,
+  builtResumeLabel,
+  isBuiltResume,
+  resumeKind,
+  splitResumeLibrary,
+} from "../lib/resumeLibrary";
 import { errorMessage } from "../services/api";
 import { applications as applicationsApi, profile as profileApi, resumes as resumesApi } from "../services/endpoints";
 import type { Application, ProfileInput, Resume } from "../types";
@@ -192,7 +199,78 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
 
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
-  const atLimit = data.resumes.length >= data.limit;
+  const { built, uploads } = splitResumeLibrary(data.resumes);
+  const libraryCount = data.library_count ?? uploads.length;
+  const atLimit = data.limit > 0 && libraryCount >= data.limit;
+  const hasAny = data.resumes.length > 0;
+
+  const renderDashboardRow = (r: Resume, variant: "built" | "upload") => {
+    const built = variant === "built";
+    const kind = resumeKind(r);
+    const jobLine = built ? builtResumeJobLine(r) : null;
+    return (
+      <li
+        key={r.id}
+        className={`rounded-xl p-4 ring-1 ${r.is_default && !built ? "bg-brand-50/40 ring-brand-200" : "bg-slate-50/50 ring-slate-200/80"}`}
+      >
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200/80">
+              <FileText className="h-5 w-5 text-slate-500" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
+                <span className="truncate">{r.name}</span>
+                {built && <Badge tone="slate">{builtResumeLabel(kind)}</Badge>}
+                {r.is_default && !built && <Badge tone="brand">Default</Badge>}
+              </p>
+              {jobLine && <p className="truncate text-xs font-medium text-slate-700">{jobLine}</p>}
+              <p className="truncate text-xs text-slate-500">
+                {r.filename} · {r.file_type.toUpperCase()} · {formatBytes(r.file_size)} · {formatDate(r.created_at)}
+              </p>
+              {typeof r.ai_metadata?.template_name === "string" && (
+                <p className="mt-1 text-xs text-slate-600">Style: {String(r.ai_metadata.template_name)}</p>
+              )}
+              {!built && r.master_skills && r.master_skills.length > 0 && (
+                <p className="mt-1 line-clamp-2 text-xs text-slate-600">
+                  Master skills: {r.master_skills.slice(0, 10).join(", ")}
+                  {r.master_skills.length > 10 ? "…" : ""}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1 lg:max-w-md lg:justify-end">
+            {!built && (
+              <>
+                <Button variant="secondary" size="sm" loading={analyze.isPending && analyze.variables === r.id}
+                        onClick={() => analyze.mutate(r.id)}>Analyze skills</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setStyling(r); }}>
+                  <Palette className="h-4 w-4" aria-hidden /> Style
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => { setTailoring(r); setPreview(null); setJd(""); setLinkApplicationId(""); }}>
+                  Tailor
+                </Button>
+                {!r.is_default && (
+                  <Button variant="ghost" size="sm" onClick={() => makeDefault.mutate(r.id)}>
+                    <Star className="h-4 w-4" aria-hidden /> Default
+                  </Button>
+                )}
+              </>
+            )}
+            <a href={resumesApi.downloadUrl(r.id)} className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50">
+              <Download className="h-4 w-4" aria-hidden /> Download
+            </a>
+            <Button variant="ghost" size="sm" aria-label={`Rename ${r.name}`} onClick={() => { setRenaming(r); setNewName(r.name); }}>
+              <Pencil className="h-4 w-4" aria-hidden />
+            </Button>
+            <Button variant="ghost" size="sm" aria-label={`Delete ${r.name}`} onClick={() => setDeleting(r)}>
+              <Trash2 className="h-4 w-4 text-red-600" aria-hidden />
+            </Button>
+          </div>
+        </div>
+      </li>
+    );
+  };
 
   const templateSection = templates.length > 0 && (
     <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5">
@@ -222,8 +300,10 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
       <section className={dashboardShell ? "rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5" : undefined}>
         {dashboardShell && (
           <header className="mb-4">
-            <h2 className="text-base font-semibold text-slate-900">Resume library</h2>
-            <p className="mt-0.5 text-sm text-slate-500">PDF or DOCX, up to 5 MB · scanned PDFs use OCR</p>
+            <h2 className="text-base font-semibold text-slate-900">Uploaded resumes</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              {libraryCount} of {data.limit} upload slot{data.limit === 1 ? "" : "s"} · PDF or DOCX, up to 5 MB
+            </p>
           </header>
         )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -247,78 +327,35 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
         <Alert kind="info">You've reached your plan's resume limit. Delete one, or <Link to="/app/billing" className="font-medium underline">upgrade your plan</Link>.</Alert>
       )}
 
-      {onboarding && data.resumes.length === 0 && (
+      {onboarding && !hasAny && (
         <Alert kind="info">
           Upload your resume first (PDF or DOCX). Scanned PDFs are read with <strong>OCR</strong> so photos and image-only CVs still
           fill your profile, experience, education, and application answers.
         </Alert>
       )}
 
-      {data.resumes.length === 0 ? (
+      {!hasAny ? (
         <EmptyState icon={<FileText className="h-10 w-10" />} title="No resumes yet">
           {onboarding
             ? "Choose a PDF or DOCX file to continue setup."
             : "Upload the resume you want the automation to attach to applications."}
         </EmptyState>
       ) : dashboardShell ? (
-        <ul className="mt-4 grid gap-4">
-          {data.resumes.map((r) => (
-            <li
-              key={r.id}
-              className={`rounded-xl p-4 ring-1 ${r.is_default ? "bg-brand-50/40 ring-brand-200" : "bg-slate-50/50 ring-slate-200/80"}`}
-            >
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex min-w-0 gap-3">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200/80">
-                    <FileText className="h-5 w-5 text-slate-500" aria-hidden />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
-                      <span className="truncate">{r.name}</span>
-                      {r.is_default && <Badge tone="brand">Default</Badge>}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {r.filename} · {r.file_type.toUpperCase()} · {formatBytes(r.file_size)} · {formatDate(r.created_at)}
-                    </p>
-                    {typeof r.ai_metadata?.template_name === "string" && (
-                      <p className="mt-1 text-xs text-slate-600">Style: {String(r.ai_metadata.template_name)}</p>
-                    )}
-                    {r.master_skills && r.master_skills.length > 0 && (
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-600">
-                        Master skills: {r.master_skills.slice(0, 10).join(", ")}
-                        {r.master_skills.length > 10 ? "…" : ""}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-1 lg:max-w-md lg:justify-end">
-                  <Button variant="secondary" size="sm" loading={analyze.isPending && analyze.variables === r.id}
-                          onClick={() => analyze.mutate(r.id)}>Analyze skills</Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setStyling(r); }}>
-                    <Palette className="h-4 w-4" aria-hidden /> Style
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setTailoring(r); setPreview(null); setJd(""); setLinkApplicationId(""); }}>
-                    Tailor
-                  </Button>
-                  {!r.is_default && (
-                    <Button variant="ghost" size="sm" onClick={() => makeDefault.mutate(r.id)}>
-                      <Star className="h-4 w-4" aria-hidden /> Default
-                    </Button>
-                  )}
-                  <a href={resumesApi.downloadUrl(r.id)} className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50">
-                    <Download className="h-4 w-4" aria-hidden /> Download
-                  </a>
-                  <Button variant="ghost" size="sm" aria-label={`Rename ${r.name}`} onClick={() => { setRenaming(r); setNewName(r.name); }}>
-                    <Pencil className="h-4 w-4" aria-hidden />
-                  </Button>
-                  <Button variant="ghost" size="sm" aria-label={`Delete ${r.name}`} onClick={() => setDeleting(r)}>
-                    <Trash2 className="h-4 w-4 text-red-600" aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-4 space-y-6">
+          {uploads.length === 0 && built.length > 0 && (
+            <Alert kind="info">
+              You have {built.length} built resume{built.length === 1 ? "" : "s"} from tailor or automation. Upload a master CV to set a default for runs.
+            </Alert>
+          )}
+          {uploads.length > 0 && (
+            <ul className="grid gap-4">{uploads.map((r) => renderDashboardRow(r, "upload"))}</ul>
+          )}
+          {uploads.length === 0 && !onboarding && (
+            <EmptyState icon={<FileText className="h-10 w-10" />} title="No uploaded resumes">
+              Upload a master CV for automation. Built copies from jobs appear in the section below.
+            </EmptyState>
+          )}
+        </div>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-200">
           {data.resumes.map((r) => (
@@ -327,6 +364,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2 font-medium text-slate-900">
                   <span className="truncate">{r.name}</span>
+                  {isBuiltResume(r) && <Badge tone="slate">{builtResumeLabel(resumeKind(r))}</Badge>}
                   {r.is_default && <Badge tone="brand">Default</Badge>}
                 </p>
                 <p className="truncate text-xs text-slate-500">
@@ -371,6 +409,18 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
         </ul>
       )}
       </section>
+
+      {dashboardShell && built.length > 0 && (
+        <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-5">
+          <header className="mb-4">
+            <h2 className="text-base font-semibold text-slate-900">Built resumes</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Tailored and automation copies ({built.length}) — do not count toward your upload limit
+            </p>
+          </header>
+          <ul className="grid gap-4">{built.map((r) => renderDashboardRow(r, "built"))}</ul>
+        </section>
+      )}
 
       <Modal open={!!renaming} onClose={() => setRenaming(null)} title="Rename resume" footer={
         <>

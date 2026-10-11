@@ -114,7 +114,7 @@ function Inner({
         Your job-site password is never stored here.
       </Alert>
 
-      <LinkedInCapturedQuestions items={initial.pending_form_questions ?? []} />
+      <LinkedInCapturedQuestions aiAvailable={initial.ai_available} />
       {save.error && !Object.keys(errors).length && <Alert kind="error">{errorMessage(save.error)}</Alert>}
 
       {sections.map(([section, sectionFields]) => (

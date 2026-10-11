@@ -7,10 +7,33 @@ import uuid
 from sqlalchemy.orm import Session
 
 from backend.app.models import User
-from backend.app.services import preferences_service, run_config_service
+from backend.app.services import preferences_service, resume_service, resume_text_service, run_config_service
 
 
-def build_context(db: Session, user_id: uuid.UUID, *, job_description: str = "", job_title: str = "", company: str = "") -> str:
+def _default_resume_excerpt(db: Session, user_id: uuid.UUID, *, max_chars: int = 6000) -> str:
+    resume = run_config_service.default_resume(db, user_id)
+    if resume is None:
+        return ""
+    try:
+        path = resume_service.absolute_path(resume)
+        text = resume_text_service.extract_text(path, resume.file_type)
+    except OSError:
+        return ""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return "\n\nResume excerpt:\n" + text[:max_chars]
+
+
+def build_context(
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    job_description: str = "",
+    job_title: str = "",
+    company: str = "",
+    include_default_resume: bool = False,
+) -> str:
     user = db.get(User, user_id)
     if user is None:
         return ""
@@ -55,4 +78,9 @@ def build_context(db: Session, user_id: uuid.UUID, *, job_description: str = "",
         parts.append(f"Job: {job_title} at {company}".strip())
     if job_description:
         parts.append("Job description excerpt:\n" + job_description[:8000])
-    return "\n".join(p for p in parts if p and not p.endswith(": "))
+    body = "\n".join(p for p in parts if p and not p.endswith(": "))
+    if include_default_resume:
+        resume_block = _default_resume_excerpt(db, user_id)
+        if resume_block:
+            body = body + resume_block if body else resume_block.strip()
+    return body

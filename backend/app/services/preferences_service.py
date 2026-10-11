@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 import uuid
 
@@ -17,12 +18,15 @@ from backend.app.schemas.application_preferences import (
     HumanQuestionIn,
 )
 from backend.app.schemas.profile import ProfileIn, SearchConfigIn
+from automation.qa_resolver import can_use_ai
+
+from backend.app.services import application_ai_service
 from backend.app.services.ai_service import ai_available
 from backend.app.services.engine_fields import APPLICATION_FIELDS, validate_mapping
 
 _QA_KEYS = frozenset({"human_questions", "ai_applications_enabled", "user_information_all", "ai_policy"})
 _MAX_PENDING_FORM_QUESTIONS = 120
-_ALLOWED_Q_TYPES = frozenset({"text", "textarea", "select", "radio", "checkbox"})
+_ALLOWED_Q_TYPES = frozenset({"text", "textarea", "select", "radio", "checkbox", "number", "tel"})
 
 _PROFILE_FIELDS = (
     "phone",
@@ -98,6 +102,15 @@ def _application_row(db: Session, user: User) -> ApplicationPreferences:
     return prefs
 
 
+def _upsert_human_rule(human: list, entry: dict) -> None:
+    pattern = str(entry.get("pattern") or "").strip()
+    for i, row in enumerate(human):
+        if isinstance(row, dict) and str(row.get("pattern") or "").strip() == pattern:
+            human[i] = entry
+            return
+    human.append(entry)
+
+
 def _validate_human_questions(raw: list) -> list[dict]:
     if len(raw) > MAX_HUMAN_QUESTIONS:
         raise ValueError(f"At most {MAX_HUMAN_QUESTIONS} custom questions are allowed")
@@ -139,10 +152,16 @@ def _pending_key(label: str, question_type: str) -> str:
     return f"{question_type}:{(label or '').strip().lower()[:400]}"
 
 
+def _pending_label_key(label: str) -> str:
+    return _clean_label_for_pattern(label).lower()
+
+
 def _public_pending(items: list) -> list:
     out = []
     for row in items:
         if not isinstance(row, dict):
+            continue
+        if not row.get("needs_answer"):
             continue
         pub = {k: v for k, v in row.items() if k != "_key"}
         out.append(pub)
@@ -151,11 +170,63 @@ def _public_pending(items: list) -> list:
 
 def _clean_label_for_pattern(label: str) -> str:
     text = (label or "").strip()
-    if " [" in text:
-        text = text.split(" [", 1)[0].strip()
+    for sep in (" [ ", " ["):
+        if sep in text:
+            text = text.split(sep, 1)[0].strip()
+            break
     if text.endswith(" ]"):
         text = text[:-2].strip()
     return text[:500] or "Unknown question"
+
+
+def _human_rule_covers(label: str, human_questions: list) -> bool:
+    from automation.qa_resolver import match_human_custom
+
+    if not human_questions:
+        return False
+    cleaned = _clean_label_for_pattern(label)
+    for candidate in (cleaned, (label or "").strip()):
+        if not candidate:
+            continue
+        ans = match_human_custom(candidate, human_questions)
+        if ans and str(ans).strip():
+            return True
+    return False
+
+
+def _find_pending_item(pending: list, *, pid: str, label: str = "", question_type: str = "") -> dict | None:
+    if pid:
+        for p in pending:
+            if str(p.get("id") or "") == pid:
+                return p
+    clean = _clean_label_for_pattern(label)
+    if not clean:
+        return None
+    qtype = (question_type or "text").strip().lower()
+    key = _pending_key(clean, qtype)
+    for p in pending:
+        if str(p.get("_key") or "") == key:
+            return p
+        if _clean_label_for_pattern(str(p.get("label") or "")) == clean:
+            return p
+    return None
+
+
+def _persist_pending_and_human(prefs: ApplicationPreferences, pending: list, human: list) -> None:
+    prefs.pending_form_questions = pending
+    prefs.human_questions = human
+    flag_modified(prefs, "pending_form_questions")
+    flag_modified(prefs, "human_questions")
+
+
+def _pending_still_needs_answer(*, engine_needs: bool, item: dict | None, human_questions: list) -> bool:
+    if not engine_needs:
+        return False
+    if item and item.get("has_saved_rule"):
+        return False
+    if _human_rule_covers(str(item.get("label") if item else ""), human_questions):
+        return False
+    return True
 
 
 def _notify_form_question_needed(db: Session, user_id: uuid.UUID, item: dict) -> None:
@@ -195,21 +266,46 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
         qtype = "text"
     options = event.get("options") if isinstance(event.get("options"), list) else []
     options = [str(o).strip()[:200] for o in options if str(o).strip()][:30]
-    needs = bool(event.get("needs_answer"))
+    engine_needs = bool(event.get("needs_answer"))
     details = job_details or {}
     key = _pending_key(label, qtype)
+    label_key = _pending_label_key(label)
     pending = list(prefs.pending_form_questions or [])
+    human = list(prefs.human_questions or [])
     hit = next((p for p in pending if p.get("_key") == key), None)
+    if hit is None and label_key:
+        hit = next(
+            (
+                p
+                for p in pending
+                if _pending_label_key(str(p.get("label") or "")) == label_key
+            ),
+            None,
+        )
+        if hit is not None:
+            hit["_key"] = key
+            hit["question_type"] = qtype
     now = datetime.now(timezone.utc).isoformat()
     target: dict | None = hit
     if hit:
         hit["times_seen"] = int(hit.get("times_seen") or 1) + 1
         hit["last_seen_at"] = now
-        if needs:
-            hit["needs_answer"] = True
+        hit["label"] = label
+        still = _pending_still_needs_answer(
+            engine_needs=engine_needs, item=hit, human_questions=human,
+        )
+        hit["needs_answer"] = still
+        if not still:
+            pending = [p for p in pending if p is not hit]
+            target = None
         if options and not hit.get("options"):
             hit["options"] = options
     else:
+        still_needs = _pending_still_needs_answer(
+            engine_needs=engine_needs, item={"label": label}, human_questions=human,
+        )
+        if not still_needs:
+            return
         target = {
             "id": str(uuid.uuid4()),
             "_key": key,
@@ -219,7 +315,7 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
             "job_id": str(event.get("job_id") or details.get("job_id") or "")[:64],
             "job_title": str(details.get("title") or "")[:200],
             "company": str(details.get("company") or "")[:200],
-            "needs_answer": needs,
+            "needs_answer": still_needs,
             "times_seen": 1,
             "first_seen_at": now,
             "last_seen_at": now,
@@ -229,51 +325,178 @@ def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_deta
         pending = pending[-_MAX_PENDING_FORM_QUESTIONS:]
         if target and target not in pending:
             target = next((p for p in pending if p.get("_key") == key), target)
-    if needs and target and not target.get("in_app_notified"):
+    if target and target.get("needs_answer") and not target.get("in_app_notified"):
         _notify_form_question_needed(db, user_id, target)
     prefs.pending_form_questions = pending
+    flag_modified(prefs, "pending_form_questions")
     db.flush()
 
 
 def resolve_pending_questions(db: Session, user: User, answers: list[dict]) -> dict:
-    """Save answers for pending questions as custom human_questions and remove them from pending."""
+    """Save answers for pending questions as custom human_questions and drop them from pending."""
     prefs = _application_row(db, user)
     pending = list(prefs.pending_form_questions or [])
     human = list(prefs.human_questions or [])
-    by_id = {p["id"]: p for p in pending if p.get("id")}
+    keys_to_remove: set[str] = set()
+    labels_to_remove: set[str] = set()
+    saved = 0
     for row in answers:
         if not isinstance(row, dict):
             continue
         pid = str(row.get("id") or "").strip()
         answer = str(row.get("answer") or "").strip()
-        if not pid or not answer:
+        if not answer:
             continue
-        item = by_id.get(pid)
+        row_label = str(row.get("label") or "")
+        row_qtype = str(row.get("question_type") or "text").strip().lower()
+        item = _find_pending_item(
+            pending,
+            pid=pid,
+            label=row_label,
+            question_type=row_qtype,
+        )
         if item is None:
+            pattern = _clean_label_for_pattern(row_label)
+            if not pattern or pattern == "Unknown question":
+                continue
+            saved += 1
+            qtype = row_qtype if row_qtype in _ALLOWED_Q_TYPES else "text"
+            field_types = [qtype] if qtype in _ALLOWED_Q_TYPES else ["text", "textarea", "select", "radio"]
+            _upsert_human_rule(
+                human,
+                HumanQuestionIn(
+                    match="contains",
+                    pattern=pattern,
+                    answer=answer[:2000],
+                    field_types=field_types,
+                ).model_dump(),
+            )
+            keys_to_remove.add(_pending_key(pattern, str(qtype)))
+            labels_to_remove.add(pattern.lower())
             continue
+        saved += 1
         qtype = item.get("question_type") or "text"
         field_types = [qtype] if qtype in _ALLOWED_Q_TYPES else ["text", "textarea", "select", "radio"]
         pattern = _clean_label_for_pattern(item.get("label") or "")
-        human.append(HumanQuestionIn(
-            match="contains",
-            pattern=pattern,
-            answer=answer[:2000],
-            field_types=field_types,
-        ).model_dump())
-        for p in pending:
-            if p.get("id") == pid:
-                p["needs_answer"] = False
-                p["has_saved_rule"] = True
-                break
+        _upsert_human_rule(
+            human,
+            HumanQuestionIn(
+                match="contains",
+                pattern=pattern,
+                answer=answer[:2000],
+                field_types=field_types,
+            ).model_dump(),
+        )
+        key = str(item.get("_key") or _pending_key(pattern, str(qtype)))
+        keys_to_remove.add(key)
+        labels_to_remove.add(pattern.lower())
+    if answers and saved == 0:
+        raise ValueError("Could not match any pending questions — refresh the page and try again.")
     if len(human) > MAX_HUMAN_QUESTIONS:
         raise ValueError(f"At most {MAX_HUMAN_QUESTIONS} custom questions are allowed")
-    prefs.human_questions = _validate_human_questions(human)
-    prefs.pending_form_questions = pending
+    human = _validate_human_questions(human)
+
+    def _drop(p: dict) -> bool:
+        if str(p.get("_key") or "") in keys_to_remove:
+            return True
+        if _clean_label_for_pattern(str(p.get("label") or "")).lower() in labels_to_remove:
+            return True
+        if _human_rule_covers(str(p.get("label") or ""), human):
+            return True
+        return False
+
+    pending = [p for p in pending if not _drop(p)]
+    _persist_pending_and_human(prefs, pending, human)
     db.commit()
-    return application_document(db, user)
+    return get_application(db, user)
+
+
+_MAX_AI_SUGGEST_BATCH = 25
+
+
+def suggest_pending_ai_answers(db: Session, user: User, *, ids: list[str] | None = None) -> dict:
+    """Use platform AI (profile + default resume) to draft answers for pending LinkedIn questions."""
+    if not ai_available(db, feature="applications") and not ai_available(db, feature="resume"):
+        raise AppError("AI_DISABLED", "Platform AI is not enabled for applications.", 503)
+    doc = application_document(db, user)
+    policy = doc.get("ai_policy") or {}
+    pending = [p for p in (doc.get("pending_form_questions") or []) if p.get("needs_answer")]
+    if ids is not None:
+        wanted = {str(i).strip() for i in ids if str(i).strip()}
+        pending = [p for p in pending if p.get("id") in wanted]
+    if len(pending) > _MAX_AI_SUGGEST_BATCH:
+        raise ValueError(f"At most {_MAX_AI_SUGGEST_BATCH} questions per request")
+    suggestions: list[dict] = []
+    skipped: list[dict] = []
+    for item in pending:
+        pid = str(item.get("id") or "")
+        label = str(item.get("label") or "")
+        qtype = str(item.get("question_type") or "text").lower()
+        options = item.get("options") if isinstance(item.get("options"), list) else []
+        from automation.answer_format import infer_answer_format
+
+        ai_qtype = "number" if infer_answer_format(label, qtype) == "number" else qtype
+        if not can_use_ai(label.lower(), ai_qtype, policy):
+            skipped.append({"id": pid, "reason": "not_eligible"})
+            continue
+        try:
+            answer = application_ai_service.answer_application_question(
+                db,
+                user.id,
+                question=label,
+                question_type=qtype,
+                options=[str(o) for o in options],
+                job_title=str(item.get("job_title") or ""),
+                company=str(item.get("company") or ""),
+            )
+        except AppError as exc:
+            skipped.append({"id": pid, "reason": exc.code})
+            continue
+        if answer:
+            suggestions.append({"id": pid, "answer": answer[:2000]})
+        else:
+            skipped.append({"id": pid, "reason": "empty"})
+    return {"suggestions": suggestions, "skipped": skipped}
+
+
+def reconcile_pending_form_questions(db: Session, user: User) -> None:
+    """Drop pending rows that already have a custom rule (fixes legacy re-opened items)."""
+    prefs = _application_row(db, user)
+    pending = list(prefs.pending_form_questions or [])
+    human = list(prefs.human_questions or [])
+    by_label: dict[str, dict] = {}
+    changed = False
+    for p in pending:
+        if not isinstance(p, dict):
+            changed = True
+            continue
+        if not p.get("id"):
+            p["id"] = str(uuid.uuid4())
+            changed = True
+        if not p.get("needs_answer") or p.get("has_saved_rule") or _human_rule_covers(str(p.get("label") or ""), human):
+            changed = True
+            continue
+        qtype = str(p.get("question_type") or "text")
+        key = str(p.get("_key") or _pending_key(str(p.get("label") or ""), qtype))
+        p["_key"] = key
+        lk = _pending_label_key(str(p.get("label") or ""))
+        if not lk:
+            changed = True
+            continue
+        prev = by_label.get(lk)
+        if prev is not None:
+            changed = True
+        if prev is None or str(p.get("last_seen_at") or "") >= str(prev.get("last_seen_at") or ""):
+            by_label[lk] = p
+    kept = list(by_label.values())
+    if changed or len(kept) != len(pending):
+        prefs.pending_form_questions = kept
+        flag_modified(prefs, "pending_form_questions")
+        db.commit()
 
 
 def get_application(db: Session, user: User) -> dict:
+    reconcile_pending_form_questions(db, user)
     return application_document(db, user)
 
 
@@ -312,7 +535,7 @@ def update_application(db: Session, user: User, changes: dict) -> dict:
             prefs.ai_policy = {"deny_label_contains": [str(x).strip().lower()[:64] for x in deny if str(x).strip()]}
 
     db.commit()
-    return application_document(db, user)
+    return get_application(db, user)
 
 
 def _ensure_profile(db: Session, user: User) -> UserProfile:

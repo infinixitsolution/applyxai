@@ -98,6 +98,36 @@ if ($InnoSetup) {
 }
 
 Write-Host ""
+Write-Host "Step 6: Packaging ZIP for browser download..." -ForegroundColor Yellow
+$ZipPath = Join-Path $DistDir "ApplyXAI-Agent-Windows.zip"
+$ZipStage = Join-Path $env:TEMP ("applyxai-agent-zip-" + [guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $ZipStage -Force | Out-Null
+$Readme = @"
+ApplyXAI Agent for Windows
+==========================
+
+1. Extract this folder to somewhere permanent (e.g. Desktop\ApplyXAI-Agent).
+2. Run ApplyXAI-Agent-Setup.exe if present, otherwise ApplyXAI-Agent-GUI.exe.
+3. Sign in on applyxai.com, open Automation, and use Connect — Live in the desktop app.
+
+If Chrome or Windows warns about an unsigned file, choose Keep / Run anyway.
+"@
+Set-Content -Path (Join-Path $ZipStage "README.txt") -Value $Readme -Encoding UTF8
+$SetupExe = Join-Path $DistDir "ApplyXAI-Agent-Setup.exe"
+$GuiExe = Join-Path $DistDir "ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
+$CliExe = Join-Path $DistDir "ApplyXAI-Agent\ApplyXAI-Agent.exe"
+if (Test-Path -LiteralPath $SetupExe) {
+    Copy-Item -LiteralPath $SetupExe -Destination $ZipStage
+} else {
+    if (Test-Path -LiteralPath $GuiExe) { Copy-Item -LiteralPath $GuiExe -Destination $ZipStage }
+    if (Test-Path -LiteralPath $CliExe) { Copy-Item -LiteralPath $CliExe -Destination $ZipStage }
+}
+if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+Compress-Archive -Path (Join-Path $ZipStage "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+Remove-Item -LiteralPath $ZipStage -Recurse -Force
+Write-Host "  ZIP: $ZipPath"
+
+Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Green
 Write-Host ""
 Write-Host "Artifacts:"
@@ -106,6 +136,7 @@ Write-Host "  GUI: $DistDir\ApplyXAI-Agent-GUI\ApplyXAI-Agent-GUI.exe"
 if ($InnoSetup) {
     Write-Host "  Installer: $DistDir\ApplyXAI-Agent-Setup.exe"
 }
+Write-Host "  ZIP:   $DistDir\ApplyXAI-Agent-Windows.zip"
 Write-Host ""
 Write-Host "To test the CLI:"
 Write-Host "  cd $DistDir\ApplyXAI-Agent"

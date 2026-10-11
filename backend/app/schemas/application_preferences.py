@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-MAX_HUMAN_QUESTIONS = 80
+MAX_HUMAN_QUESTIONS = 200
 MAX_PATTERN = 500
 MAX_ANSWER = 2000
 MAX_USER_INFO = 20_000
@@ -20,7 +20,7 @@ class HumanQuestionIn(BaseModel):
     @field_validator("field_types")
     @classmethod
     def _types(cls, value: list[str]) -> list[str]:
-        allowed = {"text", "textarea", "select", "radio", "checkbox"}
+        allowed = {"text", "textarea", "select", "radio", "checkbox", "number", "tel"}
         return [t for t in value if t in allowed]
 
 

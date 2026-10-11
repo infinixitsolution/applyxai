@@ -67,8 +67,20 @@ def patch_application(body: dict = Body(...), user: User = Depends(get_current_u
         raise AppError("VALIDATION_ERROR", "Some settings are invalid", status_code=422, details=exc.errors) from None
 
 
+def _suggest_pending_ai(body: dict, user: User, db: Session):
+    ids = body.get("ids") if isinstance(body, dict) else None
+    if ids is not None and not isinstance(ids, list):
+        raise AppError("VALIDATION_ERROR", "ids must be a list when provided", 422)
+    try:
+        return ok(preferences_service.suggest_pending_ai_answers(db, user, ids=ids))
+    except ValueError as exc:
+        raise AppError("VALIDATION_ERROR", str(exc), 422) from None
+
+
 @router.post("/preferences/application/resolve-pending", summary="Answer LinkedIn questions collected during automation")
 def resolve_pending(body: dict = Body(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if isinstance(body, dict) and body.get("mode") == "ai_suggest":
+        return _suggest_pending_ai(body, user, db)
     answers = body.get("answers") if isinstance(body, dict) else None
     if not isinstance(answers, list):
         raise AppError("VALIDATION_ERROR", "answers must be a list", 422)
@@ -76,3 +88,11 @@ def resolve_pending(body: dict = Body(...), user: User = Depends(get_current_use
         return ok(preferences_service.resolve_pending_questions(db, user, answers))
     except ValueError as exc:
         raise AppError("VALIDATION_ERROR", str(exc), 422) from None
+
+
+@router.post(
+    "/preferences/application/suggest-pending-ai",
+    summary="Draft answers for pending LinkedIn questions using profile and default resume",
+)
+def suggest_pending_ai(body: dict = Body(default={}), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _suggest_pending_ai(body if isinstance(body, dict) else {}, user, db)

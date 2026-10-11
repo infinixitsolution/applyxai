@@ -116,15 +116,21 @@ export const preferences = {
   application: () => request<import("../types").ApplicationPreferencesOut>("/preferences/application"),
   patchApplication: (changes: Record<string, unknown>) =>
     request<import("../types").ApplicationPreferencesOut>("/preferences/application", { method: "PATCH", body: changes }),
-  resolvePending: (body: { answers: { id: string; answer: string }[] }) =>
+  resolvePending: (body: { answers: { id: string; answer: string; label?: string; question_type?: string }[] }) =>
     request<import("../types").ApplicationPreferencesOut>("/preferences/application/resolve-pending", {
       method: "POST",
       body,
     }),
+  suggestPendingAi: (body: { ids?: string[] }) => {
+    type Out = { suggestions: { id: string; answer: string }[]; skipped: { id: string; reason: string }[] };
+    const payload = { mode: "ai_suggest" as const, ids: body.ids };
+    return request<Out>("/preferences/application/resolve-pending", { method: "POST", body: payload });
+  },
 };
 
 export const resumes = {
-  list: () => request<{ resumes: Resume[]; limit: number }>("/resumes"),
+  list: () =>
+    request<{ resumes: Resume[]; limit: number; library_count?: number; built_count?: number }>("/resumes"),
   templates: () => request<{ templates: ResumeTemplate[] }>("/resumes/templates"),
   upload: (file: File, name?: string) => {
     const form = new FormData();
@@ -240,8 +246,12 @@ export const automation = {
   logs: (id: string, after: number) =>
     request<{ items: RunLogLine[]; next_after: number }>(`/automation/${id}/logs`, { query: { after } }),
   devices: () => request<{ devices: AgentDevice[] }>("/automation/devices").then((d) => d.devices),
-  desktopAgentDownloadUrl: () =>
-    import.meta.env.VITE_AGENT_DOWNLOAD_URL || buildUrl("/automation/desktop-agent/download"),
+  desktopAgentDownloadUrl: (format: "exe" | "zip" = "exe") => {
+    const direct = import.meta.env.VITE_AGENT_DOWNLOAD_URL;
+    if (direct && format === "exe") return direct;
+    const base = buildUrl("/automation/desktop-agent/download");
+    return format === "zip" ? `${base}?format=zip` : base;
+  },
   desktopAgentInfo: () => request<DesktopAgentInfo>("/automation/desktop-agent/info"),
   pairingCode: () => request<{ code: string; expires_at: string }>("/automation/devices/pairing-code", { method: "POST" }),
   approveConnect: (sessionId: string) =>

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
-import { TextInput } from "./form";
+import { PendingQuestionAnswerField } from "../features/PendingQuestionAnswerField";
 import { Button } from "./ui";
 import { errorMessage } from "../services/api";
 import { preferences } from "../services/endpoints";
@@ -28,7 +28,12 @@ export function PendingQuestionsModal({
     mutationFn: () =>
       preferences.resolvePending({
         answers: need
-          .map((q) => ({ id: q.id, answer: (answers[q.id] ?? "").trim() }))
+          .map((q) => ({
+            id: q.id,
+            answer: (answers[q.id] ?? "").trim(),
+            label: q.label,
+            question_type: q.question_type,
+          }))
           .filter((row) => row.answer.length > 0),
       }),
     onSuccess: () => {
@@ -77,12 +82,13 @@ export function PendingQuestionsModal({
               <p className="mt-1 text-xs text-slate-500">Options: {q.options.join(", ")}</p>
             )}
             <p className="mt-1 text-xs uppercase tracking-wide text-slate-400">{q.question_type}</p>
-            <TextInput
-              className="mt-3"
-              label="Your answer"
-              value={answers[q.id] ?? ""}
-              onChange={(v) => setAnswers((prev) => ({ ...prev, [q.id]: v }))}
-            />
+            <div className="mt-3">
+              <PendingQuestionAnswerField
+                q={q}
+                value={answers[q.id] ?? ""}
+                onChange={(v) => setAnswers((prev) => ({ ...prev, [q.id]: v }))}
+              />
+            </div>
           </li>
         ))}
       </ul>

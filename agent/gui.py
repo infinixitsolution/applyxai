@@ -76,6 +76,9 @@ class AgentGUI:
         self._build_ui()
         self._process_queue()
         self._refresh_status()
+        self._start_local_wake_server()
+        self._load_linkedin_from_disk()
+        self.root.after(1500, self._schedule_stats_refresh)
 
     def _get_home(self):
         if AGENT_MODULES_AVAILABLE:
@@ -131,12 +134,19 @@ class AgentGUI:
 
         shell = tk.Frame(self.root, bg=BG)
         shell.grid(row=0, column=0, sticky="nsew")
-        shell.columnconfigure(1, weight=1)
+        shell.columnconfigure(0, weight=0, minsize=272)
+        shell.columnconfigure(1, weight=0, minsize=1)
+        shell.columnconfigure(2, weight=1)
         shell.rowconfigure(0, weight=1)
 
-        self._build_sidebar(shell)
+        self._sidebar_frame = tk.Frame(shell, bg=SIDEBAR, width=272)
+        self._sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self._sidebar_frame.grid_propagate(False)
+        tk.Frame(shell, bg=BORDER, width=1).grid(row=0, column=1, sticky="ns")
+
+        self._build_sidebar(self._sidebar_frame)
         main = tk.Frame(shell, bg=PAGE)
-        main.grid(row=0, column=1, sticky="nsew")
+        main.grid(row=0, column=2, sticky="nsew")
         main.columnconfigure(0, weight=1)
         main.rowconfigure(1, weight=1)
 
@@ -144,14 +154,14 @@ class AgentGUI:
         self._build_views(main)
         self._build_footer(main)
         self._set_nav("home")
+        self._sidebar_frame.lift()
+        self.root.update_idletasks()
 
     def _build_sidebar(self, parent):
-        side = tk.Frame(parent, bg=SIDEBAR, width=248, highlightbackground=BORDER, highlightthickness=1)
-        side.grid(row=0, column=0, sticky="ns")
-        side.grid_propagate(False)
+        side = parent
 
         brand = tk.Frame(side, bg=SIDEBAR)
-        brand.pack(fill=tk.X, padx=20, pady=(22, 18))
+        brand.pack(fill=tk.X, padx=16, pady=(20, 12))
         mascot = self._load_mascot_photo(max_side=36, attr="_sidebar_mascot")
         if mascot:
             tk.Label(brand, image=mascot, bg=SIDEBAR, borderwidth=0).pack(side=tk.LEFT, padx=(0, 10))
@@ -160,19 +170,25 @@ class AgentGUI:
             font=("Segoe UI", 13, "bold"), justify=tk.LEFT,
         ).pack(side=tk.LEFT)
 
-        nav = tk.Frame(side, bg=SIDEBAR)
-        nav.pack(fill=tk.X, padx=12, pady=(8, 0))
+        tk.Label(
+            side, text="MENU", bg=SIDEBAR, fg=MUTED, font=("Segoe UI", 8, "bold"),
+        ).pack(anchor=tk.W, padx=20, pady=(0, 4))
+
+        nav_host = tk.Frame(side, bg=SIDEBAR)
+        nav_host.pack(fill=tk.BOTH, expand=True, padx=8)
+        nav = tk.Frame(nav_host, bg=SIDEBAR)
+        nav.pack(fill=tk.X, pady=(0, 8))
         for key, label, icon in (
             ("home", "Home", "⌂"),
             ("automation", "Automation", "⚡"),
             ("log", "Activity Log", "☰"),
-            ("linkedin", "LinkedIn (Optional)", "in"),
+            ("linkedin", "LinkedIn", "in"),
             ("settings", "Settings", "⚙"),
         ):
             self._nav_buttons[key] = self._nav_item(nav, icon, label, lambda k=key: self._set_nav(k))
 
         promo = tk.Frame(side, bg=BRAND_SOFT, highlightbackground=BRAND_LIGHT, highlightthickness=1)
-        promo.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=16)
+        promo.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=12)
         mini = self._load_mascot_photo(max_side=56, attr="_promo_mascot")
         if mini:
             tk.Label(promo, image=mini, bg=BRAND_SOFT).pack(pady=(14, 6))
@@ -220,9 +236,15 @@ class AgentGUI:
                     child.configure(bg=bg, fg=BRAND if active else TEXT_SOFT)
         for frame in self._views.values():
             frame.grid_remove()
-        target = {"automation": "home", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(key, "home")
+        target = {"automation": "automation", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(
+            key, "home",
+        )
         self._views[target].grid(row=0, column=0, sticky="nsew")
         self._place_linkedin_card(key == "linkedin")
+        if key in ("home", "automation"):
+            self._refresh_stats()
+        if key == "settings":
+            self._load_settings_display()
 
     def _build_top_bar(self, parent):
         bar = tk.Frame(parent, bg=PAGE)
@@ -268,6 +290,12 @@ class AgentGUI:
         self._views["home"] = home
         self._build_dashboard(home)
 
+        automation = tk.Frame(stack, bg=PAGE)
+        automation.columnconfigure(0, weight=1)
+        automation.rowconfigure(0, weight=1)
+        self._views["automation"] = automation
+        self._build_automation_page(automation)
+
         log_view = tk.Frame(stack, bg=PAGE)
         log_view.columnconfigure(0, weight=1)
         log_view.rowconfigure(0, weight=1)
@@ -284,27 +312,55 @@ class AgentGUI:
         self._views["linkedin"] = linkedin_view
         self._linkedin_nav_host = tk.Frame(linkedin_view, bg=PAGE)
         self._linkedin_nav_host.grid(row=0, column=0, sticky="n", padx=24, pady=24)
+        self._build_linkedin_card(self._linkedin_nav_host)
 
         settings_view = tk.Frame(stack, bg=PAGE)
         settings_view.columnconfigure(0, weight=1)
         self._views["settings"] = settings_view
-        scard = self._card(settings_view, "Settings", "⚙", "Agent data and connection on this PC.")
-        scard.master.grid(row=0, column=0, sticky="new", padx=8, pady=8)
-        ttk.Button(scard, text="Open data folder", style="Secondary.TButton", command=self._open_logs_folder).grid(
-            row=2, column=0, sticky=tk.W, pady=(12, 8),
+        scard = self._card(
+            settings_view,
+            "Settings",
+            "⚙",
+            "Local agent data on this PC (passwords are never shown here).",
         )
-        ttk.Button(scard, text="Disconnect from ApplyXAI", style="Danger.TButton", command=self._on_unpair).grid(
-            row=3, column=0, sticky=tk.W,
+        scard.master.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        scard.rowconfigure(2, weight=1)
+        settings_view.rowconfigure(0, weight=1)
+        self.settings_text = scrolledtext.ScrolledText(
+            scard, height=16, wrap=tk.WORD, font=("Consolas", 9), bg=LOG_BG, fg=TEXT,
+        )
+        self.settings_text.grid(row=2, column=0, sticky="nsew", pady=(12, 8))
+        self.settings_text.config(state=tk.DISABLED)
+        btn_row = tk.Frame(scard, bg=SURFACE)
+        btn_row.grid(row=3, column=0, sticky="ew")
+        ttk.Button(btn_row, text="↻  Refresh", style="Secondary.TButton", command=self._load_settings_display).pack(
+            side=tk.LEFT, padx=(0, 8),
+        )
+        ttk.Button(btn_row, text="Disconnect from ApplyXAI", style="Danger.TButton", command=self._on_unpair).pack(
+            side=tk.LEFT,
         )
         tk.Label(
-            scard, text=f"Version {AGENT_VERSION}", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9),
-        ).grid(row=4, column=0, sticky=tk.W, pady=(16, 0))
+            scard, text=f"Version {AGENT_VERSION} · Folder: {self.home}", bg=SURFACE, fg=MUTED,
+            font=("Segoe UI", 9), wraplength=720, justify=tk.LEFT,
+        ).grid(row=4, column=0, sticky=tk.W, pady=(12, 0))
+
+    def _build_stats_row(self, parent, row: int) -> dict:
+        stats_row = tk.Frame(parent, bg=PAGE)
+        stats_row.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        for c in range(4):
+            stats_row.columnconfigure(c, weight=1)
+        return {
+            "applied": self._metric_card(stats_row, 0, "Applied (month)", "✓", "—"),
+            "today": self._metric_card(stats_row, 1, "Applied today", "📅", "—"),
+            "success": self._metric_card(stats_row, 2, "Success rate", "%", "—"),
+            "run": self._metric_card(stats_row, 3, "Active run", "⚡", "None"),
+        }
 
     def _build_dashboard(self, parent):
         left = tk.Frame(parent, bg=PAGE)
         left.grid(row=0, column=0, sticky="nsew", padx=(8, 10), pady=8)
         left.columnconfigure(0, weight=1)
-        left.rowconfigure(3, weight=1)
+        left.rowconfigure(4, weight=1)
 
         status_row = tk.Frame(left, bg=PAGE)
         status_row.grid(row=0, column=0, sticky="ew", pady=(0, 12))
@@ -317,8 +373,10 @@ class AgentGUI:
         self._server_badge = self._server_card["badge"]
         self._device_badge = self._device_card["badge"]
 
+        self._home_stats = self._build_stats_row(left, 1)
+
         connect = self._card(left, "Connect to ApplyXAI", "🔗", "Your browser will open so you can sign in and approve this computer.")
-        connect.master.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        connect.master.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         seg = tk.Frame(connect, bg=BORDER)
         seg.grid(row=2, column=0, sticky=tk.W, pady=(12, 0))
         self.connect_local_btn = tk.Button(
@@ -337,34 +395,29 @@ class AgentGUI:
         self.pair_button = self.connect_live_btn
         self._style_connect_buttons()
 
-        control = self._card(left, "Automation", "⚙", "Control the agent and manage your automation session.")
-        control.master.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        ctrl = tk.Frame(control, bg=SURFACE)
-        ctrl.grid(row=2, column=0, sticky="ew", pady=(12, 0))
-        self.start_button = ttk.Button(ctrl, text="▶  Start Agent", style="Primary.TButton", command=self._on_start)
-        self.start_button.pack(side=tk.LEFT, padx=(0, 8))
-        self.stop_button = ttk.Button(
-            ctrl, text="■  Stop", style="Danger.TButton", command=self._on_stop, state=tk.DISABLED,
+        hint = self._card(
+            left,
+            "Automation",
+            "⚡",
+            "Start a run from the ApplyXAI website (Automation page). This app will pick it up when the agent is running.",
         )
-        self.stop_button.pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(ctrl, text="↻  Refresh", style="Secondary.TButton", command=self._refresh_status).pack(
-            side=tk.LEFT, padx=(0, 8),
+        hint.master.grid(row=3, column=0, sticky="ew", pady=(0, 12))
+        ttk.Button(hint, text="Open Automation controls →", style="Secondary.TButton", command=lambda: self._set_nav("automation")).grid(
+            row=2, column=0, sticky=tk.W, pady=(12, 0),
         )
-        ttk.Button(ctrl, text="⎋  Disconnect", style="Secondary.TButton", command=self._on_unpair).pack(side=tk.LEFT)
 
         log_card = self._card(
             left, "Activity Log", "📄",
             "Real-time logs of the agent's activity will appear here.",
             expand=True,
         )
-        log_card.master.grid(row=3, column=0, sticky="nsew")
+        log_card.master.grid(row=4, column=0, sticky="nsew")
         log_card.rowconfigure(2, weight=1)
         self._attach_log_panel(log_card)
 
         right = tk.Frame(parent, bg=PAGE)
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 8), pady=8)
         right.columnconfigure(0, weight=1)
-        self._linkedin_dashboard_host = right
 
         qa = self._card(right, "Quick Actions", "⚡")
         qa.master.grid(row=0, column=0, sticky="ew", pady=(0, 12))
@@ -379,9 +432,36 @@ class AgentGUI:
             grid, 1, 1, "⎋", "Disconnect", "End session", self._on_unpair, DANGER,
         )
 
-        self._build_linkedin_card(right)
-
         self.status_label = self._device_badge
+        self._automation_control_host = None
+
+    def _build_automation_page(self, parent):
+        body = tk.Frame(parent, bg=PAGE, padx=8, pady=8)
+        body.pack(fill=tk.BOTH, expand=True)
+        body.columnconfigure(0, weight=1)
+
+        self._auto_stats = self._build_stats_row(body, 0)
+
+        control = self._card(body, "Automation controls", "⚙", "Start the agent here, then queue a run from the website.")
+        control.master.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        ctrl = tk.Frame(control, bg=SURFACE)
+        ctrl.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        self.start_button = ttk.Button(ctrl, text="▶  Start Agent", style="Primary.TButton", command=self._on_start)
+        self.start_button.pack(side=tk.LEFT, padx=(0, 8))
+        self.stop_button = ttk.Button(
+            ctrl, text="■  Stop", style="Danger.TButton", command=self._on_stop, state=tk.DISABLED,
+        )
+        self.stop_button.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(ctrl, text="↻  Refresh stats", style="Secondary.TButton", command=self._refresh_stats).pack(
+            side=tk.LEFT, padx=(0, 8),
+        )
+        ttk.Button(ctrl, text="⎋  Disconnect", style="Secondary.TButton", command=self._on_unpair).pack(side=tk.LEFT)
+
+        self._run_detail = tk.Label(
+            control, text="No active run.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 9),
+            wraplength=900, justify=tk.LEFT,
+        )
+        self._run_detail.grid(row=3, column=0, sticky="w", pady=(12, 0))
 
     def _card(self, parent, title: str, icon: str = "", subtitle: str = "", *, expand: bool = False) -> tk.Frame:
         outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
@@ -447,9 +527,10 @@ class AgentGUI:
         if outer is None:
             return
         outer.grid_forget()
-        host = self._linkedin_nav_host if on_linkedin_view else self._linkedin_dashboard_host
-        row = 0 if on_linkedin_view else 1
-        outer.grid(row=row, column=0, sticky="ew", in_=host)
+        if not on_linkedin_view:
+            outer.grid_forget()
+            return
+        outer.grid(row=0, column=0, sticky="ew", in_=self._linkedin_nav_host)
 
     def _build_linkedin_card(self, parent):
         card = self._card(
@@ -459,7 +540,7 @@ class AgentGUI:
             "Add your LinkedIn credentials for better results.",
         )
         self._linkedin_card_outer = card.master
-        card.master.grid(row=1, column=0, sticky="ew")
+        card.master.grid(row=0, column=0, sticky="ew")
 
         email_row = tk.Frame(card, bg=SURFACE)
         email_row.grid(row=2, column=0, sticky="ew", pady=(12, 8))
@@ -797,15 +878,145 @@ class AgentGUI:
             messagebox.showerror("Error", f"Failed to save credentials: {e}")
             self._log(f"Failed to save credentials: {e}")
 
-    def _open_logs_folder(self):
-        path = Path(self.home)
-        if path.exists():
-            subprocess.Popen(["explorer", str(path)])
+    def _start_local_wake_server(self) -> None:
+        try:
+            from agent.local_wake import start_wake_server
+
+            start_wake_server(lambda: self.root.after(0, self._on_wake_from_browser))
+        except Exception as exc:
+            self._log(f"Local wake listener unavailable: {exc}")
+
+    def _on_wake_from_browser(self) -> None:
+        if self.agent_running:
+            self._log("Browser requested agent start — already running.")
+            return
+        self._log("Run queued from website — starting agent…")
+        self._on_start()
+
+    def _schedule_stats_refresh(self) -> None:
+        self._refresh_stats()
+        self.root.after(30_000, self._schedule_stats_refresh)
+
+    def _refresh_stats(self) -> None:
+        threading.Thread(target=self._do_refresh_stats, daemon=True).start()
+
+    def _apply_stats_cards(self, cards: dict, stats: dict, overview: dict | None) -> None:
+        usage = stats.get("usage") or {}
+        apps = usage.get("applications") or {}
+        applied = apps.get("used", stats.get("total_applied", "—"))
+        cards["applied"]["value"].config(text=str(applied))
+        cards["today"]["value"].config(text=str(stats.get("applied_today", "—")))
+        rate = stats.get("success_rate")
+        cards["success"]["value"].config(
+            text="—" if rate is None else f"{int(round(float(rate) * 100))}%",
+        )
+        active = (stats.get("automation") or {}).get("active")
+        if active:
+            cards["run"]["value"].config(
+                text=f"{active.get('status', 'active')} · {active.get('successful_count', 0)} ok",
+            )
+            cards["run"]["badge"].config(text="● Running", bg=SUCCESS_BG, fg=SUCCESS_FG)
         else:
-            messagebox.showinfo("Info", f"Data folder does not exist yet: {path}")
+            cards["run"]["value"].config(text="None")
+            cards["run"]["badge"].config(text="Idle", bg="#f1f5f9", fg=MUTED)
+        if overview and getattr(self, "_run_detail", None):
+            run = overview.get("active")
+            if run:
+                detail = (
+                    f"Run {run.get('status')} · {run.get('successful_count', 0)} applied, "
+                    f"{run.get('failed_count', 0)} failed, {run.get('skipped_count', 0)} skipped"
+                )
+                if run.get("current_job"):
+                    detail += f" · Now: {run['current_job']}"
+                self._run_detail.config(text=detail, fg=TEXT)
+            else:
+                self._run_detail.config(text="No active run. Start the agent, then queue a run on the website.", fg=MUTED)
+
+    def _do_refresh_stats(self) -> None:
+        if not AGENT_MODULES_AVAILABLE:
+            return
+        try:
+            from agent import config
+            from agent.client import ApiClient
+
+            cfg = config.load(Path(self.home))
+            if cfg is None:
+                return
+            client = ApiClient(cfg.server, cfg.token)
+            stats = client.dashboard_stats()
+            overview = client.automation_overview()
+            self.root.after(0, lambda: self._apply_stats_cards(self._home_stats, stats, overview))
+            self.root.after(0, lambda: self._apply_stats_cards(self._auto_stats, stats, overview))
+        except Exception as exc:
+            self._log(f"Stats refresh failed: {exc}")
+
+    def _load_settings_display(self) -> None:
+        lines: list[str] = [f"Data folder: {self.home}", ""]
+        home = Path(self.home)
+        for name in ("user_config.json", "config.json", "paired.json"):
+            path = home / name
+            lines.append(f"--- {name} ---")
+            if not path.is_file():
+                lines.append("(not created yet)")
+                lines.append("")
+                continue
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if name == "user_config.json" and isinstance(raw.get("secrets"), dict):
+                    raw = {**raw, "secrets": {**raw["secrets"], "password": "(saved locally — hidden)"}}
+                lines.append(json.dumps(raw, indent=2))
+            except Exception as exc:
+                lines.append(f"(could not read: {exc})")
+            lines.append("")
+        if AGENT_MODULES_AVAILABLE:
+            try:
+                from agent import config as agent_config
+
+                cfg = agent_config.load(home)
+                if cfg:
+                    lines.append("--- connection ---")
+                    lines.append(json.dumps({"server": cfg.server, "name": cfg.name, "user_id": cfg.user_id}, indent=2))
+            except Exception:
+                pass
+        text = "\n".join(lines)
+        self.settings_text.config(state=tk.NORMAL)
+        self.settings_text.delete("1.0", tk.END)
+        self.settings_text.insert(tk.END, text)
+        self.settings_text.config(state=tk.DISABLED)
+
+    def _load_linkedin_from_disk(self) -> None:
+        path = Path(self.home) / "user_config.json"
+        if not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            secrets = data.get("secrets") or {}
+            email = secrets.get("username") or ""
+            if email and hasattr(self, "linkedin_email"):
+                self.linkedin_email.delete(0, tk.END)
+                self.linkedin_email.insert(0, email)
+        except Exception:
+            pass
+
+
+def _enable_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            import ctypes
+
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 
 def main():
+    _enable_windows_dpi_awareness()
     root = tk.Tk()
     AgentGUI(root)
     root.mainloop()

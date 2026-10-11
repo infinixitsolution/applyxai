@@ -13,6 +13,8 @@ This installer makes the ApplyXAI Agent installable on any Windows laptop withou
 
 Double-click the setup, approve UAC, optional desktop shortcut, then launch **ApplyXAI Agent** from the Start Menu.
 
+**Chrome blocked the download?** Use **Download ZIP** on the Automation page (extract, then run the setup). For a blocked `.exe`, open Chrome’s downloads → ⋮ on the file → **Keep** / **Download unverified file**. The installer is not code-signed yet ([BACKLOG #22](./BACKLOG.md)); SmartScreen warnings are expected until signing is in place.
+
 **Build the setup (developers):** after `scripts\build_agent.bat`, install [Inno Setup 6](https://jrsoftware.org/isdl.php), then:
 
 ```bat

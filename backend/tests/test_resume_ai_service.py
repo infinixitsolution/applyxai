@@ -58,7 +58,7 @@ def test_build_resume_version_name(db):
         master_skills=["Python", "Django"],
         patch={"skills_order": ["Django", "Python"]},
     )
-    assert name == "Ada Lovelace_Django_5 years"
+    assert name == "Ada_Lovelace_Django-Python_5y"
     titled = build_resume_version_name(
         db,
         user,
@@ -67,7 +67,7 @@ def test_build_resume_version_name(db):
         job_title="Backend Engineer",
         company="Acme",
     )
-    assert titled == "Ada Lovelace_Backend Engineer_Acme_5 years"
+    assert titled == "Ada_Lovelace_Python_5y"
 
 
 def test_humanize_strips_ai_buzzwords():

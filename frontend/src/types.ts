@@ -278,6 +278,7 @@ export interface DesktopAgentInfo {
   available: boolean;
   filename: string | null;
   size_bytes: number | null;
+  zip?: { filename: string; size_bytes: number } | null;
 }
 
 export type ResumeRunMode = "default" | "tailor_if_gate";

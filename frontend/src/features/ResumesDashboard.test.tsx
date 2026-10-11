@@ -104,4 +104,74 @@ describe("ResumesDashboard", () => {
     expect(await screen.findByText("Default for automation")).toBeTruthy();
     expect(screen.getAllByText("Main CV").length).toBeGreaterThan(0);
   });
+
+  it("shows built resumes section for automation copies", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("/resumes/templates")) return ok({ templates: [] });
+      if (url.includes("/resumes") && !url.includes("templates")) {
+        return ok({
+          resumes: [
+            {
+              id: "built-1",
+              name: "Jane_Doe_Python_v-2.pdf",
+              filename: "Jane_Doe_Python_v-2.pdf",
+              is_default: false,
+              file_type: "pdf",
+              file_size: 900,
+              created_at: "2026-10-02T00:00:00Z",
+              ai_metadata: { generated_by: "automation", job_title: "Engineer", company: "Acme" },
+            },
+          ],
+          limit: 1,
+          library_count: 0,
+          built_count: 1,
+        });
+      }
+      if (url.includes("/dashboard/stats")) {
+        return ok({
+          applications_by_status: { applied: 0, failed: 0, skipped: 0, queued: 0, running: 0, discovered: 0, external: 0, cancelled: 0 },
+          total_applied: 0, applied_today: 0, success_rate: 0, daily: [], top_companies: [], recent_applications: [],
+          automation: { active: null, last: null },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 0, limit: 1, remaining: 1 },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+        });
+      }
+      if (url.includes("/automation/overview")) {
+        return ok({
+          devices: [],
+          active: null,
+          recent: [],
+          agent_online: false,
+          readiness: { ready: false, problems: [] },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 0, limit: 1, remaining: 1 },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+          resume_tailor: { mode: "default", resume_ai_available: false, master_skills_ready: false, can_tailor: false },
+        });
+      }
+      throw new Error(url);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <ResumesDashboard />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Built resumes" })).toBeTruthy();
+    expect(screen.getAllByText("Jane_Doe_Python_v-2.pdf").length).toBeGreaterThan(0);
+    expect(screen.getByText("Engineer · Acme")).toBeTruthy();
+    expect(screen.getByText("Auto apply")).toBeTruthy();
+  });
 });

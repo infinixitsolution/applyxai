@@ -8,6 +8,8 @@ from typing import Callable
 
 import requests
 
+from automation.answer_format import infer_answer_format, normalize_numeric_answer
+
 log = logging.getLogger(__name__)
 
 _API_BASE = ""
@@ -48,7 +50,7 @@ def _deny_list(ai_policy: dict) -> list[str]:
 
 
 def can_use_ai(label_lower: str, question_type: str, ai_policy: dict) -> bool:
-    if question_type not in ("text", "textarea", "select", "radio"):
+    if question_type not in ("text", "textarea", "select", "radio", "number", "tel"):
         return False
     for d in _deny_list(ai_policy):
         if d in label_lower:
@@ -183,5 +185,7 @@ def resolve_missing_answer(
             user_information_all=user_information_all,
         )
         if ai:
+            if infer_answer_format(label_org, question_type) == "number":
+                ai = normalize_numeric_answer(label_org, ai)
             return ai
     return None

@@ -88,6 +88,12 @@ class ApiClient:
     def me(self) -> dict:
         return self._send("GET", "/agent/me")
 
+    def dashboard_stats(self) -> dict:
+        return self._send("GET", "/agent/dashboard-stats")
+
+    def automation_overview(self) -> dict:
+        return self._send("GET", "/agent/automation-overview")
+
     def unpair(self) -> dict:
         return self._send("POST", "/agent/unpair")
 

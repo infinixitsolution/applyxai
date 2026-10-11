@@ -31,8 +31,14 @@ def _out(resume) -> dict:
 
 @router.get("", summary="List your resumes")
 def list_resumes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok({"resumes": [_out(r) for r in resume_service.list_resumes(db, user)],
-               "limit": plan_limits(db, user.id)["resumes"]})
+    rows = resume_service.list_resumes(db, user)
+    built = sum(1 for r in rows if not resume_service.counts_toward_plan_limit(r))
+    return ok({
+        "resumes": [_out(r) for r in rows],
+        "limit": plan_limits(db, user.id)["resumes"],
+        "library_count": resume_service.resumes_counting_toward_limit(db, user.id),
+        "built_count": built,
+    })
 
 
 @router.get("/templates", summary="List resume style templates")

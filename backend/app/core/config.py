@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Desktop agent download: prefer single Setup.exe, else GUI-only fallback.
     DESKTOP_AGENT_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Setup.exe"
     DESKTOP_AGENT_GUI_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-GUI.exe"
+    DESKTOP_AGENT_ZIP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Windows.zip"
     AGENT_LATEST_VERSION: str = "1.1.5"
     AGENT_DOWNLOAD_URL: str = ""
 

@@ -9,6 +9,7 @@ import { useToast } from "../../components/Toast";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
 import { Alert, Badge, Button, ButtonLink, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
 import { agentServerUrl } from "../../lib/config";
+import { wakeDesktopAgent } from "../../lib/wakeDesktopAgent";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
 import { automation, preferences } from "../../services/endpoints";
@@ -130,6 +131,7 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
     mutationFn: (mode: ResumeRunMode) => automation.start({ dry_run: dryRun, resume_mode: mode }),
     onSuccess: () => {
       toast.success(dryRun ? "Practice run queued." : "Run queued.");
+      wakeDesktopAgent();
       setConfirmOpen(false);
       void client.invalidateQueries({ queryKey: ["automation"] });
       void client.invalidateQueries({ queryKey: ["preferences", "search"] });
