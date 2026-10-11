@@ -27,6 +27,7 @@ from backend.app.schemas.mock_interview import (
 )
 from backend.app.services import mock_interview_service as svc
 from backend.app.services.ai_service import transcribe_audio
+from backend.app.services.mock_interview_prompts import MAX_TURNS_BEFORE_END
 
 router = APIRouter(prefix="/mock-interviews", tags=["mock-interviews"])
 
@@ -57,6 +58,7 @@ def _summary(session: MockInterviewSession) -> MockInterviewSessionSummary:
         updated_at=session.updated_at,
         overall_score=overall,
         max_duration_seconds=timing.max_duration_seconds,
+        max_questions=MAX_TURNS_BEFORE_END,
         ends_at=timing.ends_at,
         seconds_remaining=remaining,
     )

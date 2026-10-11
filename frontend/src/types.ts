@@ -1031,6 +1031,7 @@ export interface MockInterviewSessionSummary {
   updated_at: string;
   overall_score?: number | null;
   max_duration_seconds: number;
+  max_questions?: number;
   ends_at: string;
   seconds_remaining?: number | null;
 }

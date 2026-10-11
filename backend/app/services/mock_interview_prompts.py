@@ -9,8 +9,8 @@ INTERVIEWER_JSON_RULES = (
     "Set should_end to true only when you are politely closing the interview after enough questions."
 )
 
-MAX_TURNS_BEFORE_END = 12
-SUGGEST_END_AFTER_TURNS = 10
+MAX_TURNS_BEFORE_END = 20
+SUGGEST_END_AFTER_TURNS = 18
 MOCK_INTERVIEW_MAX_DURATION_MINUTES = 30
 MOCK_INTERVIEW_MAX_DURATION_SEC = MOCK_INTERVIEW_MAX_DURATION_MINUTES * 60
 
@@ -63,7 +63,8 @@ def interviewer_system_prompt(
         )
     time_hint = (
         f"\nThis is a timed mock interview: maximum {MOCK_INTERVIEW_MAX_DURATION_MINUTES} minutes from the start. "
-        "Pace yourself (roughly 2-4 minutes per exchange including the candidate's answer)."
+        f"You may ask up to {MAX_TURNS_BEFORE_END} questions, so keep each turn short and focused "
+        "(roughly 1-2 minutes per exchange including the candidate's answer)."
     )
     if minutes_remaining is not None:
         if minutes_remaining <= 2:
@@ -71,7 +72,7 @@ def interviewer_system_prompt(
                 f"\nOnly about {minutes_remaining} minute(s) remain — thank the candidate and close the interview "
                 "with should_end true; do not ask another question."
             )
-        elif minutes_remaining <= 8:
+        elif minutes_remaining <= 5:
             time_hint += f"\nAbout {minutes_remaining} minutes remain — ask at most one more question, then wrap up."
     return (
         "You are a professional hiring manager conducting a live mock job interview for the candidate below. "

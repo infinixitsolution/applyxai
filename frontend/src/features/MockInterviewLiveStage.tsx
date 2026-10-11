@@ -31,7 +31,7 @@ const TRACKED_PARAMS = [
   { icon: Smile, label: "Behavior & attitude" },
 ] as const;
 
-const MAX_QUESTIONS = 12;
+const DEFAULT_MAX_QUESTIONS = 20;
 
 function PanelBadge({ children, tone }: { children: ReactNode; tone?: "brand" | "green" | "neutral" }) {
   const cls =
@@ -166,7 +166,7 @@ export function MockInterviewLiveStage({
             Live
           </span>
           <span className="rounded-full bg-black/20 px-2.5 py-1 text-xs font-medium">
-            Q {qDisplay}/{MAX_QUESTIONS}
+            Q {qDisplay}/{session.max_questions ?? DEFAULT_MAX_QUESTIONS}
           </span>
           {secondsLeft !== null && (
             <span

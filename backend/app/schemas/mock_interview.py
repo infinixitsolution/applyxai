@@ -62,6 +62,7 @@ class MockInterviewSessionSummary(BaseModel):
     updated_at: datetime
     overall_score: int | None = None
     max_duration_seconds: int = 1800
+    max_questions: int = 20
     ends_at: datetime
     seconds_remaining: int | None = None
 
