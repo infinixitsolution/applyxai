@@ -6,7 +6,7 @@ import { Select, TextInput } from "../components/form";
 import { ConfirmDialog, Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { Alert, Badge, Button, EmptyState, Spinner } from "../components/ui";
-import { formatBytes, formatDate } from "../lib/format";
+import { formatBytes, formatDate, isUnlimitedUsageCap } from "../lib/format";
 import {
   builtResumeJobLine,
   builtResumeLabel,
@@ -200,8 +200,12 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
   const { built, uploads } = splitResumeLibrary(data.resumes);
-  const libraryCount = data.library_count ?? uploads.length;
-  const atLimit = data.limit > 0 && libraryCount >= data.limit;
+  const created = data.created_this_month ?? 0;
+  const unlimited = isUnlimitedUsageCap(data.limit, "resumes");
+  const atLimit = !unlimited && created >= data.limit;
+  const allowance = unlimited
+    ? "Unlimited new resumes"
+    : `${created} of ${data.limit} new resume${data.limit === 1 ? "" : "s"} this month`;
   const hasAny = data.resumes.length > 0;
 
   const renderDashboardRow = (r: Resume, variant: "built" | "upload") => {
@@ -302,14 +306,14 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
           <header className="mb-4">
             <h2 className="text-base font-semibold text-slate-900">Uploaded resumes</h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              {libraryCount} of {data.limit} upload slot{data.limit === 1 ? "" : "s"} · PDF or DOCX, up to 5 MB
+              {allowance} · PDF or DOCX, up to 5 MB
             </p>
           </header>
         )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {!dashboardShell && (
             <p className="text-sm text-slate-600">
-              {data.resumes.length} of {data.limit} resume{data.limit === 1 ? "" : "s"} used · PDF or DOCX, up to 5 MB · scanned PDFs use OCR
+              {allowance} · PDF or DOCX, up to 5 MB · scanned PDFs use OCR
             </p>
           )}
           <input ref={input} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -324,7 +328,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
           </Button>
         </div>
       {atLimit && (
-        <Alert kind="info">You've reached your plan's resume limit. Delete one, or <Link to="/app/billing" className="font-medium underline">upgrade your plan</Link>.</Alert>
+        <Alert kind="info">You've created all {data.limit} resumes your plan allows this month. <Link to="/app/billing" className="font-medium underline">Upgrade your plan</Link> or wait for next month's reset.</Alert>
       )}
 
       {onboarding && !hasAny && (
@@ -415,7 +419,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
           <header className="mb-4">
             <h2 className="text-base font-semibold text-slate-900">Built resumes</h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              Tailored and automation copies ({built.length}) — do not count toward your upload limit
+              Tailored and automation copies ({built.length}). Tailored versions you create here count toward your monthly limit; auto-apply copies don't.
             </p>
           </header>
           <ul className="grid gap-4">{built.map((r) => renderDashboardRow(r, "built"))}</ul>
@@ -453,7 +457,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
         {atLimit && (
           <div className="mb-3">
             <Alert kind="info">
-              Resume limit reached — delete a resume or upgrade before saving a styled copy.
+              You've used this month's resume allowance. Upgrade your plan to save a styled copy.
             </Alert>
           </div>
         )}

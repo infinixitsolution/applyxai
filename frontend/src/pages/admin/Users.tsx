@@ -471,7 +471,7 @@ export function AdminUserPage() {
         <Card title={`Usage (${usage.period})`}>
           <div className="space-y-4">
             <ProgressBar label="Applications" usageKind="applications" value={usage.applications.used} max={usage.applications.limit} />
-            <ProgressBar label="Resumes" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
+            <ProgressBar label="New resumes this month" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
             <div className="flex flex-wrap gap-1">
               {APPLICATION_STATUSES.filter((s) => data.applications_by_status[s] > 0).map((s) => (
                 <Badge key={s} tone={STATUS_TONES[s]}>{STATUS_LABELS[s]}: {data.applications_by_status[s]}</Badge>

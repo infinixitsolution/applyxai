@@ -6,6 +6,7 @@ import { useMarketingReveal } from "../hooks/useMarketingReveal";
 import { Spinner } from "../components/ui";
 import { CONTACT_EMAIL } from "../lib/config";
 import { formatMoney } from "../lib/format";
+import { formatResumeLimit } from "../lib/planLimits";
 import { usePublicSite } from "../lib/usePublicSite";
 import { plans as plansApi } from "../services/endpoints";
 import type { PlatformCms } from "../types";
@@ -136,7 +137,7 @@ function MarketingPricing() {
                   {(plan.limits.mock_interviews_per_month ?? 0).toLocaleString()} mock interview
                   {(plan.limits.mock_interviews_per_month ?? 0) === 1 ? "" : "s"} / month
                 </li>
-                <li>Unlimited resume building & uploads</li>
+                <li>{formatResumeLimit(plan.limits.resumes)} resumes built or uploaded / month</li>
                 <li>AI tailor per job (optional)</li>
                 <li>Desktop agent + CSV export</li>
               </ul>

@@ -810,12 +810,14 @@ def _plan_admin_out(db: Session, plan: Plan, now: datetime) -> dict:
     limits = {**defaults, **(plan.limits or {})}
     kind = _plan_kind(plan)
     from backend.app.core.plans import RESUMES_UNLIMITED
+    from backend.app.services.usage_service import resume_limit_of
 
+    resumes = resume_limit_of(limits)
     out_limits = {
         "applications_per_month": limits.get("applications_per_month", 0),
         "mock_interviews_per_month": limits.get("mock_interviews_per_month", 0),
-        "resumes": RESUMES_UNLIMITED,
-        "resumes_unlimited": True,
+        "resumes": resumes,
+        "resumes_unlimited": resumes >= RESUMES_UNLIMITED,
     }
     if kind == PlanKind.INSTITUTE.value:
         out_limits["seats"] = int(limits.get("seats") or 0)
@@ -843,7 +845,7 @@ def _validate_plan_pricing(code: str, price_cents: int, *, is_active: bool) -> N
 
 def create_plan(db: Session, admin: User, provider: PaymentProvider, *, code: str, name: str, kind: str,
                 price_cents: int, applications_per_month: int, mock_interviews_per_month: int, is_active: bool,
-                sort_order: int, seats: int | None = None) -> dict:
+                sort_order: int, seats: int | None = None, resumes_per_month: int | None = None) -> dict:
     from backend.app.models.enums import PlanKind
 
     billing_service.seed_plans(db)
@@ -854,12 +856,11 @@ def create_plan(db: Session, admin: User, provider: PaymentProvider, *, code: st
         raise AppError("PLAN_EXISTS", "A plan with that code already exists.", 409)
     _validate_plan_pricing(code, price_cents, is_active=is_active)
     plan_kind = PlanKind.INSTITUTE if kind == PlanKind.INSTITUTE.value else PlanKind.PERSONAL
-    from backend.app.core.plans import RESUMES_UNLIMITED
 
     limits = {
         "applications_per_month": applications_per_month,
         "mock_interviews_per_month": mock_interviews_per_month,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": resumes_per_month if resumes_per_month is not None else PLAN_LIMITS[FREE_PLAN]["resumes"],
     }
     if plan_kind == PlanKind.INSTITUTE:
         seat_count = int(seats if seats is not None else 1)
@@ -909,7 +910,7 @@ def delete_plan(db: Session, admin: User, code: str) -> dict:
 
 def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, *, name: str, price_cents: int,
                 applications_per_month: int, mock_interviews_per_month: int, is_active: bool, sort_order: int,
-                seats: int | None = None) -> dict:
+                seats: int | None = None, resumes_per_month: int | None = None) -> dict:
     billing_service.seed_plans(db)
     plan = db.scalar(select(Plan).where(Plan.code == code))
     if plan is None:
@@ -919,12 +920,11 @@ def update_plan(db: Session, admin: User, provider: PaymentProvider, code: str, 
     before = _plan_admin_out(db, plan, _now())
     price_changed = price_cents != plan.price_cents
     plan.name, plan.price_cents, plan.is_active, plan.sort_order = name.strip(), price_cents, is_active, sort_order
-    from backend.app.core.plans import RESUMES_UNLIMITED
 
     next_limits = {
         "applications_per_month": applications_per_month,
         "mock_interviews_per_month": mock_interviews_per_month,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": resumes_per_month if resumes_per_month is not None else before["limits"]["resumes"],
     }
     if _plan_kind(plan) == PlanKind.INSTITUTE.value:
         existing = (plan.limits or {}).get("seats") or PLAN_LIMITS.get(code, {}).get("seats") or 1

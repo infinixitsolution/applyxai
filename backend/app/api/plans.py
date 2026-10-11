@@ -14,12 +14,14 @@ def _limits(code: str, overrides: dict | None) -> dict:
     defaults = PLAN_LIMITS.get(code, {})
     merged = {**defaults, **(overrides or {})}
     from backend.app.core.plans import RESUMES_UNLIMITED
+    from backend.app.services.usage_service import resume_limit_of
 
+    resumes = resume_limit_of(merged)
     return {
         "applications_per_month": merged.get("applications_per_month", 0),
         "mock_interviews_per_month": merged.get("mock_interviews_per_month", 0),
-        "resumes": RESUMES_UNLIMITED,
-        "resumes_unlimited": True,
+        "resumes": resumes,
+        "resumes_unlimited": resumes >= RESUMES_UNLIMITED,
     }
 
 

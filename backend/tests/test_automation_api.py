@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.models import (
     AgentDevice, Application, AutomationJob, AutomationStatus, Notification, UsageCounter, User,
 )
-from backend.app.services.usage_service import current_period
+from backend.app.services import usage_service
 from backend.tests.conftest import csrf_headers
 from backend.tests.test_resumes_api import PDF
 
@@ -158,7 +158,7 @@ def test_start_needs_a_connected_agent_and_allows_one_run_at_a_time(app, alice):
 
 def test_start_refuses_when_the_monthly_limit_is_used_up(db, alice, alice_agent):
     user = db.query(User).filter_by(email="alice@example.com").one()
-    db.add(UsageCounter(user_id=user.id, period=current_period(), applications=10))
+    usage_service.increment(db, user.id, applications=10)
     db.commit()
     resp = start(alice)
     assert resp.status_code == 403 and resp.json()["error"]["code"] == "PLAN_LIMIT_REACHED"
@@ -235,7 +235,7 @@ def test_retried_batches_are_applied_once_and_gaps_are_refused(db, alice, alice_
 
 def test_reaching_the_plan_limit_tells_the_agent_to_stop(db, alice, alice_agent):
     user = db.query(User).filter_by(email="alice@example.com").one()
-    db.add(UsageCounter(user_id=user.id, period=current_period(), applications=9))
+    usage_service.increment(db, user.id, applications=9)
     db.commit()
     run_id = start(alice).json()["data"]["id"]
     assert claim(alice_agent)["remaining_applications"] == 1

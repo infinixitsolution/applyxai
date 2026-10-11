@@ -131,7 +131,13 @@ export const preferences = {
 
 export const resumes = {
   list: () =>
-    request<{ resumes: Resume[]; limit: number; library_count?: number; built_count?: number }>("/resumes"),
+    request<{
+      resumes: Resume[];
+      limit: number;
+      created_this_month?: number;
+      library_count?: number;
+      built_count?: number;
+    }>("/resumes"),
   templates: () => request<{ templates: ResumeTemplate[] }>("/resumes/templates"),
   upload: (file: File, name?: string) => {
     const form = new FormData();

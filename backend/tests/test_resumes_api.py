@@ -110,11 +110,27 @@ def test_rejects_oversized_file(alice, storage_dir, monkeypatch):
     assert not list(storage_dir.rglob("*.*"))
 
 
-def test_free_plan_allows_unlimited_resume_uploads(alice):
+def test_plan_caps_new_resumes_per_month_and_deleting_does_not_free_one(alice, db):
+    give_plan(db, "alice@example.com", "two", resumes=2)
+    first = upload(alice).json()["data"]["id"]
     assert upload(alice).status_code == 201
-    assert upload(alice).status_code == 201
+    assert alice.delete(f"/api/resumes/{first}", headers=csrf_headers(alice)).status_code == 200
+
+    blocked = upload(alice)
+    assert blocked.status_code == 403 and blocked.json()["error"]["code"] == "PLAN_LIMIT_REACHED"
     body = alice.get("/api/resumes").json()["data"]
-    assert body["limit"] >= 999_000
+    assert body["limit"] == 2 and body["created_this_month"] == 2
+    usage = alice.get("/api/usage").json()["data"]["resumes"]
+    assert usage == {"used": 2, "limit": 2, "remaining": 0, "unlimited": False}
+
+
+def test_unlimited_resume_plan_is_never_blocked(alice, db):
+    from backend.app.core.plans import RESUMES_UNLIMITED
+
+    give_plan(db, "alice@example.com", "lots", resumes=RESUMES_UNLIMITED)
+    for _ in range(3):
+        assert upload(alice).status_code == 201
+    assert alice.get("/api/usage").json()["data"]["resumes"]["unlimited"] is True
 
 
 def test_intake_fills_profile_and_cover_letter(alice, db):

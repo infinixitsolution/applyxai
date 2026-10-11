@@ -231,7 +231,7 @@ describe("admin area", () => {
     await vi.waitFor(() => expect(calls.some((c) => c.key === "PUT /api/admin/plans/starter")).toBe(true));
     expect(calls.find((c) => c.key === "PUT /api/admin/plans/starter")?.body).toEqual({
       name: "Starter", price_cents: 59900, applications_per_month: 100, mock_interviews_per_month: 10,
-      is_active: true, sort_order: 1,
+      resumes_per_month: 999_999, is_active: true, sort_order: 1,
     });
   });
 

@@ -3,9 +3,12 @@ import io
 import pytest
 from fastapi import UploadFile
 
+from backend.app.core.errors import AppError
 from backend.app.core.security import hash_password
 from backend.app.models import Application, ApplicationStatus, Job, Resume, User
-from backend.app.services import application_service, resume_service
+from backend.app.services import application_service, resume_service, usage_service
+
+PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
 
 
 @pytest.fixture
@@ -16,102 +19,48 @@ def user(db):
     return u
 
 
-def test_ai_application_resumes_do_not_count_toward_plan_limit(db, user, monkeypatch):
-    monkeypatch.setattr(
-        "backend.app.services.resume_service.plan_limits",
-        lambda _db, _uid: {"resumes": 1},
-    )
-    master = Resume(
-        user_id=user.id,
-        name="Master",
-        filename="master.pdf",
-        storage_path="resumes/u/master.pdf",
-        file_type="pdf",
-        file_size=10,
-        is_default=True,
-    )
+@pytest.fixture
+def one_resume_a_month(monkeypatch):
+    monkeypatch.setattr(usage_service, "plan_limits", lambda _db, _uid: {"resumes": 1})
+
+
+def test_ai_application_resumes_are_not_library_slots(db, user):
+    master = Resume(user_id=user.id, name="Master", filename="master.pdf", storage_path="resumes/u/master.pdf",
+                    file_type="pdf", file_size=10, is_default=True)
     db.add(master)
     db.commit()
     assert resume_service.resumes_counting_toward_limit(db, user.id) == 1
 
-    tailored = Resume(
-        user_id=user.id,
-        name="Tailored v1",
-        filename="v1.docx",
-        storage_path="resumes/u/v1.docx",
-        file_type="docx",
-        file_size=10,
-        application_id=None,
-        ai_metadata={"generated_by": "ai", "job_id": "123"},
-    )
+    tailored = Resume(user_id=user.id, name="Tailored v1", filename="v1.docx", storage_path="resumes/u/v1.docx",
+                      file_type="docx", file_size=10, ai_metadata={"generated_by": "ai", "job_id": "123"})
     db.add(tailored)
     db.commit()
     assert resume_service.resumes_counting_toward_limit(db, user.id) == 1
 
 
 @pytest.mark.asyncio
-async def test_upload_allowed_when_only_master_and_ai_copies_exist(db, user, monkeypatch):
-    monkeypatch.setattr(
-        "backend.app.services.resume_service.plan_limits",
-        lambda _db, _uid: {"resumes": 1},
-    )
-    master = Resume(
-        user_id=user.id,
-        name="Master",
-        filename="master.pdf",
-        storage_path="resumes/u/master.pdf",
-        file_type="pdf",
-        file_size=10,
-        is_default=True,
-    )
-    tailored = Resume(
-        user_id=user.id,
-        name="Tailored",
-        filename="t.docx",
-        storage_path="resumes/u/t.docx",
-        file_type="docx",
-        file_size=10,
-        ai_metadata={"generated_by": "ai", "job_id": "99"},
-    )
-    db.add_all([master, tailored])
-    db.commit()
-
-    # Minimal valid PDF header for upload validation
-    pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
-    upload = UploadFile(filename="second.pdf", file=io.BytesIO(pdf))
-    with pytest.raises(Exception):
-        # Still blocked: user already has one library resume
-        await resume_service.upload_resume(db, user, upload, name="Second")
+async def test_second_upload_in_a_month_is_blocked_on_a_one_resume_plan(db, user, one_resume_a_month):
+    await resume_service.upload_resume(db, user, UploadFile(filename="first.pdf", file=io.BytesIO(PDF)))
+    assert usage_service.resumes_created(db, user.id) == 1
+    with pytest.raises(AppError) as err:
+        await resume_service.upload_resume(db, user, UploadFile(filename="second.pdf", file=io.BytesIO(PDF)))
+    assert err.value.code == "PLAN_LIMIT_REACHED"
 
 
 @pytest.mark.asyncio
-async def test_tailored_upload_does_not_need_library_count(db, user, monkeypatch):
-    """Per-job copies pass counts_against_plan=False and must still save beside an existing default."""
-    monkeypatch.setattr(
-        "backend.app.services.resume_service.plan_limits",
-        lambda _db, _uid: {"resumes": 1},
-    )
-    master = Resume(
-        user_id=user.id,
-        name="Master",
-        filename="master.pdf",
-        storage_path="resumes/u/master.pdf",
-        file_type="pdf",
-        file_size=10,
-        is_default=True,
-    )
-    db.add(master)
-    db.commit()
+async def test_auto_apply_copies_skip_the_monthly_limit(db, user, one_resume_a_month):
+    """Per-job copies pass counts_against_plan=False: they save past the limit and are not counted."""
+    master = await resume_service.upload_resume(db, user, UploadFile(filename="master.pdf", file=io.BytesIO(PDF)))
 
-    pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
-    upload = UploadFile(filename="tailored.pdf", file=io.BytesIO(pdf))
     saved = await resume_service.upload_resume(
-        db, user, upload, name="Sai_Python_2 years", counts_against_plan=False,
+        db, user, UploadFile(filename="tailored.pdf", file=io.BytesIO(PDF)),
+        name="Sai_Python_2 years", counts_against_plan=False,
     )
     assert saved.is_default is False
     assert saved.name == "Sai_Python_2 years"
     assert master.is_default is True
     assert resume_service.absolute_path(saved).is_file()
+    assert usage_service.resumes_created(db, user.id) == 1
 
 
 def test_resolve_applied_resume_id_from_ai_metadata(db, user):

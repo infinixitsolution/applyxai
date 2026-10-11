@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../../components/ui";
 import { formatDate, formatMoney } from "../../lib/format";
+import { formatResumeLimit, RESUMES_UNLIMITED } from "../../lib/planLimits";
 import { CheckoutError, openRazorpayCheckout } from "../../lib/razorpay";
 import { errorMessage } from "../../services/api";
 import { billing, institute } from "../../services/endpoints";
@@ -289,11 +290,13 @@ export function InstituteSubscriptionPage() {
                 {(p.limits.seats ?? 0).toLocaleString()} minimum students · {formatMoney(p.price_cents, p.currency)} / student
               </p>
               <p className="mt-3 text-sm text-slate-600">
-                Per student: {p.limits.applications_per_month.toLocaleString()} applications / month · {p.limits.resumes} resumes
+                Per student: {p.limits.applications_per_month.toLocaleString()} applications / month · {formatResumeLimit(p.limits.resumes)} resumes / month
               </p>
               <p className="mt-1 text-sm text-slate-600">
                 Package: {(p.limits.applications_per_month * (p.limits.seats ?? 0)).toLocaleString()} applications / month ·{" "}
-                {(p.limits.resumes * (p.limits.seats ?? 0)).toLocaleString()} resumes
+                {p.limits.resumes >= RESUMES_UNLIMITED
+                  ? "unlimited resumes"
+                  : `${(p.limits.resumes * (p.limits.seats ?? 0)).toLocaleString()} resumes / month`}
               </p>
               {!current && (
                 <Button className="mt-4" onClick={() => checkout.mutate(p)} loading={checkout.isPending && checkout.variables?.code === p.code}

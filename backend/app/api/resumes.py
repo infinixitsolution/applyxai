@@ -17,10 +17,9 @@ from backend.app.schemas.resume_ai import (
     ResumeApplyStyleIn,
     ResumeIntakeIn,
 )
-from backend.app.services import resume_ai_service, resume_service
+from backend.app.services import resume_ai_service, resume_service, usage_service
 from backend.app.services.resume_templates import list_templates
 from backend.app.services.ai_service import ai_available
-from backend.app.services.usage_service import plan_limits
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -35,7 +34,8 @@ def list_resumes(user: User = Depends(get_current_user), db: Session = Depends(g
     built = sum(1 for r in rows if not resume_service.counts_toward_plan_limit(r))
     return ok({
         "resumes": [_out(r) for r in rows],
-        "limit": plan_limits(db, user.id)["resumes"],
+        "limit": usage_service.resume_limit_of(usage_service.plan_limits(db, user.id)),
+        "created_this_month": usage_service.resumes_created(db, user.id),
         "library_count": resume_service.resumes_counting_toward_limit(db, user.id),
         "built_count": built,
     })
@@ -115,6 +115,7 @@ async def ai_tailor(body: ResumeAiTailorIn, user: User = Depends(get_current_use
     if not ai_available(db, feature="resume"):
         raise AppError("AI_DISABLED", "Platform AI is not enabled for resume features.", 503)
     limiter.hit("20/hour", "resume-ai-tailor", str(user.id))
+    usage_service.ensure_can_create_resume(db, user.id)
     resume = await resume_ai_service.tailor_and_save(
         db,
         user,
@@ -124,6 +125,8 @@ async def ai_tailor(body: ResumeAiTailorIn, user: User = Depends(get_current_use
         template_id=body.template_id,
         application_id=body.application_id,
     )
+    usage_service.increment(db, user.id, resumes_created=1)
+    db.commit()
     return ok(_out(resume))
 
 

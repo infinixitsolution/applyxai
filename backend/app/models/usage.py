@@ -7,7 +7,7 @@ from backend.app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class UsageCounter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Per-user, per-calendar-month usage. Resume count is derived from the resumes table."""
+    """Per-user, per-calendar-month usage."""
 
     __tablename__ = "usage_counters"
 
@@ -16,5 +16,6 @@ class UsageCounter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     applications: Mapped[int] = mapped_column(Integer, default=0)
     jobs_discovered: Mapped[int] = mapped_column(Integer, default=0)
     runtime_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    resumes_created: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     __table_args__ = (UniqueConstraint("user_id", "period"),)

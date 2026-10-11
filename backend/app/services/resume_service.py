@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import get_settings
 from backend.app.core.errors import AppError
 from backend.app.models import Resume, User
-from backend.app.services.usage_service import plan_limits
+from backend.app.services import usage_service
 
 log = logging.getLogger(__name__)
 
@@ -116,16 +116,9 @@ async def upload_resume(
     *,
     counts_against_plan: bool = True,
 ) -> Resume:
-    from backend.app.core.plans import RESUMES_UNLIMITED
-
-    limit = plan_limits(db, user.id)["resumes"]
+    if counts_against_plan:
+        usage_service.ensure_can_create_resume(db, user.id)
     library_count = resumes_counting_toward_limit(db, user.id) if counts_against_plan else 0
-    if counts_against_plan and limit < RESUMES_UNLIMITED and library_count >= limit:
-        raise AppError(
-            "PLAN_LIMIT_REACHED",
-            f"Your plan allows {limit} resume{'s' if limit != 1 else ''}. Delete one or upgrade.",
-            status_code=403,
-        )
 
     display = safe_display_name(upload.filename)
     file_type = _extension(display)
@@ -156,6 +149,8 @@ async def upload_resume(
     resume = Resume(user_id=user.id, name=label, filename=display, storage_path=rel, file_type=file_type,
                     file_size=len(data), sha256=hashlib.sha256(data).hexdigest(), is_default=make_default)
     db.add(resume)
+    if counts_against_plan:
+        usage_service.increment(db, user.id, resumes_created=1)
     try:
         db.commit()
     except Exception:

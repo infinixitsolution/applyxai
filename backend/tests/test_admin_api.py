@@ -451,8 +451,6 @@ def plan_body(**kw):
 
 
 def test_plans_list_includes_limits_and_subscribers(admin):
-    from backend.app.core.plans import RESUMES_UNLIMITED
-
     plans = data(get(admin, "/plans"))["plans"]
     assert [p["code"] for p in plans] == ["free", "starter", "pro", "premium", "unlimited", "campus", "campus_pro"]
     starter = plans[1]
@@ -460,16 +458,15 @@ def test_plans_list_includes_limits_and_subscribers(admin):
     assert starter["limits"] == {
         "applications_per_month": 100,
         "mock_interviews_per_month": 10,
-        "resumes": RESUMES_UNLIMITED,
-        "resumes_unlimited": True,
+        "resumes": 20,
+        "resumes_unlimited": False,
     } and starter["subscribers"] == 0
+    assert plans[4]["limits"]["resumes_unlimited"] is True
     campus = next(p for p in plans if p["code"] == "campus")
     assert campus["kind"] == "institute" and campus["limits"]["seats"] == 10
 
 
 def test_editing_an_institute_plan_updates_seats(admin):
-    from backend.app.core.plans import RESUMES_UNLIMITED
-
     out = data(send(admin, "PUT", "/plans/campus", {
         "name": "Campus", "price_cents": 49900, "applications_per_month": 100, "mock_interviews_per_month": 10,
         "seats": 25, "is_active": True, "sort_order": 5,
@@ -477,22 +474,24 @@ def test_editing_an_institute_plan_updates_seats(admin):
     assert out["kind"] == "institute" and out["limits"] == {
         "applications_per_month": 100,
         "mock_interviews_per_month": 10,
-        "resumes": RESUMES_UNLIMITED,
-        "resumes_unlimited": True,
+        "resumes": 20,
+        "resumes_unlimited": False,
         "seats": 25,
     }
 
 
 def test_editing_a_plan_changes_limits_for_everyone_on_it(admin, alice, db):
-    from backend.app.core.plans import RESUMES_UNLIMITED
-
     out = data(send(admin, "PUT", "/plans/free", {"name": "Free", "price_cents": 0, "applications_per_month": 25,
-                                                 "mock_interviews_per_month": 3, "is_active": True, "sort_order": 0}))
+                                                 "mock_interviews_per_month": 3, "resumes_per_month": 7,
+                                                 "is_active": True, "sort_order": 0}))
     assert out["limits"]["applications_per_month"] == 25
-    assert out["limits"]["resumes"] == RESUMES_UNLIMITED
-    assert alice.get("/api/usage").json()["data"]["applications"]["limit"] == 25
+    assert out["limits"]["resumes"] == 7
+    usage = alice.get("/api/usage").json()["data"]
+    assert usage["applications"]["limit"] == 25
+    assert usage["resumes"] == {"used": 0, "limit": 7, "remaining": 7, "unlimited": False}
     public = {p["code"]: p for p in alice.get("/api/plans").json()["data"]["plans"]}
     assert public["free"]["limits"]["applications_per_month"] == 25
+    assert public["free"]["limits"]["resumes"] == 7
     action = db.scalar(select(AdminAction).where(AdminAction.action == "plan.update"))
     assert action.target == "plan:free"
     assert action.details["limits"][1]["applications_per_month"] == 25

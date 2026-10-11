@@ -13,7 +13,9 @@ def test_plans_are_public_and_default_to_the_catalogue(api):
     assert [p["code"] for p in plans] == expected
     assert "unlimited" not in {p["code"] for p in plans}
     free = plans[0]
-    assert free["price_cents"] == 0 and free["limits"] == {"applications_per_month": 10, "resumes": 1}
+    assert free["price_cents"] == 0 and free["limits"] == {
+        "applications_per_month": 10, "mock_interviews_per_month": 3, "resumes": 3, "resumes_unlimited": False,
+    }
 
 
 def test_plans_table_overrides_defaults(api, db):
@@ -28,4 +30,6 @@ def test_plans_table_overrides_defaults(api, db):
     assert [p["code"] for p in plans] == ["free", "pro"]
     assert "unlimited" not in {p["code"] for p in plans}
     assert plans[1]["price_cents"] == 79900
-    assert plans[1]["limits"] == {"applications_per_month": 600, "resumes": 10}
+    assert plans[1]["limits"] == {
+        "applications_per_month": 600, "mock_interviews_per_month": 30, "resumes": 60, "resumes_unlimited": False,
+    }

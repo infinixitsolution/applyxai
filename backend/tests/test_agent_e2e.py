@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 import automation.runner as runner_module
 from agent.client import ApiClient
 from agent.supervisor import Supervisor
-from backend.app.models import Application, ApplicationStatus, UsageCounter, User
-from backend.app.services.usage_service import current_period
+from backend.app.models import Application, ApplicationStatus, User
+from backend.app.services import usage_service
 from backend.tests.conftest import csrf_headers
 from backend.tests.test_automation_api import make_ready
 from backend.tests.test_resumes_api import PDF
@@ -129,7 +129,7 @@ def test_a_run_started_on_the_website_runs_on_the_computer_and_stops_on_request(
 def test_the_plan_limit_stops_a_live_run(db, setup, monkeypatch):
     alice, client, user_id, home = setup
     user = db.query(User).filter_by(email="alice@example.com").one()
-    db.add(UsageCounter(user_id=user.id, period=current_period(), applications=8))
+    usage_service.increment(db, user.id, applications=8)
     db.commit()
     monkeypatch.setenv("STAND_IN_APPLY", "50")                       # would apply to everything
     run_id = alice.post("/api/automation/start", json={}, headers=csrf_headers(alice)).json()["data"]["id"]

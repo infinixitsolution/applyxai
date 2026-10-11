@@ -6,7 +6,8 @@ authoritative. Prices are never referenced outside this catalogue and that table
 
 FREE_PLAN = "free"
 
-# Resume library uploads / building are not capped by plan (stored value for catalogue compatibility).
+# "resumes" is the number of resumes a user may create per calendar month (uploads, style copies, and
+# AI-tailored versions made on the website). Desktop auto-apply copies are not counted.
 RESUMES_UNLIMITED = 999_999
 MOCK_INTERVIEWS_UNLIMITED = 999_999
 
@@ -25,7 +26,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Free",
         "kind": "personal",
         "applications_per_month": 10,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 3,
         "mock_interviews_per_month": 3,
         "price_cents": 0,
     },
@@ -33,7 +34,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Starter",
         "kind": "personal",
         "applications_per_month": 100,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 20,
         "mock_interviews_per_month": 10,
         "price_cents": 49900,
     },
@@ -41,7 +42,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Pro",
         "kind": "personal",
         "applications_per_month": 500,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 60,
         "mock_interviews_per_month": 30,
         "price_cents": 99900,
     },
@@ -49,7 +50,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Premium",
         "kind": "personal",
         "applications_per_month": 1500,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 150,
         "mock_interviews_per_month": 100,
         "price_cents": 199900,
     },
@@ -66,7 +67,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Campus",
         "kind": "institute",
         "applications_per_month": 100,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 20,
         "mock_interviews_per_month": 10,
         "seats": 10,
         "price_cents": 49900,
@@ -75,7 +76,7 @@ PLAN_LIMITS: dict[str, dict] = {
         "name": "Campus Pro",
         "kind": "institute",
         "applications_per_month": 500,
-        "resumes": RESUMES_UNLIMITED,
+        "resumes": 60,
         "mock_interviews_per_month": 30,
         "seats": 50,
         "price_cents": 199900,

@@ -796,6 +796,7 @@ export interface PlanUpdate {
   price_cents: number;
   applications_per_month: number;
   mock_interviews_per_month: number;
+  resumes_per_month: number;
   seats?: number;
   is_active: boolean;
   sort_order: number;

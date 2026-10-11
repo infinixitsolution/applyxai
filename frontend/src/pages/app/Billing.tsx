@@ -5,6 +5,7 @@ import { ConfirmDialog } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { Alert, Badge, Button, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner, surfaceCardClass } from "../../components/ui";
 import { formatDate, formatMoney } from "../../lib/format";
+import { formatResumeLimit } from "../../lib/planLimits";
 import { CheckoutError, openRazorpayCheckout } from "../../lib/razorpay";
 import { errorMessage } from "../../services/api";
 import { billing, plans as plansApi } from "../../services/endpoints";
@@ -232,7 +233,8 @@ function PlanCard({ plan: p, sub, busy, loading, checkoutAvailable, onChoose }: 
       </p>
       <p className="mt-2 text-sm text-slate-600">
         {p.limits.applications_per_month.toLocaleString()} applications / month &middot;{" "}
-        {(p.limits.mock_interviews_per_month ?? 0).toLocaleString()} mock interviews / month &middot; unlimited resumes
+        {(p.limits.mock_interviews_per_month ?? 0).toLocaleString()} mock interviews / month &middot;{" "}
+        {formatResumeLimit(p.limits.resumes)} resumes / month
       </p>
       {!current && p.price_cents > 0 && (
         <Button

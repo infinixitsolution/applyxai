@@ -6,10 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.plans import FREE_PLAN, MOCK_INTERVIEWS_UNLIMITED, PLAN_LIMITS, RESUMES_UNLIMITED
-from backend.app.models import MockInterviewSession, Plan, Resume, Subscription, SubscriptionStatus, UsageCounter
+from backend.app.models import MockInterviewSession, Plan, Subscription, SubscriptionStatus, UsageCounter
 
 _ENTITLED = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
-_COUNTERS = ("applications", "jobs_discovered", "runtime_seconds")
+_COUNTERS = ("applications", "jobs_discovered", "runtime_seconds", "resumes_created")
 
 
 def _aware(dt: datetime) -> datetime:
@@ -63,7 +63,6 @@ def _limits_of(plan: Plan) -> dict:
     """The catalogue defaults, overridden by what an admin set on the plan row."""
     defaults = PLAN_LIMITS.get(plan.code, PLAN_LIMITS[FREE_PLAN])
     merged = {**defaults, **(plan.limits or {})}
-    merged["resumes"] = RESUMES_UNLIMITED
     return {**merged, "plan": plan.code, "name": plan.name, "price_cents": plan.price_cents}
 
 
@@ -120,9 +119,9 @@ def usage_summary(db: Session, user_id: uuid.UUID) -> dict:
     period = current_period()
     counter = get_counter(db, user_id, period)
     used = counter.applications if counter else 0
-    resumes = db.scalar(select(func.count()).select_from(Resume).where(Resume.user_id == user_id))
+    resumes = counter.resumes_created if counter else 0
     app_limit = int(limits["applications_per_month"])
-    resume_limit = RESUMES_UNLIMITED
+    resume_limit = resume_limit_of(limits)
     mock_limit = int(limits.get("mock_interviews_per_month") or 0)
     mock_used = mock_interviews_used(db, user_id, period)
     mock_remaining = (
@@ -135,10 +134,10 @@ def usage_summary(db: Session, user_id: uuid.UUID) -> dict:
         "resets_at": period_bounds(period)[1].isoformat(),
         "applications": {"used": used, "limit": app_limit, "remaining": max(app_limit - used, 0)},
         "resumes": {
-            "used": resumes or 0,
+            "used": resumes,
             "limit": resume_limit,
-            "remaining": max(resume_limit - (resumes or 0), 0),
-            "unlimited": True,
+            "remaining": max(resume_limit - resumes, 0),
+            "unlimited": resume_limit >= RESUMES_UNLIMITED,
         },
         "mock_interviews": {
             "used": mock_used,
@@ -154,3 +153,29 @@ def usage_summary(db: Session, user_id: uuid.UUID) -> dict:
 
 def remaining_applications(db: Session, user_id: uuid.UUID) -> int:
     return usage_summary(db, user_id)["applications"]["remaining"]
+
+
+def resume_limit_of(limits: dict) -> int:
+    value = limits.get("resumes")
+    return RESUMES_UNLIMITED if value is None else int(value)
+
+
+def resumes_created(db: Session, user_id: uuid.UUID, period: str | None = None) -> int:
+    counter = get_counter(db, user_id, period)
+    return counter.resumes_created if counter else 0
+
+
+def ensure_can_create_resume(db: Session, user_id: uuid.UUID) -> None:
+    """Raise PLAN_LIMIT_REACHED when this month's resume creations already meet the plan limit."""
+    from backend.app.core.errors import AppError
+
+    limit = resume_limit_of(plan_limits(db, user_id))
+    if limit >= RESUMES_UNLIMITED:
+        return
+    if resumes_created(db, user_id) >= limit:
+        raise AppError(
+            "PLAN_LIMIT_REACHED",
+            f"Your plan allows {limit} new resume{'s' if limit != 1 else ''} per month. "
+            "Upgrade your plan or wait for next month's reset.",
+            status_code=403,
+        )

@@ -151,6 +151,7 @@ class PlanCreateIn(BaseModel):
     price_cents: int = Field(ge=0, le=100_000_000)
     applications_per_month: int = Field(ge=0, le=1_000_000)
     mock_interviews_per_month: int = Field(ge=0, le=1_000_000)
+    resumes_per_month: int | None = Field(default=None, ge=0, le=1_000_000)
     seats: int | None = Field(default=None, ge=1, le=10_000)
     is_active: bool = True
     sort_order: int = Field(default=100, ge=0, le=1000)
@@ -166,6 +167,7 @@ class PlanUpdateIn(BaseModel):
     price_cents: int = Field(ge=0, le=100_000_000)
     applications_per_month: int = Field(ge=0, le=1_000_000)
     mock_interviews_per_month: int = Field(ge=0, le=1_000_000)
+    resumes_per_month: int | None = Field(default=None, ge=0, le=1_000_000)
     seats: int | None = Field(default=None, ge=1, le=10_000)
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0, le=1000)

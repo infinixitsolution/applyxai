@@ -6,7 +6,7 @@ import { ConfirmDialog, Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../../components/ui";
 import { formatMoney } from "../../lib/format";
-import { formatMockInterviewLimit, formatResumeLimit } from "../../lib/planLimits";
+import { formatMockInterviewLimit, formatResumeLimit, RESUMES_UNLIMITED } from "../../lib/planLimits";
 import { errorMessage, fieldErrors } from "../../services/api";
 import { admin } from "../../services/endpoints";
 import type { AdminPlan, PlanCreate, PlanKind, PlanUpdate } from "../../types";
@@ -57,7 +57,7 @@ export function AdminPlansPage() {
       <div className="space-y-6">
         <PlanListSection
           title="Candidate plans"
-          hint="Sold to job seekers. Resume building is unlimited; set applications and mock interviews per month."
+          hint="Sold to job seekers. Set applications, mock interviews, and new resumes per month."
           plans={candidates}
           institute={false}
           onAdd={() => setDialog({ mode: "create", kind: "personal" })}
@@ -134,7 +134,7 @@ function PlanListSection({
                   <br />
                   {pack.packMocks.toLocaleString()} mock interviews / mo
                   <br />
-                  Resumes: {formatResumeLimit(p.limits.resumes)}
+                  {formatResumeLimit(p.limits.resumes)} resumes / mo per student
                 </Td>
                 <Td>{p.subscribers.toLocaleString()}</Td>
                 <Td>{p.is_active ? <Badge tone="green">On sale</Badge> : <Badge>Hidden</Badge>}</Td>
@@ -157,7 +157,7 @@ function PlanListSection({
           })}
         </Table>
       ) : (
-        <Table head={["Plan", "Price", "Applications / mo", "Mock interviews / mo", "Resumes", "Subscribers", "Status", ""]}>
+        <Table head={["Plan", "Price", "Applications / mo", "Mock interviews / mo", "Resumes / mo", "Subscribers", "Status", ""]}>
           {plans.map((p) => (
             <tr key={p.code} className="hover:bg-slate-50/80">
               <Td>
@@ -208,6 +208,7 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
         price: "",
         applications: institute ? "100" : "50",
         mock_interviews: institute ? "10" : "5",
+        resumes: "20",
         seats: "10",
         is_active: true,
         sort_order: "100",
@@ -219,6 +220,7 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
       price: String(plan!.price_cents / 100),
       applications: String(plan!.limits.applications_per_month),
       mock_interviews: String(plan!.limits.mock_interviews_per_month ?? 0),
+      resumes: String(plan!.limits.resumes),
       seats: String(plan!.limits.seats ?? 1),
       is_active: plan!.is_active,
       sort_order: String(plan!.sort_order),
@@ -232,6 +234,7 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
     price_cents: Math.round(Number(form.price) * 100),
     applications_per_month: Number(form.applications),
     mock_interviews_per_month: Number(form.mock_interviews),
+    resumes_per_month: Number(form.resumes),
     is_active: form.is_active,
     sort_order: Number(form.sort_order),
     ...(institute ? { seats: Number(form.seats) } : {}),
@@ -264,6 +267,7 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
     body.price_cents,
     body.applications_per_month,
     body.mock_interviews_per_month,
+    body.resumes_per_month,
     ...(institute ? [body.seats ?? 0] : []),
   ];
   const codeOk = isCreate ? /^[a-z][a-z0-9_]*$/.test(form.code.trim()) : true;
@@ -353,6 +357,15 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
             hint="New live mock interview sessions started each calendar month."
           />
           <TextInput
+            label={institute ? "Resumes per student / month" : "Resumes / month"}
+            type="number"
+            min={0}
+            value={form.resumes}
+            onChange={set("resumes")}
+            error={errors.resumes_per_month}
+            hint={`New resumes created each calendar month: uploads, styled copies, and AI-tailored versions. Auto-apply copies don't count. ${RESUMES_UNLIMITED.toLocaleString()} means unlimited.`}
+          />
+          <TextInput
             label="Sort order"
             type="number"
             min={0}
@@ -366,10 +379,10 @@ function PlanDialog({ state, onClose }: { state: NonNullable<DialogState>; onClo
             Amount = {body.price_cents === 0 ? "Free" : `${formatMoney(body.price_cents * (body.seats ?? 0), isCreate ? "INR" : plan!.currency)} / ${isCreate ? "month" : plan!.interval}`}
             {" "}({body.seats} × {formatMoney(body.price_cents, isCreate ? "INR" : plan!.currency)}).{" "}
             Package: {(body.applications_per_month * (body.seats ?? 0)).toLocaleString()} applications / month and{" "}
-            {(body.mock_interviews_per_month * (body.seats ?? 0)).toLocaleString()} mock interviews / month. Resumes: unlimited.
+            {(body.mock_interviews_per_month * (body.seats ?? 0)).toLocaleString()} mock interviews / month, and{" "}
+            {formatResumeLimit(body.resumes_per_month)} resumes / month per student.
           </p>
         )}
-        <p className="text-sm text-slate-600">Resume building and uploads are <strong>unlimited</strong> on all plans.</p>
         <Toggle
           label="On sale"
           checked={form.is_active}

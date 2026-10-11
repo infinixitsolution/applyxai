@@ -37,7 +37,9 @@ export function ResumesDashboard() {
   const libraryCount = data?.library_count ?? uploads.length;
   const defaultResume = uploads.find((r) => r.is_default) ?? uploads[0];
   const limit = data?.limit ?? 0;
-  const atLimit = libraryCount >= limit && limit > 0;
+  const created = data?.created_this_month ?? 0;
+  const unlimited = isUnlimitedUsageCap(limit, "resumes");
+  const atLimit = !!data && !unlimited && created >= limit;
 
   return (
     <>
@@ -76,12 +78,14 @@ export function ResumesDashboard() {
           <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
               icon={<FileText className="h-4 w-4" aria-hidden />}
-              label="Resume slots"
-              value={`${libraryCount} / ${isUnlimitedUsageCap(limit, "resumes") ? "∞" : limit}`}
+              label="New resumes this month"
+              value={`${created} / ${unlimited ? "∞" : limit}`}
               sub={
-                atLimit
-                  ? "Upload limit reached"
-                  : `${Math.max(0, limit - libraryCount)} upload slot${limit - libraryCount === 1 ? "" : "s"} free`
+                unlimited
+                  ? "Unlimited on your plan"
+                  : atLimit
+                    ? "Monthly limit reached"
+                    : `${limit - created} left this month`
               }
             />
             <StatCard
@@ -102,7 +106,7 @@ export function ResumesDashboard() {
               value={builtCount}
               sub={
                 builtCount > 0
-                  ? "Tailored & automation copies (unlimited)"
+                  ? "Tailored & automation copies"
                   : tailor?.resume_ai_available
                     ? "Run tailor or auto apply to build"
                     : "AI tailoring needs admin setup"
@@ -144,7 +148,7 @@ export function ResumesDashboard() {
             <div className="space-y-6">
               {usage && (
                 <Card title="Plan usage">
-                  <ProgressBar label="Resumes" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
+                  <ProgressBar label="New resumes this month" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
                   <p className="mt-3 text-xs text-slate-500">
                     {usage.plan_name} · resets {formatDate(usage.resets_at)}
                   </p>
@@ -211,8 +215,8 @@ function ResumesHero({
     headline = `${builtCount} built resume${builtCount === 1 ? "" : "s"}`;
     detail = "Download copies from automation and manual tailor. Upload a master CV to set a default for runs.";
   } else if (atLimit) {
-    headline = "Resume limit reached";
-    detail = "Delete an old copy or upgrade your plan before uploading or saving styled versions.";
+    headline = "Monthly resume limit reached";
+    detail = "Upgrade your plan or wait for next month's reset before uploading, styling, or tailoring more resumes.";
   } else if (!masterSkillsReady && defaultResume) {
     headline = "Analyze skills on your default resume";
     detail = "Master skills power AI tailoring during automation runs (tailor_if_gate mode).";

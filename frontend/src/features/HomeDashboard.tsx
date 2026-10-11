@@ -285,7 +285,7 @@ export function HomeDashboard() {
         <Card title="Plan usage">
           <div className="space-y-4">
             <ProgressBar label="Applications" usageKind="applications" value={usage.applications.used} max={usage.applications.limit} />
-            <ProgressBar label="Resumes" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
+            <ProgressBar label="New resumes this month" usageKind="resumes" value={usage.resumes.used} max={usage.resumes.limit} />
             {mockUsage && mockUsage.limit > 0 && (
               <ProgressBar
                 label="Mock interviews"
