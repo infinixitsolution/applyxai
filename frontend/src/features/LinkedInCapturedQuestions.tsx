@@ -274,14 +274,18 @@ export function LinkedInCapturedQuestions({ aiAvailable }: { aiAvailable: boolea
         save. Saved answers become custom rules for the next run.
       </p>
       {needCount > 0 && !aiAvailable && (
-        <Alert kind="info" className="mb-4">
-          Platform AI is not enabled. An admin must configure AI under Settings, or answer questions manually below.
-        </Alert>
+        <div className="mb-4">
+          <Alert kind="info">
+            Platform AI is not enabled. An admin must configure AI under Settings, or answer questions manually below.
+          </Alert>
+        </div>
       )}
       {needCount > 0 && aiAvailable && (
-        <Alert kind="info" className="mb-4">
-          AI uses your screening profile, extra context, and default resume. Review every suggestion before saving.
-        </Alert>
+        <div className="mb-4">
+          <Alert kind="info">
+            AI uses your screening profile, extra context, and default resume. Review every suggestion before saving.
+          </Alert>
+        </div>
       )}
       <ul className="mt-4 max-h-[min(520px,55vh)] space-y-3 overflow-y-auto pr-1">
         {openQuestions.map((q) => (

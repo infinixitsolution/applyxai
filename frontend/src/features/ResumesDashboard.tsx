@@ -68,7 +68,6 @@ export function ResumesDashboard() {
             defaultResume={defaultResume}
             count={libraryCount}
             builtCount={builtCount}
-            limit={limit}
             atLimit={atLimit}
             tailorReady={tailor?.can_tailor}
             masterSkillsReady={tailor?.master_skills_ready}
@@ -191,7 +190,6 @@ function ResumesHero({
   defaultResume,
   count,
   builtCount,
-  limit,
   atLimit,
   tailorReady,
   masterSkillsReady,
@@ -199,7 +197,6 @@ function ResumesHero({
   defaultResume?: Resume;
   count: number;
   builtCount: number;
-  limit: number;
   atLimit: boolean;
   tailorReady?: boolean;
   masterSkillsReady?: boolean;
