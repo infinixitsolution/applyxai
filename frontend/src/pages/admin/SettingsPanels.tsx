@@ -13,6 +13,7 @@ import { agentServerUrl } from "../../lib/config";
 import { ApiError, errorMessage } from "../../services/api";
 import { admin } from "../../services/endpoints";
 import type { AdminPlatformSettings, AuthEmailTemplate, EmailTemplates, EventNotificationTemplate, LogLevel, PlatformCms } from "../../types";
+import { authSampleLink, EmailTemplatePreview, sampleTemplateVars } from "./EmailTemplatePreview";
 import { FilterBar, PAGE_SIZE, Table, Td, UserLink } from "./shared";
 
 const SETTINGS_KEY = ["admin", "settings"] as const;
@@ -61,6 +62,9 @@ export function AdminSettingsPage() {
           <TemplatesTab
             templates={data.email_templates ?? { auth: {}, events: {} }}
             notifications={data.notifications}
+            appName={data.cms.branding.app_name || "ApplyXAI"}
+            fromAddress={data.smtp.from_address}
+            auth={data.auth_email}
           />
         )}
         {tab === "ai" && <AiTab ai={data.ai} />}
@@ -463,10 +467,23 @@ function TemplateActionButtons({
 function TemplatesTab({
   templates,
   notifications,
+  appName,
+  fromAddress,
+  auth,
 }: {
   templates: EmailTemplates;
   notifications: AdminPlatformSettings["notifications"];
+  appName: string;
+  fromAddress: string;
+  auth: AdminPlatformSettings["auth_email"];
 }) {
+  const sampleVars = sampleTemplateVars({
+    appName,
+    frontendUrl: auth.frontend_url,
+    verificationHours: auth.verification_hours,
+    passwordResetMinutes: auth.password_reset_minutes,
+  });
+  const sender = fromAddress ? `${appName} <${fromAddress}>` : appName;
   const qc = useQueryClient();
   const { data: session } = useSession();
   const [local, setLocal] = useState(templates);
@@ -635,7 +652,10 @@ function TemplatesTab({
         }
         footer={
           authReadOnly ? (
-            <Button variant="secondary" onClick={() => setAuthModal((m) => ({ ...m, open: false }))}>Close</Button>
+            <>
+              <Button variant="secondary" onClick={() => setAuthModal((m) => ({ ...m, open: false }))}>Close</Button>
+              <Button onClick={() => setAuthModal((m) => ({ ...m, mode: "edit" }))}>Edit</Button>
+            </>
           ) : (
             <>
               <Button variant="secondary" onClick={() => setAuthModal((m) => ({ ...m, open: false }))}>Cancel</Button>
@@ -666,6 +686,15 @@ function TemplatesTab({
             <span className="text-slate-400"> · {authModal.key}</span>
           </p>
         )}
+        {authReadOnly ? (
+          <EmailTemplatePreview
+            from={sender}
+            subject={authModal.draft.subject}
+            body={authModal.draft.body}
+            html={authModal.draft.html}
+            vars={{ ...sampleVars, link: authSampleLink(auth.frontend_url, authModal.key) }}
+          />
+        ) : (
         <div className="grid gap-3">
           <TextInput label="Subject" value={authModal.draft.subject} readOnly={authReadOnly}
                      onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, subject: v } }))} maxLength={500} />
@@ -679,6 +708,7 @@ function TemplatesTab({
             </Button>
           )}
         </div>
+        )}
       </Modal>
 
       <Modal
@@ -692,7 +722,10 @@ function TemplatesTab({
         }
         footer={
           eventModal.mode === "view" ? (
-            <Button variant="secondary" onClick={() => setEventModal((m) => ({ ...m, open: false }))}>Close</Button>
+            <>
+              <Button variant="secondary" onClick={() => setEventModal((m) => ({ ...m, open: false }))}>Close</Button>
+              <Button onClick={() => setEventModal((m) => ({ ...m, mode: "edit" }))}>Edit</Button>
+            </>
           ) : (
             <>
               <Button variant="secondary" onClick={() => setEventModal((m) => ({ ...m, open: false }))}>Cancel</Button>
@@ -730,18 +763,28 @@ function TemplatesTab({
             )}
           </p>
         )}
+        {eventModal.mode === "view" ? (
+          <EmailTemplatePreview
+            from={sender}
+            subject={eventModal.draft.email_subject || `{app_name}: ${eventModal.draft.in_app_title}`}
+            body={eventModal.draft.email_body || `${eventModal.draft.in_app_title}\n\n${eventModal.draft.in_app_body}`}
+            html={eventModal.draft.email_html}
+            vars={sampleVars}
+            appendLink={sampleVars.link_url}
+            inApp={{ title: eventModal.draft.in_app_title, body: eventModal.draft.in_app_body }}
+          />
+        ) : (
         <div className="grid gap-3">
-          <TextInput label="In-app title" value={eventModal.draft.in_app_title} readOnly={eventModal.mode === "view"}
-                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, in_app_title: v } }))} maxLength={500} />
-          <TextArea label="In-app body" value={eventModal.draft.in_app_body} readOnly={eventModal.mode === "view"} rows={3}
+          <TextInput label="In-app title" value={eventModal.draft.in_app_title}                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, in_app_title: v } }))} maxLength={500} />
+          <TextArea label="In-app body" value={eventModal.draft.in_app_body} rows={3}
                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, in_app_body: v } }))} />
-          <TextInput label="Email subject" value={eventModal.draft.email_subject} readOnly={eventModal.mode === "view"}
-                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_subject: v } }))} maxLength={500} />
-          <TextArea label="Email body" value={eventModal.draft.email_body} readOnly={eventModal.mode === "view"} rows={4}
+          <TextInput label="Email subject" value={eventModal.draft.email_subject}                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_subject: v } }))} maxLength={500} />
+          <TextArea label="Email body" value={eventModal.draft.email_body} rows={4}
                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_body: v } }))} />
-          <TextArea label="Email HTML (optional)" value={eventModal.draft.email_html} readOnly={eventModal.mode === "view"} rows={3}
+          <TextArea label="Email HTML (optional)" value={eventModal.draft.email_html} rows={3}
                     onChange={(v) => setEventModal((m) => ({ ...m, draft: { ...m.draft, email_html: v } }))} />
         </div>
+        )}
       </Modal>
 
       <ConfirmDialog

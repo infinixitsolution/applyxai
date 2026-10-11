@@ -25,12 +25,39 @@ class Email:
     html: str = ""
 
 
+FOOTER_LINES = ("Regards,", "ApplyXAI", "www.applyxai.com", "Bangalore", "info@applyxai.com")
+_FOOTER_MARKER = "info@applyxai.com"
+_FOOTER_HTML = (
+    '<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;'
+    'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#334155">'
+    "Regards,<br><strong>ApplyXAI</strong><br>"
+    '<a href="https://www.applyxai.com" style="color:#2563eb">www.applyxai.com</a><br>'
+    "Bangalore<br>"
+    '<a href="mailto:info@applyxai.com" style="color:#2563eb">info@applyxai.com</a>'
+    "</div>"
+)
+
+
+def with_footer(email: Email) -> Email:
+    """Every outgoing email ends with the company signature (added once)."""
+    body = email.body.rstrip()
+    if _FOOTER_MARKER not in body:
+        body = f"{body}\n\n" + "\n".join(FOOTER_LINES)
+    html = email.html
+    if html.strip() and _FOOTER_MARKER not in html:
+        lower = html.lower()
+        cut = lower.rfind("</body>")
+        html = f"{html[:cut]}{_FOOTER_HTML}{html[cut:]}" if cut >= 0 else f"{html}{_FOOTER_HTML}"
+    return Email(to=email.to, subject=email.subject, body=body, html=html)
+
+
 class EmailSender(Protocol):
     def send(self, email: Email) -> None: ...
 
 
 class ConsoleEmailSender:
     def send(self, email: Email) -> None:
+        email = with_footer(email)
         extra = f"\n[HTML]\n{email.html}" if email.html else ""
         logger.warning("DEV EMAIL to %s | %s\n%s%s", email.to, email.subject, email.body, extra)
 
@@ -61,7 +88,7 @@ class SmtpEmailSender:
 
     def send(self, email: Email) -> None:
         try:
-            self.deliver(email)
+            self.deliver(with_footer(email))
         except Exception:
             logger.exception("Failed to send email '%s'", email.subject)
 
