@@ -77,7 +77,8 @@ def _row(db: Session) -> PlatformSettings:
     now = time.monotonic()
     if _PLATFORM_ROW_CACHE is not None:
         cached_at, cached_row = _PLATFORM_ROW_CACHE
-        if now - cached_at < _PLATFORM_ROW_TTL_SEC:
+        # A row loaded by another request's session can't be saved through this one; edits to it would be lost.
+        if now - cached_at < _PLATFORM_ROW_TTL_SEC and cached_row in db:
             return cached_row
     row = db.get(PlatformSettings, PLATFORM_SETTINGS_KEY)
     if row is None:

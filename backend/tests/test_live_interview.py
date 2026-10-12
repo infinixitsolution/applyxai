@@ -58,6 +58,34 @@ def test_request_issues_token_on_null_provider(alice, db):
     assert code in token_msgs[0]["body"]
 
 
+def test_admin_price_change_is_saved_and_used_for_the_next_payment_link(admin, alice, db):
+    from backend.app.models import LiveInterviewOrder, PlatformSettings
+    _enable(db)
+    resp = admin.put("/api/admin/settings/live-interview", headers=csrf_headers(admin),
+                     json={"enabled": True, "display_name": "Live coach", "price_cents": 79900})
+    assert resp.status_code == 200, resp.text
+    ps.invalidate_caches()
+    db.expire_all()
+    stored = db.get(PlatformSettings, "default") or db.scalars(select(PlatformSettings)).one()
+    assert stored.live_interview["price_cents"] == 79900 and stored.live_interview["display_name"] == "Live coach"
+
+    calls = []
+
+    class LinkProvider:
+        name = "razorpay"
+
+        def create_payment_link(self, **kw):
+            calls.append(kw)
+            return RemotePaymentLink(id="plink_1", url="https://rzp.io/l/x", status="created")
+
+    out = request_live_interview(db, alice.user, LinkProvider())
+    db.commit()
+    assert calls[0]["amount_cents"] == 79900 and calls[0]["description"] == "Live coach"
+    assert db.scalars(select(LiveInterviewOrder)).one().amount_cents == 79900
+    link_msg = next(m for m in out["messages"] if m["kind"] == "payment_link")
+    assert "799" in link_msg["body"] and link_msg["meta"]["amount_cents"] == 79900
+
+
 def test_token_starts_once_and_resume_until_end(alice, db):
     _enable(db)
     resp = alice.post("/api/support/live-interview-request", headers=csrf_headers(alice))

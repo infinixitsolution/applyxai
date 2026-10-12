@@ -26,3 +26,5 @@ class PlatformSettings(TimestampMixin, Base):
     ai: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_AI))
     payments: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_PAYMENTS))
     email_templates: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_EMAIL_TEMPLATES))
+    live_interview: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_LIVE_INTERVIEW),
+                                                 server_default="{}")
