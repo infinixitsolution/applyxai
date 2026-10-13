@@ -389,6 +389,8 @@ export const admin = {
     request<{ message: SupportMessage }>(`/admin/support/threads/${id}/messages`, { method: "POST", body: { body } }),
   email: () => request<AdminEmailStatus>("/admin/email"),
   testEmail: (to: string) => request<TestEmailResult>("/admin/email/test", { method: "POST", body: { to: to || null } }),
+  emailPreview: (body: { subject: string; body: string; html: string }) =>
+    request<{ html: string; text: string }>("/admin/email/preview", { method: "POST", body }),
   verifyEmail: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/verify-email`, { method: "POST" }),
   resendVerification: (id: string) =>
     request<AdminUserDetail>(`/admin/users/${id}/resend-verification`, { method: "POST" }),

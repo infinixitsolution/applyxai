@@ -22,6 +22,7 @@ from backend.app.schemas.admin import (
     PartnerUpdateIn,
     PlanCreateIn,
     PlanUpdateIn,
+    EmailPreviewIn,
     TestEmailIn,
     TestTemplateIn,
     UserCreateIn,
@@ -35,7 +36,7 @@ from backend.app.schemas.platform_settings import (
 from backend.app.services import ai_service
 from backend.app.services.ai_service import AiTask
 from backend.app.services import admin_service, auth_service, live_interview_service, platform_settings_service as ps, support_service
-from backend.app.services.email_service import EmailSender, sample_email, verification_email
+from backend.app.services.email_service import Email, EmailSender, branded, sample_email, verification_email
 from backend.app.services import billing_service
 from backend.app.services.payments import PaymentProvider, get_payment_provider, resolve_payment_provider
 from backend.app.services.payments.base import PaymentError
@@ -369,6 +370,12 @@ def post_settings_ai_test(admin: User = Depends(require_admin), db: Session = De
 @router.get("/email", summary="How email is delivered (never the SMTP password), and unverified accounts")
 def email_status(db: Session = Depends(get_db)):
     return ok(admin_service.email_overview(db))
+
+
+@router.post("/email/preview", summary="Show an email inside the branded header and footer layout")
+def email_preview(body: EmailPreviewIn, admin: User = Depends(require_admin)):
+    email = branded(Email(to=admin.email, subject=body.subject, body=body.body, html=body.html))
+    return ok({"html": email.html, "text": email.body})
 
 
 @router.post("/email/test", summary="Send a test email now and report whether it was accepted")

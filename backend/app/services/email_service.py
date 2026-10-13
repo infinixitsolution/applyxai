@@ -1,9 +1,12 @@
 """Outgoing email. SMTP from platform settings (DB) or environment; otherwise console (development)."""
 
+import html as html_lib
 import logging
+import re
 import smtplib
 import ssl
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Protocol
 
@@ -27,27 +30,123 @@ class Email:
 
 FOOTER_LINES = ("Regards,", "ApplyXAI", "www.applyxai.com", "Bangalore", "info@applyxai.com")
 _FOOTER_MARKER = "info@applyxai.com"
-_FOOTER_HTML = (
-    '<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;'
-    'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#334155">'
-    "Regards,<br><strong>ApplyXAI</strong><br>"
-    '<a href="https://www.applyxai.com" style="color:#2563eb">www.applyxai.com</a><br>'
-    "Bangalore<br>"
-    '<a href="mailto:info@applyxai.com" style="color:#2563eb">info@applyxai.com</a>'
-    "</div>"
-)
+_LAYOUT_MARKER = "<!-- applyxai-layout -->"
+SITE_URL = "https://www.applyxai.com"
+# Mail clients load images from the public site, never from localhost, and most block SVG.
+LOGO_URL = "https://applyxai.com/email-logo.png"
+_BRAND = "#2563eb"
+_FONT = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+_URL = re.compile(r"(https?://[^\s<>\"']+)")
+_BODY = re.compile(r"<body[^>]*>(.*)</body>", re.IGNORECASE | re.DOTALL)
 
 
-def with_footer(email: Email) -> Email:
-    """Every outgoing email ends with the company signature (added once)."""
+def _inline(text: str) -> str:
+    """Escape one line of plain text and turn bare URLs into links."""
+    parts = _URL.split(text)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2:
+            url = html_lib.escape(part, quote=True)
+            out.append(f'<a href="{url}" style="color:{_BRAND};word-break:break-all">{url}</a>')
+        else:
+            out.append(html_lib.escape(part))
+    return "".join(out)
+
+
+def _button(label: str, url: str) -> str:
+    url = html_lib.escape(url, quote=True)
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px">'
+        f'<tr><td style="border-radius:10px;background:{_BRAND}">'
+        f'<a href="{url}" style="display:inline-block;padding:12px 24px;{_FONT};font-size:15px;font-weight:600;'
+        f'color:#ffffff;text-decoration:none;border-radius:10px">{html_lib.escape(label)}</a>'
+        "</td></tr></table>"
+        f'<p style="margin:0 0 20px;font-size:12px;line-height:1.5;color:#94a3b8">'
+        f'Or paste this link into your browser:<br><a href="{url}" style="color:#64748b;word-break:break-all">{url}</a></p>'
+    )
+
+
+def text_to_html(body: str) -> str:
+    """Plain-text email body as HTML: a short first line becomes the heading, "Label:" + URL becomes a button."""
+    blocks = [b.strip("\n") for b in re.split(r"\n\s*\n", body.strip()) if b.strip()]
+    out = []
+    for index, block in enumerate(blocks):
+        lines = [line.rstrip() for line in block.split("\n")]
+        if index == 0 and len(lines) == 1 and len(lines[0]) <= 80 and len(blocks) > 1 and not _URL.search(lines[0]):
+            out.append(f'<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;color:#0f172a">{html_lib.escape(lines[0])}</h1>')
+            continue
+        para: list[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            if line.endswith(":") and _URL.fullmatch(nxt):
+                if para:
+                    out.append(_paragraph(para))
+                    para = []
+                out.append(_button(line[:-1].strip(), nxt))
+                i += 2
+                continue
+            if _URL.fullmatch(line.strip()) and not para:
+                out.append(_button("Open link", line.strip()))
+                i += 1
+                continue
+            para.append(_inline(line))
+            i += 1
+        if para:
+            out.append(_paragraph(para))
+    return "".join(out)
+
+
+def _paragraph(lines: list[str]) -> str:
+    return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155">{"<br>".join(lines)}</p>'
+
+
+def render_layout(subject: str, content_html: str) -> str:
+    """Wrap email content in the ApplyXAI header (logo) and footer (logo, signature, contact)."""
+    title = html_lib.escape(subject)
+    year = datetime.now(timezone.utc).year
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>{title}</title></head>
+<body style="margin:0;padding:0;background:#f1f5f9;{_FONT}">{_LAYOUT_MARKER}
+<span style="display:none;max-height:0;overflow:hidden;opacity:0">{title}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9">
+<tr><td align="center" style="padding:32px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,.08)">
+<tr><td style="background:#0f172a;background-image:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);padding:22px 32px">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="vertical-align:middle"><a href="{SITE_URL}"><img src="{LOGO_URL}" width="44" height="44" alt="ApplyXAI" style="display:block;border:0;border-radius:12px;background:#ffffff"></a></td>
+<td style="vertical-align:middle;padding-left:12px"><a href="{SITE_URL}" style="{_FONT};font-size:20px;font-weight:700;color:#ffffff;text-decoration:none">Apply<span style="color:#60a5fa">XAI</span></a>
+<div style="{_FONT};font-size:12px;color:#cbd5e1;margin-top:2px">Apply smarter on LinkedIn</div></td>
+</tr></table></td></tr>
+<tr><td style="padding:32px;{_FONT};color:#334155">{content_html}</td></tr>
+<tr><td style="padding:0 32px"><div style="border-top:1px solid #e2e8f0"></div></td></tr>
+<tr><td style="padding:24px 32px 28px;{_FONT}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+<td width="56" style="vertical-align:top"><img src="{LOGO_URL}" width="44" height="44" alt="ApplyXAI" style="display:block;border:0;border-radius:12px"></td>
+<td style="vertical-align:top;font-size:14px;line-height:1.6;color:#475569">Regards,<br><strong style="color:#0f172a">ApplyXAI</strong><br>
+<a href="{SITE_URL}" style="color:{_BRAND};text-decoration:none">www.applyxai.com</a><br>Bangalore<br>
+<a href="mailto:info@applyxai.com" style="color:{_BRAND};text-decoration:none">info@applyxai.com</a></td>
+</tr></table></td></tr>
+</table>
+<p style="margin:20px 0 0;{_FONT};font-size:12px;line-height:1.5;color:#94a3b8">You're receiving this email because of your ApplyXAI account.<br>&copy; {year} ApplyXAI &middot; Bangalore, India</p>
+</td></tr></table></body></html>"""
+
+
+def branded(email: Email) -> Email:
+    """Every outgoing email: text ends with the signature, HTML gets the branded header and footer (each added once)."""
     body = email.body.rstrip()
     if _FOOTER_MARKER not in body:
         body = f"{body}\n\n" + "\n".join(FOOTER_LINES)
     html = email.html
-    if html.strip() and _FOOTER_MARKER not in html:
-        lower = html.lower()
-        cut = lower.rfind("</body>")
-        html = f"{html[:cut]}{_FOOTER_HTML}{html[cut:]}" if cut >= 0 else f"{html}{_FOOTER_HTML}"
+    if _LAYOUT_MARKER not in html:
+        if html.strip():
+            match = _BODY.search(html)
+            content = match.group(1) if match else html
+        else:
+            content = text_to_html(email.body)
+        html = render_layout(email.subject, content)
     return Email(to=email.to, subject=email.subject, body=body, html=html)
 
 
@@ -57,9 +156,8 @@ class EmailSender(Protocol):
 
 class ConsoleEmailSender:
     def send(self, email: Email) -> None:
-        email = with_footer(email)
-        extra = f"\n[HTML]\n{email.html}" if email.html else ""
-        logger.warning("DEV EMAIL to %s | %s\n%s%s", email.to, email.subject, email.body, extra)
+        email = branded(email)
+        logger.warning("DEV EMAIL to %s | %s\n%s", email.to, email.subject, email.body)
 
 
 class SmtpEmailSender:
@@ -88,7 +186,7 @@ class SmtpEmailSender:
 
     def send(self, email: Email) -> None:
         try:
-            self.deliver(with_footer(email))
+            self.deliver(branded(email))
         except Exception:
             logger.exception("Failed to send email '%s'", email.subject)
 

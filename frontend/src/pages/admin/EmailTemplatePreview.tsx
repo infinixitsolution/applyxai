@@ -1,6 +1,7 @@
 import { Bell, Mail } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cx } from "../../components/ui";
+import { admin } from "../../services/endpoints";
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 
@@ -9,26 +10,30 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
   return (template || "").replace(PLACEHOLDER, (_, key: string) => vars[key] ?? "");
 }
 
-/** Same signature the server adds to every outgoing email (`email_service.with_footer`). */
+/** Same text signature the server adds to every outgoing email (`email_service.branded`). */
 const FOOTER_MARKER = "info@applyxai.com";
 const FOOTER_TEXT = ["Regards,", "ApplyXAI", "www.applyxai.com", "Bangalore", "info@applyxai.com"].join("\n");
-const FOOTER_HTML =
-  '<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;' +
-  'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#334155">' +
-  "Regards,<br><strong>ApplyXAI</strong><br>" +
-  '<a href="https://www.applyxai.com" style="color:#2563eb">www.applyxai.com</a><br>' +
-  "Bangalore<br>" +
-  '<a href="mailto:info@applyxai.com" style="color:#2563eb">info@applyxai.com</a>' +
-  "</div>";
 
-export function withFooter(text: string, html: string): { text: string; html: string } {
-  const outText = text.includes(FOOTER_MARKER) ? text : `${text.trimEnd()}\n\n${FOOTER_TEXT}`;
-  let outHtml = html;
-  if (html.trim() && !html.includes(FOOTER_MARKER)) {
-    const cut = html.toLowerCase().lastIndexOf("</body>");
-    outHtml = cut >= 0 ? `${html.slice(0, cut)}${FOOTER_HTML}${html.slice(cut)}` : `${html}${FOOTER_HTML}`;
-  }
-  return { text: outText, html: outHtml };
+export function withFooter(text: string): string {
+  return text.includes(FOOTER_MARKER) ? text : `${text.trimEnd()}\n\n${FOOTER_TEXT}`;
+}
+
+const LIVE_LOGO = "https://applyxai.com/email-logo.png";
+
+/** The exact branded HTML (header, logo, footer) the server sends, refreshed as the template is edited. */
+function useBrandedHtml(subject: string, text: string, html: string): string {
+  const [out, setOut] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      admin
+        .emailPreview({ subject, body: text, html })
+        .then((r) => { if (alive) setOut(r.html.replaceAll(LIVE_LOGO, `${window.location.origin}/email-logo.png`)); })
+        .catch(() => { if (alive) setOut(""); });
+    }, 300);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [subject, text, html]);
+  return out;
 }
 
 const URL_RE = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[\w.+-]+@[\w-]+\.[\w.]+)/g;
@@ -112,7 +117,6 @@ export function EmailTemplatePreview({
   appendLink?: string;
   inApp?: { title: string; body: string };
 }) {
-  const hasHtml = html.trim().length > 0;
   const [view, setView] = useState<View>("email");
 
   const renderedSubject = renderTemplate(subject, vars);
@@ -120,13 +124,12 @@ export function EmailTemplatePreview({
   if (appendLink && !text.includes("Open in")) {
     text += `\n\nOpen in ${vars.app_name}:\n${appendLink}`;
   }
-  const signed = withFooter(text, renderTemplate(html, vars));
-  const renderedText = signed.text;
-  const renderedHtml = signed.html;
+  const renderedText = withFooter(text);
+  const renderedHtml = useBrandedHtml(renderedSubject, text, renderTemplate(html, vars));
 
   const tabs: { id: View; label: string }[] = [
-    { id: "email", label: hasHtml ? "Email (HTML)" : "Email" },
-    ...(hasHtml ? [{ id: "text" as const, label: "Plain-text fallback" }] : []),
+    { id: "email", label: "Email" },
+    { id: "text", label: "Plain-text fallback" },
     ...(inApp ? [{ id: "in_app" as const, label: "In-app notification" }] : []),
   ];
 
@@ -175,12 +178,12 @@ export function EmailTemplatePreview({
             <p className="text-slate-600"><span className="text-slate-400">From:</span> {from}</p>
             <p className="text-slate-600"><span className="text-slate-400">To:</span> {to}</p>
           </div>
-          {view === "email" && hasHtml ? (
+          {view === "email" && renderedHtml ? (
             <iframe
               title="Email HTML preview"
               sandbox=""
               srcDoc={renderedHtml}
-              className="block h-[420px] w-full bg-white"
+              className="block h-[560px] w-full bg-slate-100"
             />
           ) : (
             <div className="max-h-[420px] overflow-auto bg-white px-5 py-4 font-sans text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
