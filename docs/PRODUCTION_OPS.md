@@ -23,7 +23,7 @@ From Windows (uses the same SSH key as deploy):
 | **Redis** | `REDIS_URL` for Celery; **`RATE_LIMIT_STORAGE_URL=redis://127.0.0.1:6379/1`** (not `memory://`) |
 | **Razorpay** | `PAYMENT_PROVIDER=razorpay` + live keys + webhook → [DEVELOPMENT.md](./DEVELOPMENT.md#payments-razorpay) |
 | **Billing scope** | Production billing is **Razorpay-only** until Stripe Checkout ships — [BILLING.md](./BILLING.md) |
-| **SES / SMTP** | [SES.md](./SES.md); verify domain DKIM; test from Admin → Email |
+| **SMTP (Hostinger)** | [EMAIL.md](./EMAIL.md); sender must be the login mailbox; test from Admin → Email |
 | **Celery + beat** | `applyxai-celery.service` runs `celery … worker --beat` (single instance) |
 | **Mock interview abandon** | Beat task `applyxai.abandon_stale_mock_interviews` hourly — see logs below |
 | **Backups** | Install [systemd timer](./../scripts/systemd/applyxai-backup.timer) or cron example |

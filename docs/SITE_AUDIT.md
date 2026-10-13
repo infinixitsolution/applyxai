@@ -22,9 +22,9 @@ curl -s https://applyxai.com/api/plans | jq '.data.plans[].code'
 
 Expected: HSTS present; sitemap is XML; robots lists `/onboarding`; contact is `support@applyxai.com`; plans exclude `unlimited`.
 
-## Email (SES Mail Manager)
+## Email (Hostinger SMTP)
 
-See [SES.md](./SES.md). SMTP credentials live in Admin → Email & SMTP (or EC2 `.env` fallback).
+See [EMAIL.md](./EMAIL.md). SMTP credentials live in Admin → Email & SMTP (or EC2 `.env` fallback).
 
 ## Backups (recommended)
 

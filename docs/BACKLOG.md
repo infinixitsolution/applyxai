@@ -145,7 +145,7 @@ Related docs: [MOCK_INTERVIEW_IMPLEMENTATION_PLAN.md](./MOCK_INTERVIEW_IMPLEMENT
 | 38 | PG migration CI | P1 | 4 |
 | 39 | OpenAI live test | P1 | 4 |
 | 40 | Prod rate limits (Redis) | P0 | 1 |
-| 41 | SES production readiness | P1 | Ops |
+| 41 | Email deliverability (Hostinger SMTP, SPF/DKIM) | P1 | Ops |
 | 42 | Automated deploy smoke | P1 | 4 |
 | 43 | Security sign-off | P0 | 1 |
 | 44 | Talking-avatar SDK | P1 | 2 |

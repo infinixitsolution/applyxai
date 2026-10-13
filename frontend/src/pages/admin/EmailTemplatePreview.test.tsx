@@ -11,7 +11,7 @@ describe("EmailTemplatePreview", () => {
   it("renders a plain-text email with the sample link and an in-app tab", async () => {
     render(
       <EmailTemplatePreview
-        from="ApplyXAI <no-reply@applyxai.com>"
+        from="ApplyXAI <noreply@applyxai.com>"
         subject="Verify your {app_name} email"
         body={"Confirm here:\n{link}"}
         html=""
