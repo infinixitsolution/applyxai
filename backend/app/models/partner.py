@@ -90,6 +90,7 @@ class PartnerPayout(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     note: Mapped[str] = mapped_column(Text, default="")
     processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    provider_transfer_id: Mapped[str] = mapped_column(String(255), default="", server_default="")
 
 
 class PartnerCampaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):

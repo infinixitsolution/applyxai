@@ -1,0 +1,3 @@
+131.0.6778.87
+# Place Windows x64 chromedriver.exe in this folder (vendor/chromedriver.exe).
+# scripts/fetch_chromedriver.ps1 downloads this pin. Open_chrome prefers it over Selenium Manager.

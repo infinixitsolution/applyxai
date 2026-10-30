@@ -5,6 +5,9 @@ from backend.app.core.platform_defaults import (
     DEFAULT_AI,
     DEFAULT_CMS,
     DEFAULT_EMAIL_TEMPLATES,
+    DEFAULT_JOB_SOURCES,
+    DEFAULT_GST,
+    DEFAULT_OUTREACH,
     DEFAULT_LIVE_INTERVIEW,
     DEFAULT_NOTIFICATIONS,
     DEFAULT_PAYMENTS,
@@ -28,3 +31,8 @@ class PlatformSettings(TimestampMixin, Base):
     email_templates: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_EMAIL_TEMPLATES))
     live_interview: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_LIVE_INTERVIEW),
                                                  server_default="{}")
+    job_sources: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_JOB_SOURCES),
+                                              server_default="{}")
+    outreach: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_OUTREACH),
+                                           server_default="{}")
+    gst: Mapped[dict] = mapped_column(JSONType, default=lambda: dict(DEFAULT_GST), server_default="{}")

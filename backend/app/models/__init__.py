@@ -17,7 +17,7 @@ from backend.app.models.agent_connect import AgentConnectSession
 from backend.app.models.automation import AutomationJob, AutomationLog
 from backend.app.models.application import Application
 from backend.app.models.subscription import Plan, Subscription
-from backend.app.models.billing import BillingEvent, Payment
+from backend.app.models.billing import BillingEvent, Payment, TaxInvoice
 from backend.app.models.usage import UsageCounter
 from backend.app.models.notification import Notification
 from backend.app.models.admin import AdminAction
@@ -29,6 +29,12 @@ from backend.app.models.mock_interview_feedback_job import MockInterviewFeedback
 from backend.app.models.live_interview import (
     LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, SupportMessage, SupportThread,
 )
+from backend.app.models.outreach import (
+    InstituteLead, InstituteLeadChatMessage, InstituteLeadProfile, InstituteOutreachMessage, InstituteScrapeJob,
+    WhatsAppSession,
+)
+from backend.app.models.company_directory import CompanyDirectoryProfile
+from backend.app.models.candidate_referral import CandidateReferral
 
 __all__ = [
     "Base",
@@ -39,9 +45,11 @@ __all__ = [
     "User", "UserProfile", "AuthToken", "SearchConfig", "ApplicationPreferences", "Resume", "Job", "AgentDevice",
     "AgentConnectSession",
     "AutomationJob",
-    "AutomationLog", "Application", "Plan", "Subscription", "Payment", "BillingEvent", "UsageCounter", "Notification",
-    "AdminAction", "PlatformSettings",
+    "AutomationLog", "Application", "Plan", "Subscription", "Payment", "BillingEvent", "TaxInvoice", "UsageCounter",
+    "Notification", "AdminAction", "PlatformSettings",
     "Partner", "PartnerAttribution", "PartnerCampaign", "PartnerCommission", "PartnerPayout",
     "Institute", "InstituteAssignment", "InstituteInvite", "InstituteMember", "InstituteSeat",
     "MockInterviewSession", "MockInterviewMessage", "MockInterviewFeedbackJob",
+    "InstituteScrapeJob", "InstituteLead", "InstituteLeadProfile", "InstituteOutreachMessage",
+    "InstituteLeadChatMessage", "WhatsAppSession", "CompanyDirectoryProfile", "CandidateReferral",
 ]

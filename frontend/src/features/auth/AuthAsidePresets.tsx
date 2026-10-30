@@ -47,7 +47,7 @@ export function DefaultAuthStory() {
       footer={
         <div className="auth-aside-source">
           <img src="/sources/linkedin.svg" alt="" width={28} height={28} className="source-logo" />
-          <span>LinkedIn only</span>
+          <span>LinkedIn and Naukri</span>
         </div>
       }
     />
@@ -68,7 +68,7 @@ export function LoginAside() {
       footer={
         <div className="auth-aside-source">
           <img src="/sources/linkedin.svg" alt="" width={28} height={28} className="source-logo" />
-          <span>LinkedIn Easy Apply only</span>
+          <span>LinkedIn Easy Apply · Naukri when enabled</span>
         </div>
       }
     />

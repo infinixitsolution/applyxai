@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
+import { DesktopAgentPanel } from "./DesktopAgentPanel";
+import { hasDesktopAgent, isDesktopHost } from "../lib/desktop";
 import { automation } from "../services/endpoints";
 import { buttonClass, Spinner } from "./ui";
 
@@ -8,8 +10,7 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Logged-in download for the Windows desktop agent (uses session cookies; no forced filename). */
-export function AgentDownloadPanel({ className }: { className?: string }) {
+function AgentDownloadPanelWeb({ className }: { className?: string }) {
   const info = useQuery({
     queryKey: ["desktop-agent-info"],
     queryFn: automation.desktopAgentInfo,
@@ -22,12 +23,12 @@ export function AgentDownloadPanel({ className }: { className?: string }) {
   if (useApi && info.isSuccess && info.data && !info.data.available) {
     return (
       <p className="text-sm text-slate-600">
-        The desktop agent download is not on this server yet. Please contact support.
+        ApplyXAI Desktop is not available for download on this server yet. Please contact support.
       </p>
     );
   }
 
-  const exeName = info.data?.filename ?? "ApplyXAI-Agent.exe";
+  const exeName = info.data?.filename ?? "ApplyXAI-Desktop-Setup.exe";
   const exeSize = info.data?.size_bytes ? formatBytes(info.data.size_bytes) : null;
   const zip = info.data?.zip;
   const zipHref = automation.desktopAgentDownloadUrl("zip");
@@ -52,14 +53,14 @@ export function AgentDownloadPanel({ className }: { className?: string }) {
         </a>
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        Windows 10 or later. Extract the ZIP if needed, run the installer, then use Connect — Live in the app.
+        Windows 10 or later. One installer includes the app and automation — sign in, connect this computer, then start runs from the web UI inside Desktop.
       </p>
       <details className="mt-2 text-xs text-slate-600">
         <summary className="cursor-pointer font-medium text-slate-700">Chrome blocked the download?</summary>
         <ul className="mt-2 list-disc space-y-1 pl-4">
           <li>
             Prefer the <strong>ZIP</strong> link — Chrome usually allows it; extract, then run{" "}
-            <code className="rounded bg-slate-100 px-1">ApplyXAI-Agent-Setup.exe</code>.
+            <code className="rounded bg-slate-100 px-1">ApplyXAI-Desktop-Setup.exe</code>.
           </li>
           <li>
             For a blocked .exe: open Chrome&apos;s download bar → ⋮ on the file → <strong>Keep</strong> or{" "}
@@ -73,4 +74,33 @@ export function AgentDownloadPanel({ className }: { className?: string }) {
       </details>
     </div>
   );
+}
+
+type DownloadPanelProps = {
+  className?: string;
+  serverLinked?: boolean;
+  linking?: boolean;
+  linkError?: string | null;
+};
+
+/** Logged-in download for ApplyXAI Desktop on Windows (uses session cookies). */
+export function AgentDownloadPanel({ className, serverLinked = false, linking, linkError }: DownloadPanelProps) {
+  if (isDesktopHost) {
+    if (hasDesktopAgent()) {
+      return (
+        <DesktopAgentPanel
+          className={className}
+          serverLinked={serverLinked}
+          linking={linking}
+          linkError={linkError}
+        />
+      );
+    }
+    return (
+      <p className={className ?? "text-sm text-slate-600"}>
+        Restart ApplyXAI Desktop if this computer does not appear in a few seconds.
+      </p>
+    );
+  }
+  return <AgentDownloadPanelWeb className={className} />;
 }

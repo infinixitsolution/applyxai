@@ -2,6 +2,7 @@ import { Eye, EyeOff, Lock, Mail, Sparkles } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button } from "../../components/ui";
+import { isDesktopApp } from "../../lib/desktop";
 import { AuthLegalLinks, AuthPageLayout } from "./AuthPageLayout";
 
 export type LoginScreenProps = {
@@ -53,8 +54,11 @@ export function LoginScreen(props: LoginScreenProps) {
   const [showPassword, setShowPassword] = useState(false);
   const canSubmit = twoFactorStep ? totpCode.trim().length >= 6 : Boolean(email.trim() && password);
 
+  const compact = isDesktopApp;
+
   return (
     <AuthPageLayout
+      compact={compact}
       storyAriaLabel="Why ApplyXAI"
       kicker={
         <>
@@ -80,11 +84,13 @@ export function LoginScreen(props: LoginScreenProps) {
         </>
       }
       footer={
-        <div className="ax-login__alt">
-          <span>Other accounts</span>
-          <Link to="/register/institute">Institute</Link>
-          <Link to="/register/partner">Partner</Link>
-        </div>
+        compact ? null : (
+          <div className="ax-login__alt">
+            <span>Other accounts</span>
+            <Link to="/register/institute">Institute</Link>
+            <Link to="/register/partner">Partner</Link>
+          </div>
+        )
       }
     >
       <form className="ax-login__form" onSubmit={onSubmit} noValidate>

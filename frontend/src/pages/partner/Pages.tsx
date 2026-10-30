@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../../auth/session";
 import { TextArea, TextInput } from "../../components/form";
@@ -318,14 +318,17 @@ export function PartnerKycPage() {
   const toast = useToast();
   const client = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["partner", "me"], queryFn: partner.me });
-  const [filename, setFilename] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [note, setNote] = useState("");
   const add = useMutation({
-    mutationFn: () => partner.addKyc(filename, note),
+    mutationFn: () => partner.addKyc(file as File, note),
     onSuccess: (updated) => {
-      setFilename(""); setNote("");
+      setFile(null);
+      setNote("");
+      if (fileRef.current) fileRef.current.value = "";
       client.setQueryData(["partner", "me"], updated);
-      toast.success("Document recorded.");
+      toast.success("Document uploaded.");
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -334,22 +337,40 @@ export function PartnerKycPage() {
     <>
       <PageHeader title="KYC" description={`Status: ${data.kyc_status}`} />
       <Card className="mb-6">
-        <form onSubmit={(e) => { e.preventDefault(); add.mutate(); }} className="space-y-3">
-          <TextInput label="Document name" value={filename} onChange={setFilename} required hint="Record the file you hold. Uploads are reviewed by ApplyXAI." />
+        <form onSubmit={(e) => { e.preventDefault(); if (file) add.mutate(); }} className="space-y-3">
+          <label className="block text-sm font-medium text-slate-700">
+            Document
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+              aria-label="KYC document"
+              className="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            <span className="mt-1 block text-xs font-normal text-slate-500">PDF, JPG, PNG, or WEBP, up to 5 MB. ApplyXAI reviews uploads.</span>
+          </label>
           <TextArea label="Note" value={note} onChange={setNote} maxLength={255} />
-          <Button type="submit" loading={add.isPending} disabled={!filename.trim()}>Add</Button>
+          <Button type="submit" loading={add.isPending} disabled={!file}>Upload</Button>
         </form>
       </Card>
       <Card>
         <ul className="divide-y divide-slate-100 text-sm">
           {data.kyc_documents.map((d) => (
-            <li key={`${d.uploaded_at}-${d.filename}`} className="py-2">
-              <p className="font-medium">{d.filename}</p>
-              {d.note && <p className="text-slate-600">{d.note}</p>}
-              <p className="text-xs text-slate-400">{formatDateTime(d.uploaded_at)}</p>
+            <li key={`${d.id || d.uploaded_at}-${d.filename}`} className="flex items-start justify-between gap-3 py-2">
+              <div>
+                <p className="font-medium">{d.filename}</p>
+                {d.note && <p className="text-slate-600">{d.note}</p>}
+                <p className="text-xs text-slate-400">{formatDateTime(d.uploaded_at)}</p>
+              </div>
+              {d.id && (
+                <a className="shrink-0 text-sm font-medium text-brand-700 hover:underline" href={`/api/partner/kyc/${d.id}/file`}>
+                  Download
+                </a>
+              )}
             </li>
           ))}
-          {!data.kyc_documents.length && <li className="py-6 text-slate-500">No documents recorded.</li>}
+          {!data.kyc_documents.length && <li className="py-6 text-slate-500">No documents uploaded.</li>}
         </ul>
       </Card>
     </>

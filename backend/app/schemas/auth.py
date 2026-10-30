@@ -103,3 +103,6 @@ class UserOut(BaseModel):
     institute_status: str | None = None
     partner_status: str | None = None
     totp_enabled: bool = False
+    institute_managed: bool = False
+    institute_name: str | None = None
+    referral_code: str | None = None

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("applyxai.api")
@@ -70,6 +71,32 @@ def register_error_handlers(app: FastAPI) -> None:
         ]
         message = details[0]["message"] if len(details) == 1 else "Invalid request"
         return error_response(422, "VALIDATION_ERROR", message, details)
+
+    @app.exception_handler(OperationalError)
+    async def _database_operational(_request: Request, exc: OperationalError):
+        message = str(getattr(exc, "orig", exc) or exc).lower()
+        if "locked" in message or "busy" in message:
+            return error_response(
+                503,
+                "DATABASE_BUSY",
+                "The local database is locked. Stop other programs using storage/applyxai.db "
+                "(DB Browser, a second API server, Celery), wait a few seconds, and try again.",
+            )
+        if "no such table" in message or "no such column" in message:
+            return error_response(
+                503,
+                "DATABASE_SCHEMA",
+                "The database schema is out of date. From the project folder run: "
+                "alembic -c backend/alembic.ini upgrade head — then restart the API.",
+            )
+        if "could not connect" in message or "connection refused" in message or "password authentication failed" in message:
+            return error_response(
+                503,
+                "DATABASE_UNAVAILABLE",
+                "Cannot connect to the database. Check DATABASE_URL in .env and that PostgreSQL is running.",
+            )
+        logger.exception("Database error")
+        return error_response(503, "DATABASE_ERROR", "Database is temporarily unavailable. Please try again.")
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception):

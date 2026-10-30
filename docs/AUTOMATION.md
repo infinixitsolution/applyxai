@@ -135,3 +135,18 @@ The remaining monthly applications are checked when a run starts and again when 
 3. The server sets the run's control to `stop` once usage reaches the limit.
 
 The run ends as `cancelled` with `stop_reason = plan_limit`, and the user gets a notification linking to Billing. Practice runs (`dry_run`) submit nothing and have no cap.
+
+## LinkedIn profile sync
+
+A separate engine entry (`runLinkedInProfileSync.py`) pushes **Master Profile** data into the member’s logged-in LinkedIn profile on the user’s PC. It reuses the same agent workspace Chrome profile as Easy Apply but does **not** consume monthly application quota.
+
+| Piece | Role |
+|---|---|
+| `POST /api/automation/profile-sync/start` | Queues `run_kind=linkedin_profile_sync` |
+| `run_payload.profile_sync` | Snapshot + sync plan + settings for the engine |
+| `automation/linkedin_profile/` | Section orchestration and browser helpers |
+| Profile events | `profile_sync_started`, `profile_section_*`, `profile_sync_finished` |
+
+Default policy is **fill empty fields only**; optional per-section overwrite is stored on the run’s `run_options`. Dry runs walk the plan without saving on LinkedIn.
+
+HTML fixtures for profile edit modals live under `tests/fixtures/linkedin_profile/` (extend as LinkedIn UI changes).

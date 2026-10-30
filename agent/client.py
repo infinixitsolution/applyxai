@@ -106,8 +106,14 @@ class ApiClient:
         return self._send("POST", "/agent/poll", json={
             "active_run_id": active_run_id, "platform": platform_name(), "agent_version": AGENT_VERSION})
 
+    def refresh_run_config(self, run_id: str) -> dict:
+        return self._send("GET", f"/agent/runs/{run_id}/refresh")
+
     def download_resume(self, run_id: str) -> bytes:
         return self._send("GET", f"/agent/runs/{run_id}/resume", raw=True)
+
+    def download_profile_photo(self, run_id: str) -> bytes:
+        return self._send("GET", f"/agent/runs/{run_id}/profile-photo", raw=True)
 
     def post_events(self, run_id: str, first_seq: int, events: list[dict]) -> dict:
         return self._send("POST", f"/agent/runs/{run_id}/events", json={"first_seq": first_seq, "events": events})

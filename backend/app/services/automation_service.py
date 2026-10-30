@@ -19,9 +19,11 @@ from sqlalchemy.orm import Session
 
 from automation import events as ev
 from backend.app.core.errors import AppError
-from backend.app.models import AgentDevice, AutomationJob, AutomationLog, AutomationStatus, SearchConfig, User
+from backend.app.models import (
+    AgentDevice, ApplicationPreferences, AutomationJob, AutomationLog, AutomationStatus, SearchConfig, User, UserProfile,
+)
 from backend.app.models.enums import ACTIVE_AUTOMATION_STATUSES
-from backend.app.services import agent_service, ingest_service, notification_service, preferences_service, run_config_service, usage_service
+from backend.app.services import agent_service, ingest_service, linkedin_profile_sync_service as lp_sync, notification_service, platform_settings_service, preferences_service, run_config_service, usage_service
 
 CONTROL_RUN, CONTROL_PAUSE, CONTROL_STOP = "run", "pause", "stop"
 RUN_STALE_SECONDS = 180
@@ -31,7 +33,7 @@ RECENT_RUNS = 10
 
 STOP_USER, STOP_PLAN_LIMIT, STOP_ADMIN = "user", "plan_limit", "admin"
 _NO_RESUME = "Upload a resume and make it your default."
-_LOST_AGENT = ("Lost contact with the desktop agent on your computer. "
+_LOST_AGENT = ("Lost contact with ApplyXAI Desktop on your computer. "
                "Everything it reported before that is saved.")
 
 
@@ -54,6 +56,24 @@ def run_out(run: AutomationJob | None) -> dict | None:
         "successful_count": run.successful_count, "failed_count": run.failed_count,
         "skipped_count": run.skipped_count, "error_message": run.error_message, "stop_reason": run.stop_reason,
         "claimed": run.device_id is not None,
+        "run_kind": run.run_kind or lp_sync.RUN_KIND_JOB_APPLY,
+        **_source_fields(run),
+    }
+
+
+def _source_fields(run: AutomationJob) -> dict:
+    sources = [s for s in (run.sources or ["linkedin"]) if s in ("linkedin", "naukri")] or ["linkedin"]
+    ctx = run.ingest_context or {}
+    active = ctx.get("active_source") if ctx.get("active_source") in sources else sources[0]
+    try:
+        submitted = int(ctx.get("source_submitted") or 0)
+    except (TypeError, ValueError):
+        submitted = 0
+    return {
+        "sources": sources,
+        "switch_after": run.switch_after,
+        "active_source": active,
+        "source_submitted": submitted,
     }
 
 
@@ -164,10 +184,12 @@ def overview(db: Session, user_id: uuid.UUID) -> dict:
         "readiness": {"ready": not problems, "problems": problems},
         "usage": usage_service.usage_summary(db, user_id),
         "resume_tailor": _resume_tailor_snapshot(db, user_id),
+        "enabled_sources": platform_settings_service.enabled_source_names(db),
     }
 
 
-def start_run(db: Session, user: User, *, dry_run: bool = False, resume_mode: str = "default") -> AutomationJob:
+def start_run(db: Session, user: User, *, dry_run: bool = False, resume_mode: str = "default",
+              sources: list[str] | None = None, switch_after: int | None = None) -> AutomationJob:
     reap_stale_runs(db, user_id=user.id)
     problems = readiness(db, user.id)
     if problems:
@@ -180,7 +202,21 @@ def start_run(db: Session, user: User, *, dry_run: bool = False, resume_mode: st
     if active_run(db, user.id) is not None:
         raise AppError("RUN_ACTIVE", "A run is already in progress. Stop it before starting another.", 409)
     _persist_resume_mode(db, user.id, resume_mode)
-    run = AutomationJob(user_id=user.id, status=AutomationStatus.QUEUED, dry_run=dry_run)
+    enabled = set(platform_settings_service.enabled_source_names(db))
+    requested = [s for s in (sources or ["linkedin"]) if s in ("linkedin", "naukri")]
+    if not requested:
+        raise AppError("SOURCE_DISABLED", "Choose at least one job source.", 422)
+    if any(name not in enabled for name in requested):
+        raise AppError(
+            "SOURCE_DISABLED",
+            "Choose a job source that is turned on. An admin activates sources under Settings.",
+            422,
+        )
+    chosen = requested
+    run = AutomationJob(
+        user_id=user.id, status=AutomationStatus.QUEUED, dry_run=dry_run,
+        sources=chosen, switch_after=switch_after if len(chosen) > 1 else None,
+    )
     try:
         with db.begin_nested():
             db.add(run)
@@ -188,6 +224,37 @@ def start_run(db: Session, user: User, *, dry_run: bool = False, resume_mode: st
         raise AppError("RUN_ACTIVE", "A run is already in progress. Stop it before starting another.", 409)
     db.flush()
     return run
+
+
+def start_profile_sync_run(db: Session, user: User, *, options: dict | None = None) -> AutomationJob:
+    reap_stale_runs(db, user_id=user.id)
+    problems = lp_sync.readiness_problems(db, user)
+    if problems:
+        raise AppError("NOT_READY", "Finish setting up before you sync: " + " ".join(problems), 422, details=problems)
+    if active_run(db, user.id) is not None:
+        raise AppError("RUN_ACTIVE", "A run is already in progress. Stop it before starting another.", 409)
+    opts = lp_sync.normalize_start_options(options)
+    run = AutomationJob(
+        user_id=user.id,
+        status=AutomationStatus.QUEUED,
+        dry_run=opts["dry_run"],
+        run_kind=lp_sync.RUN_KIND_PROFILE_SYNC,
+        run_options=opts,
+        sources=["linkedin"],
+    )
+    try:
+        with db.begin_nested():
+            db.add(run)
+    except IntegrityError:
+        raise AppError("RUN_ACTIVE", "A run is already in progress. Stop it before starting another.", 409)
+    db.flush()
+    return run
+
+
+def profile_sync_readiness(db: Session, user_id: uuid.UUID) -> dict:
+    user = db.get(User, user_id)
+    problems = lp_sync.readiness_problems(db, user) if user else ["Account not found."]
+    return {"ready": not problems, "problems": problems}
 
 
 def _finished_error() -> AppError:
@@ -251,14 +318,33 @@ def _fail_claim(db: Session, run: AutomationJob, message: str) -> None:
 def run_payload(db: Session, run: AutomationJob) -> dict:
     from backend.app.services.ai_service import ai_available
 
-    resume = run_config_service.default_resume(db, run.user_id)
     user = db.get(User, run.user_id)
+    base = {
+        "id": str(run.id),
+        "dry_run": run.dry_run,
+        "control": run.control,
+        "next_seq": run.event_seq + 1,
+        "run_kind": run.run_kind or lp_sync.RUN_KIND_JOB_APPLY,
+    }
+    if (run.run_kind or lp_sync.RUN_KIND_JOB_APPLY) == lp_sync.RUN_KIND_PROFILE_SYNC:
+        opts = dict(run.run_options or {})
+        opts.setdefault("dry_run", run.dry_run)
+        profile_sync = lp_sync.profile_sync_payload(db, user, opts)
+        return {
+            **base,
+            "profile_sync": profile_sync,
+            "remaining_applications": usage_service.remaining_applications(db, run.user_id),
+        }
+
+    resume = run_config_service.default_resume(db, run.user_id)
     doc = preferences_service.application_document(db, user)
     avail = ai_available(db, feature="applications") or ai_available(db, feature="resume")
     search = db.scalar(select(SearchConfig).where(SearchConfig.user_id == run.user_id))
     resume_mode = (search.extra or {}).get("resume_mode", "default") if search and search.extra else "default"
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == run.user_id))
+    education = list((profile.education if profile else []) or [])
     return {
-        "id": str(run.id), "dry_run": run.dry_run, "control": run.control, "next_seq": run.event_seq + 1,
+        **base,
         "values": run_config_service.engine_values(db, run.user_id),
         "resume": None if resume is None else {"id": str(resume.id), "filename": resume.filename,
                                                "file_type": resume.file_type, "file_size": resume.file_size},
@@ -268,9 +354,12 @@ def run_payload(db: Session, run: AutomationJob) -> dict:
             "ai_applications_enabled": doc["ai_applications_enabled"],
             "user_information_all": doc["user_information_all"],
             "ai_policy": doc["ai_policy"],
+            "education": education,
         },
         "ai_available": avail,
         "resume_mode": resume_mode if resume_mode in ("default", "tailor_if_gate") else "default",
+        "sources": list(run.sources or ["linkedin"]),
+        "switch_after": run.switch_after,
     }
 
 
@@ -281,13 +370,32 @@ def poll(db: Session, device: AgentDevice, *, active_run_id: uuid.UUID | None = 
     restarted mid-run). An idle agent gets the user's queued run, if there is one. The caller commits.
     """
     agent_service.touch(device, agent_version=agent_version, platform=platform)
+    now = _now()
     held = db.scalars(select(AutomationJob).where(AutomationJob.device_id == device.id,
                                                   AutomationJob.status.in_(ACTIVE_AUTOMATION_STATUSES))).all()
-    for run in held:
-        if run.id != active_run_id:
-            _fail_claim(db, run, "The desktop agent restarted during the run. Everything it reported before that is saved.")
     if active_run_id is not None:
+        for run in held:
+            if run.id == active_run_id:
+                run.last_seen_at = now
+        db.flush()
         return None
+
+    # Idle poll while this device still holds an active run — re-deliver the run instead of
+    # failing (duplicate workers or a brief worker restart used to mark these as "restarted").
+    if len(held) == 1:
+        run = held[0]
+        run.last_seen_at = now
+        return run_payload(db, run)
+    if len(held) > 1:
+        for run in held[1:]:
+            _fail_claim(
+                db,
+                run,
+                "ApplyXAI Desktop had conflicting active runs on this computer. This one was stopped.",
+            )
+        run = held[0]
+        run.last_seen_at = now
+        return run_payload(db, run)
 
     run = db.scalar(select(AutomationJob).where(AutomationJob.user_id == device.user_id,
                                                 AutomationJob.status == AutomationStatus.QUEUED,
@@ -302,6 +410,14 @@ def poll(db: Session, device: AgentDevice, *, active_run_id: uuid.UUID | None = 
         return None                                   # another of the user's computers took it
     db.refresh(run)
 
+    if (run.run_kind or lp_sync.RUN_KIND_JOB_APPLY) == lp_sync.RUN_KIND_PROFILE_SYNC:
+        problems = lp_sync.readiness_problems(db, db.get(User, run.user_id))
+        if problems:
+            _fail_claim(db, run, "The profile sync couldn't start: " + " ".join(problems))
+            return None
+        _log(db, run, "info", "claimed", f"Picked up by {device.name or 'your computer'}. Opening LinkedIn profile sync…")
+        return run_payload(db, run)
+
     problems = readiness(db, run.user_id)
     if problems:
         _fail_claim(db, run, "The run couldn't start: " + " ".join(problems))
@@ -311,6 +427,32 @@ def poll(db: Session, device: AgentDevice, *, active_run_id: uuid.UUID | None = 
         return None
     _log(db, run, "info", "claimed", f"Picked up by {device.name or 'your computer'}. Opening the browser…")
     return run_payload(db, run)
+
+
+def active_run_refresh_meta(db: Session, device: AgentDevice, active_run_id: uuid.UUID) -> dict:
+    """Timestamps so the worker can hot-reload Master Profile / custom QA at the next job checkpoint."""
+    run = db.get(AutomationJob, active_run_id)
+    if run is None or run.device_id != device.id:
+        return {}
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == run.user_id))
+    prefs = db.scalar(select(ApplicationPreferences).where(ApplicationPreferences.user_id == run.user_id))
+    return {
+        "heartbeat": True,
+        "profile_updated_at": profile.updated_at.isoformat() if profile and profile.updated_at else None,
+        "qa_updated_at": prefs.updated_at.isoformat() if prefs and prefs.updated_at else None,
+    }
+
+
+def refresh_run_config(db: Session, device: AgentDevice, run_id: uuid.UUID) -> dict:
+    run = agent_run(db, device, run_id)
+    payload = run_payload(db, run)
+    meta = active_run_refresh_meta(db, device, run.id)
+    return {
+        "values": payload.get("values") or {},
+        "application_qa": payload.get("application_qa") or {},
+        "profile_updated_at": meta.get("profile_updated_at"),
+        "qa_updated_at": meta.get("qa_updated_at"),
+    }
 
 
 def agent_run(db: Session, device: AgentDevice, run_id: uuid.UUID, *, lock: bool = False) -> AutomationJob:
@@ -348,8 +490,13 @@ def ingest_batch(db: Session, device: AgentDevice, run_id: uuid.UUID, first_seq:
 
     remaining = usage_service.remaining_applications(db, run.user_id)
     # The engine usually stops itself at the cap (limit_reached); otherwise the server tells it to.
-    if fresh and remaining <= 0 and not run.stop_reason and (
-            (is_active(run) and run.control != CONTROL_STOP) or run.status == AutomationStatus.CANCELLED):
+    if (
+        (run.run_kind or lp_sync.RUN_KIND_JOB_APPLY) != lp_sync.RUN_KIND_PROFILE_SYNC
+        and fresh
+        and remaining <= 0
+        and not run.stop_reason
+        and ((is_active(run) and run.control != CONTROL_STOP) or run.status == AutomationStatus.CANCELLED)
+    ):
         run.stop_reason = STOP_PLAN_LIMIT
         if is_active(run):
             run.control = CONTROL_STOP

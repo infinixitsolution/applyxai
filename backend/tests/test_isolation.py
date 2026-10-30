@@ -45,7 +45,8 @@ def test_profile_and_preferences_are_private(two_users):
 
     assert bob.get("/api/profile").json()["data"]["headline"] is None
     assert bob.get("/api/preferences/search").json()["data"]["configured"] is False
-    assert bob.get("/api/preferences/application").json()["data"] == {}
+    bob_app = bob.get("/api/preferences/application").json()["data"]
+    assert bob_app.get("answers", {}).get("desired_salary") is None
 
     hb = csrf_headers(bob)
     bob.put("/api/preferences/search", json={"keywords": ["Bob role"]}, headers=hb)

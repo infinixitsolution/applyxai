@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -252,24 +252,25 @@ def create_session(db: Session, user: User, *, application_id: uuid.UUID, interv
     if not ai_service.ai_available(db, feature=_FEATURE):
         raise AppError("AI_DISABLED", "Mock interview AI is not enabled.", 503)
     from backend.app.core.plans import MOCK_INTERVIEWS_UNLIMITED
-    from backend.app.services.usage_service import mock_interviews_used, plan_limits
+    from backend.app.services.usage_service import mock_interviews_used, plan_limits, user_has_unlimited_mock_interviews
 
-    limits = plan_limits(db, user.id)
-    cap = int(limits.get("mock_interviews_per_month") or 0)
-    if cap <= 0:
-        raise AppError(
-            "PLAN_LIMIT_REACHED",
-            "Your plan does not include mock interviews. Upgrade your plan.",
-            403,
-        )
-    if cap < MOCK_INTERVIEWS_UNLIMITED:
-        used = mock_interviews_used(db, user.id)
-        if used >= cap:
+    if not user_has_unlimited_mock_interviews(db, user.id):
+        limits = plan_limits(db, user.id)
+        cap = int(limits.get("mock_interviews_per_month") or 0)
+        if cap <= 0:
             raise AppError(
                 "PLAN_LIMIT_REACHED",
-                f"Your plan allows {cap} mock interview{'s' if cap != 1 else ''} per month. Upgrade or wait until next month.",
+                "Your plan does not include mock interviews. Upgrade your plan.",
                 403,
             )
+        if cap < MOCK_INTERVIEWS_UNLIMITED:
+            used = mock_interviews_used(db, user.id)
+            if used >= cap:
+                raise AppError(
+                    "PLAN_LIMIT_REACHED",
+                    f"Your plan allows {cap} mock interview{'s' if cap != 1 else ''} per month. Upgrade or wait until next month.",
+                    403,
+                )
     app = application_service.get_application(db, user.id, application_id)
     ctx, snapshot = build_interview_context(db, user.id, app)
     types = _types_strings([t.value if isinstance(t, InterviewType) else t for t in interview_types])
@@ -333,16 +334,48 @@ def _turn_response_for_idempotency(
     )
     if cand is None:
         return None
-    interviewer = db.scalar(
-        select(MockInterviewMessage)
-        .where(
-            MockInterviewMessage.session_id == session.id,
-            MockInterviewMessage.role == MockInterviewMessageRole.INTERVIEWER,
-            MockInterviewMessage.created_at > cand.created_at,
+    turn_key = str(client_turn_id)
+    interviewer = None
+    for row in db.scalars(
+        select(MockInterviewMessage).where(MockInterviewMessage.session_id == session.id)
+    ):
+        if row.role != MockInterviewMessageRole.INTERVIEWER:
+            continue
+        meta = row.meta if isinstance(row.meta, dict) else {}
+        if meta.get("client_turn_id") == turn_key:
+            interviewer = row
+            break
+    if interviewer is None:
+        # Legacy rows: reply is the first interviewer strictly after the candidate in (created_at, id).
+        interviewer = db.scalar(
+            select(MockInterviewMessage)
+            .where(
+                MockInterviewMessage.session_id == session.id,
+                MockInterviewMessage.role == MockInterviewMessageRole.INTERVIEWER,
+                or_(
+                    MockInterviewMessage.created_at > cand.created_at,
+                    and_(
+                        MockInterviewMessage.created_at == cand.created_at,
+                        MockInterviewMessage.id > cand.id,
+                    ),
+                ),
+            )
+            .order_by(MockInterviewMessage.created_at.asc(), MockInterviewMessage.id.asc())
+            .limit(1)
         )
-        .order_by(MockInterviewMessage.created_at.asc())
-        .limit(1)
-    )
+    if interviewer is None:
+        # Same-timestamp reply can sort before the candidate UUID.
+        interviewer = db.scalar(
+            select(MockInterviewMessage)
+            .where(
+                MockInterviewMessage.session_id == session.id,
+                MockInterviewMessage.role == MockInterviewMessageRole.INTERVIEWER,
+                MockInterviewMessage.created_at == cand.created_at,
+                MockInterviewMessage.id != cand.id,
+            )
+            .order_by(MockInterviewMessage.id.asc())
+            .limit(1)
+        )
     if interviewer is None:
         return None
     audio_b64, audio_mime = "", ""
@@ -420,6 +453,8 @@ def append_candidate_turn(
     reply, should_end = _apply_wrap_up(reply, should_end=should_end, forced=forced)
     meta = _segment_meta(types, session.turn_count)
     meta = {**meta, "should_end": should_end}
+    if client_turn_id is not None:
+        meta = {**meta, "client_turn_id": str(client_turn_id)}
     interviewer = MockInterviewMessage(
         session_id=session.id,
         role=MockInterviewMessageRole.INTERVIEWER,

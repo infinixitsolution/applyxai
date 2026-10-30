@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.app.models import (
     AdminAction, AgentDevice, Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
-    LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, Plan, SearchConfig, Subscription,
+    LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, Payment, Plan, SearchConfig, Subscription,
     SubscriptionStatus, SupportThread, User, UserProfile,
 )
 from backend.app.services import admin_service, dashboard_service
@@ -64,7 +64,7 @@ def add_run(db, user, status=AutomationStatus.RUNNING, **kw):
 
 
 # ----------------------------------------------------------------------------- access
-ADMIN_GETS = ["/analytics", "/users", "/subscriptions", "/automation-jobs", "/applications", "/companies", "/logs",
+ADMIN_GETS = ["/analytics", "/users", "/subscriptions", "/payments", "/automation-jobs", "/applications", "/companies", "/logs",
               "/audit-log", "/workers", "/plans", "/email"]
 
 
@@ -92,6 +92,14 @@ def test_analytics_includes_mock_interviews(admin, db):
     assert "this_month" in mi
     assert "by_status" in mi
     assert "failed_feedback_jobs_24h" in mi
+    assert "average_score" in mi
+    assert "daily" in mi
+    assert len(mi["daily"]) == dashboard_service.CHART_DAYS
+    live = out.get("live_interviews")
+    assert live is not None
+    assert "total_sessions" in live
+    assert "this_month" in live
+    assert "by_status" in live
 
 
 def test_analytics_counts_users_plans_and_runs(admin, alice, db):
@@ -122,6 +130,20 @@ def test_users_list_search_and_filters(admin, alice, make_user, app, db):
     assert data(get(admin, "/users", plan="free"))["total"] == 2
     row = data(get(admin, "/users", q="alice"))["items"][0]
     assert row["plan"] == "starter" and row["plan_name"] == "Starter" and "password_hash" not in row
+
+
+def test_payments_list(admin, alice, db):
+    db.add(Payment(
+        user_id=alice.user.id, provider="razorpay", provider_payment_id="pay_test_1",
+        amount_cents=49900, currency="INR", status="captured", method="card", description="Starter",
+    ))
+    db.commit()
+    out = data(get(admin, "/payments"))
+    assert out["total"] == 1
+    assert out["items"][0]["user_email"] == "alice@example.com"
+    assert out["items"][0]["provider"] == "razorpay"
+    assert data(get(admin, "/payments", q="alice"))["total"] == 1
+    assert data(get(admin, "/payments", status="failed"))["total"] == 0
 
 
 def test_user_detail_and_unknown_user(admin, alice):
@@ -368,6 +390,11 @@ def test_companies_from_searches_and_jobs(admin, alice, db):
     assert by_name["Acme"]["search_filters"] == 1 and by_name["Acme"]["user_emails"] == ["alice@example.com"]
     assert by_name["Globex"]["jobs"] == 0 and by_name["Globex"]["search_filters"] == 1
     assert data(get(admin, "/companies", q="globex"))["items"][0]["company"] == "Globex"
+    by_date = data(get(admin, "/companies", sort="-last_seen", page_size=50))["items"]
+    assert by_date[0]["company"] in {"Acme", "Globex"}
+    applied_only = data(get(admin, "/companies", filter="applied"))["items"]
+    assert all(row["applied"] > 0 for row in applied_only)
+    assert any(row["company"] == "Acme" for row in applied_only)
 
     alice.user.first_name = "Ada"
     job.description = "Send your CV to hiring@acme.com or call +91 98450 11223."

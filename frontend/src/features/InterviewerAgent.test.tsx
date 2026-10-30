@@ -41,4 +41,19 @@ describe("InterviewerAgent", () => {
     );
     expect(document.querySelector('img[src="/mock-interviewer-host.jpg"]')).toBeTruthy();
   });
+
+  it("renders an iframe for live_stream URLs", () => {
+    render(
+      <InterviewerAgent presenter={{ mode: "live_stream", live_stream_url: "https://example.com/stream" }} />,
+    );
+    expect(document.querySelector('iframe[title="Interviewer stream"]')).toBeTruthy();
+    expect(document.querySelector('iframe')?.getAttribute("src")).toBe("https://example.com/stream");
+  });
+
+  it("renders a video element for live_stream mp4 URLs", () => {
+    render(
+      <InterviewerAgent presenter={{ mode: "live_stream", live_stream_url: "https://cdn.example.com/host.mp4" }} />,
+    );
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("https://cdn.example.com/host.mp4");
+  });
 });

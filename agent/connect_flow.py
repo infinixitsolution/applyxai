@@ -23,8 +23,9 @@ def connect_with_browser(
     web_base: str,
     home: Path,
     log: LogFn | None = None,
+    open_url: Callable[[str], None] | None = None,
 ) -> AgentConfig:
-    """Start connect session, open browser, poll until approved."""
+    """Start connect session, open approval URL, poll until approved."""
 
     def _log(msg: str) -> None:
         if log:
@@ -39,7 +40,10 @@ def connect_with_browser(
     secret = started["secret"]
     url = f"{web}/app/automation/connect?session={session_id}"
     _log("Opening your browser — sign in if needed, then approve this computer.")
-    webbrowser.open(url)
+    if open_url is not None:
+        open_url(url)
+    else:
+        webbrowser.open(url)
     deadline = time.monotonic() + MAX_WAIT_SECONDS
     while time.monotonic() < deadline:
         try:

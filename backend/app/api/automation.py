@@ -10,19 +10,18 @@ from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, ok
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import User
-from backend.app.schemas.automation import ConnectApproveIn, StartRunIn
+from backend.app.schemas.automation import ConnectApproveIn, StartProfileSyncIn, StartRunIn
 from backend.app.services import agent_service, automation_service
 from backend.app.services.automation_service import run_out
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
 
-def _resolve_desktop_agent_file():
+def _resolve_desktop_app_installer():
+    """Single product installer: ApplyXAI Desktop (automation worker bundled inside)."""
     settings = get_settings()
-    if settings.DESKTOP_AGENT_SETUP_PATH.is_file():
-        return settings.DESKTOP_AGENT_SETUP_PATH, "ApplyXAI-Agent-Setup.exe"
-    if settings.DESKTOP_AGENT_GUI_PATH.is_file():
-        return settings.DESKTOP_AGENT_GUI_PATH, "ApplyXAI-Agent-GUI.exe"
+    if settings.DESKTOP_APP_SETUP_PATH.is_file():
+        return settings.DESKTOP_APP_SETUP_PATH, "ApplyXAI-Desktop-Setup.exe"
     return None, None
 
 
@@ -38,6 +37,31 @@ def start(body: StartRunIn | None = None, user: User = Depends(get_current_user)
     payload = body or StartRunIn()
     run = automation_service.start_run(
         db, user, dry_run=payload.dry_run, resume_mode=payload.resume_mode,
+        sources=list(payload.sources), switch_after=payload.switch_after,
+    )
+    db.commit()
+    return ok(run_out(run))
+
+
+@router.get("/profile-sync/readiness", summary="Whether Master Profile is ready to sync to LinkedIn")
+def profile_sync_readiness(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ok(automation_service.profile_sync_readiness(db, user.id))
+
+
+@router.post("/profile-sync/start", status_code=201, summary="Queue a LinkedIn profile sync for your desktop agent")
+def profile_sync_start(body: StartProfileSyncIn | None = None, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("10/hour", "profile-sync-start", str(user.id))
+    payload = body or StartProfileSyncIn()
+    run = automation_service.start_profile_sync_run(
+        db,
+        user,
+        options={
+            "dry_run": payload.dry_run,
+            "include_photo": payload.include_photo,
+            "sections": list(payload.sections) if payload.sections else None,
+            "overwrite_sections": list(payload.overwrite_sections),
+        },
     )
     db.commit()
     return ok(run_out(run))
@@ -49,33 +73,39 @@ def list_devices(user: User = Depends(get_current_user), db: Session = Depends(g
     return ok({"devices": [agent_service.device_out(d) for d in agent_service.list_devices(db, user.id)]})
 
 
-def _desktop_agent_zip_meta():
-    zip_path = get_settings().DESKTOP_AGENT_ZIP_PATH
+def _desktop_app_zip_meta():
+    settings = get_settings()
+    zip_path = settings.DESKTOP_APP_ZIP_PATH
+    if not zip_path.is_file():
+        zip_path = settings.DESKTOP_AGENT_ZIP_PATH
     if not zip_path.is_file():
         return None
     return {"filename": zip_path.name, "size_bytes": zip_path.stat().st_size}
 
 
-@router.get("/desktop-agent/info", summary="Whether the desktop agent download is available on this server")
+@router.get("/desktop-agent/info", summary="Whether the ApplyXAI Desktop installer is available on this server")
 def desktop_agent_info(user: User = Depends(get_current_user)):
-    path, filename = _resolve_desktop_agent_file()
+    path, filename = _resolve_desktop_app_installer()
     if not path:
         return ok({"available": False, "filename": None, "size_bytes": None, "zip": None})
     return ok({
         "available": True,
         "filename": filename,
         "size_bytes": path.stat().st_size,
-        "zip": _desktop_agent_zip_meta(),
+        "zip": _desktop_app_zip_meta(),
     })
 
 
-@router.get("/desktop-agent/download", summary="Download the Windows desktop agent installer")
+@router.get("/desktop-agent/download", summary="Download the ApplyXAI Desktop installer for Windows")
 def download_desktop_agent(user: User = Depends(get_current_user),
                            limiter: RateLimiter = Depends(get_rate_limiter),
                            format: str = Query("exe", pattern="^(exe|zip)$")):
     limiter.hit("20/hour", "desktop-agent-download", str(user.id))
+    settings = get_settings()
     if format == "zip":
-        zip_path = get_settings().DESKTOP_AGENT_ZIP_PATH
+        zip_path = settings.DESKTOP_APP_ZIP_PATH
+        if not zip_path.is_file():
+            zip_path = settings.DESKTOP_AGENT_ZIP_PATH
         if not zip_path.is_file():
             raise AppError(
                 "AGENT_DOWNLOAD_UNAVAILABLE",
@@ -88,11 +118,11 @@ def download_desktop_agent(user: User = Depends(get_current_user),
             filename=zip_path.name,
             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
         )
-    path, filename = _resolve_desktop_agent_file()
+    path, filename = _resolve_desktop_app_installer()
     if not path:
         raise AppError(
             "AGENT_DOWNLOAD_UNAVAILABLE",
-            "The desktop agent download isn't available on this server yet. Contact support.",
+            "ApplyXAI Desktop isn't available for download on this server yet. Contact support.",
             404,
         )
     return FileResponse(

@@ -53,7 +53,7 @@ sudo systemctl is-active applyxai-backend
 
 SMOKE_BASE="${APPLYXAI_SMOKE_URL:-https://applyxai.com}"
 if [[ -f "$APP_DIR/scripts/smoke_production.sh" ]]; then
-  BASE_URL="$SMOKE_BASE" bash "$APP_DIR/scripts/smoke_production.sh" || echo "WARN: smoke checks failed (deploy still complete)"
+  BASE_URL="$SMOKE_BASE" bash "$APP_DIR/scripts/smoke_production.sh"
 fi
 
 if [[ -f "$APP_DIR/scripts/verify_production_ops.sh" ]]; then

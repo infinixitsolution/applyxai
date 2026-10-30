@@ -9,16 +9,20 @@ not yet confirmed reach what the server says is left, the engine is told to stop
 waiting for the next reply.
 """
 
+import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.client import ApiClient, ApiError, NetworkError
 from automation import events as ev
+from automation.profile_sync_config import build_profile_sync_config
 from automation.run_config import RunConfigError, build_run_config
-from automation.runner import EngineRun, Workspace
+from automation.runner import EngineRun, RunnerError, Workspace
+_RUN_KIND_PROFILE_SYNC = "linkedin_profile_sync"
 
 logger = logging.getLogger("applyxai.agent")
 
@@ -29,6 +33,43 @@ HEARTBEAT_SECONDS = 5.0
 STOP_GRACE_SECONDS = 90.0
 FLUSH_DEADLINE_SECONDS = 600.0
 MAX_BATCH = 200
+
+# Push to the server right away so the web app and Desktop show live counters.
+_FLUSH_NOW = frozenset({
+    ev.RUN_STARTED,
+    ev.JOB_STARTED,
+    ev.APPLIED,
+    ev.EXTERNAL,
+    ev.FAILED,
+    ev.SKIPPED,
+    ev.PAUSED,
+    ev.RESUMED,
+    ev.SOURCE_STARTED,
+    ev.SOURCE_SWITCHED,
+    ev.SOURCE_BLOCKED,
+    ev.LOGIN_REQUIRED,
+    ev.RUN_FINISHED,
+    ev.LIMIT_REACHED,
+}) | ev.PROFILE_EVENTS
+
+
+_LOCAL_SECRET_KEYS = ("username", "password", "naukri_username", "naukri_password")
+
+
+def _merge_local_secrets(config: dict, path: Path) -> None:
+    """Copy saved logins from this PC into the run config. Blank fields stay as placeholders."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return
+    local = data.get("secrets") if isinstance(data, dict) else None
+    if not isinstance(local, dict):
+        return
+    secrets = config.setdefault("secrets", {})
+    for key in _LOCAL_SECRET_KEYS:
+        value = str(local.get(key) or "").strip()
+        if value:
+            secrets[key] = value
 
 
 class AgentStopped(Exception):
@@ -74,10 +115,32 @@ class Supervisor:
     def __init__(self, client: ApiClient, home: Path, user_id: str, *, engine_factory=EngineRun,
                  sleep=time.sleep, clock=time.monotonic):
         self.client = client
-        self.workspace = Workspace(Path(home) / "workspace" / user_id)
+        self.home = Path(home)
+        self.workspace = Workspace(self.home / "workspace" / user_id)
         self._engine_factory = engine_factory
         self._sleep = sleep
         self._clock = clock
+        self._nudge = threading.Event()
+
+    def nudge(self) -> None:
+        """Break the idle wait so a queued run is claimed as soon as the web app hits /wake."""
+        self._nudge.set()
+
+    def _idle_wait(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        if self._sleep is time.sleep:
+            if self._nudge.wait(timeout=seconds):
+                self._nudge.clear()
+            return
+        deadline = self._clock() + seconds
+        while not self._nudge.is_set() and self._clock() < deadline:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                break
+            self._sleep(min(0.05, remaining))
+        if self._nudge.is_set():
+            self._nudge.clear()
 
     # ------------------------------------------------------------------ idle loop
     def run_forever(self) -> None:
@@ -89,7 +152,7 @@ class Supervisor:
             except NetworkError as exc:
                 logger.warning("%s Retrying in %d seconds.", exc, delay)
                 delay = min(delay * 2, MAX_IDLE_BACKOFF)
-            self._sleep(delay)
+            self._idle_wait(delay)
 
     def run_once(self) -> bool:
         """Poll once and carry out the run the server hands out, if any. True if a run was done."""
@@ -128,14 +191,44 @@ class _RunSession:
         self.applied_control = "run"
         self.stop_requested_at = None
         self.last_post = float("-inf")
+        self.last_run_poll = float("-inf")
+        self._profile_updated_at = None
+        self._qa_updated_at = None
         self.saw_finish = False
-        self.counts = dict.fromkeys(sorted(ev.OUTCOMES), 0)
+        self.is_profile_sync = (self.payload.get("run_kind") or "") == _RUN_KIND_PROFILE_SYNC
+        if self.is_profile_sync:
+            self.counts = {"updated": 0, "skipped": 0, "failed": 0}
+        else:
+            self.counts = dict.fromkeys(sorted(ev.OUTCOMES), 0)
 
     def _finished_event(self, *, stopped: bool, error: str = "") -> dict:
+        if self.is_profile_sync:
+            return {
+                "event": ev.PROFILE_SYNC_FINISHED,
+                "ts": _now_iso(),
+                **self.counts,
+                "stopped": stopped,
+                "error": error,
+            }
         return {"event": ev.RUN_FINISHED, "ts": _now_iso(), **self.counts, "stopped": stopped, "error": error}
 
     # -- setup
+    def _prepare_profile_sync(self) -> dict:
+        ps = self.payload.get("profile_sync") or {}
+        self.engine.dir.mkdir(parents=True, exist_ok=True)
+        photo_path = None
+        settings = ps.get("settings") or {}
+        if settings.get("include_photo"):
+            try:
+                photo_path = self.engine.dir / "profile_photo.bin"
+                photo_path.write_bytes(self.client.download_profile_photo(self.run_id))
+            except (ApiError, NetworkError, OSError) as exc:
+                logger.warning("Could not download profile photo: %s", exc)
+        return build_profile_sync_config(ps, run_dir=self.engine.dir, photo_path=photo_path)
+
     def _prepare(self) -> dict:
+        if self.is_profile_sync:
+            return self._prepare_profile_sync()
         resume = self.payload.get("resume")
         if not resume:
             raise RunConfigError(["Upload a resume and make it your default."])
@@ -151,8 +244,12 @@ class _RunSession:
             "ai_available": bool(self.payload.get("ai_available")),
             "run_id": self.run_id,
             "resume_mode": self.payload.get("resume_mode") or "default",
+            "default_resume_id": resume.get("id") or "",
+            "sources": self.payload.get("sources") or ["linkedin"],
+            "switch_after": self.payload.get("switch_after"),
+            "education": qa.get("education") or [],
         }
-        return build_run_config(
+        config = build_run_config(
             self.payload.get("values") or {},
             history_dir=self.s.workspace.history_dir,
             run_dir=self.engine.dir,
@@ -161,9 +258,13 @@ class _RunSession:
             use_ai=use_ai,
             applyxai_qa=applyxai_qa,
         )
+        _merge_local_secrets(config, self.s.home / "user_config.json")
+        return config
 
     def go(self) -> None:
         logger.info("Starting run %s%s.", self.run_id, " (dry run: nothing is submitted)" if self.payload.get("dry_run") else "")
+        self._heartbeat_poll()
+        self.last_run_poll = self.s._clock()
         try:
             config = self._prepare()
         except (RunConfigError, ApiError, NetworkError, OSError) as exc:
@@ -176,21 +277,64 @@ class _RunSession:
             self.outbox.add(self._finished_event(stopped=True))
             self._flush_all()
             return
-        cap = None if self.remaining is None or self.payload.get("dry_run") else int(self.remaining)
+        cap = None
+        if not self.is_profile_sync and self.remaining is not None and not self.payload.get("dry_run"):
+            cap = int(self.remaining)
         extra_env = {
-            "APPLYXAI_API_BASE": self.s.client.server,
-            "APPLYXAI_AGENT_TOKEN": self.s.client.token,
+            "APPLYXAI_API_BASE": self.client.server,
+            "APPLYXAI_AGENT_TOKEN": self.client.token,
             "APPLYXAI_RUN_ID": self.run_id,
         }
-        self.engine.start(config, max_applied=cap, extra_env=extra_env)
+        try:
+            self.engine.start(config, max_applied=cap, extra_env=extra_env, profile_sync=self.is_profile_sync)
+        except RunnerError as exc:
+            logger.error("%s", exc)
+            self.outbox.add(self._finished_event(stopped=False, error=str(exc)))
+            self._flush_all()
+            return
+        self._heartbeat_poll()
+        self.last_run_poll = self.s._clock()
         self._apply_control()
         self._supervise()
 
     # -- main loop
+    def _heartbeat_poll(self) -> None:
+        """Tell the server this run is still active (avoids false 'restarted' failures during long jobs)."""
+        try:
+            data = self.client.poll(active_run_id=self.run_id)
+        except NetworkError:
+            return
+        except ApiError:
+            return
+        if not isinstance(data, dict) or self.is_profile_sync:
+            return
+        profile_at = data.get("profile_updated_at")
+        qa_at = data.get("qa_updated_at")
+        first = self._profile_updated_at is None and self._qa_updated_at is None
+        changed = (not first) and (profile_at != self._profile_updated_at or qa_at != self._qa_updated_at)
+        self._profile_updated_at = profile_at
+        self._qa_updated_at = qa_at
+        if not changed:
+            return
+        try:
+            blob = self.client.refresh_run_config(self.run_id)
+        except (NetworkError, ApiError) as exc:
+            logger.warning("Could not refresh profile mid-run: %s", exc)
+            return
+        try:
+            path = self.engine.dir / "profile_refresh.json"
+            path.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
+            logger.info("Queued Master Profile / custom QA refresh for the next job.")
+        except OSError as exc:
+            logger.warning("Could not write profile refresh: %s", exc)
+
     def _supervise(self) -> None:
         while True:
             self._collect()
             self._enforce_limit()
+            if self.s._clock() - self.last_run_poll >= HEARTBEAT_SECONDS:
+                self._heartbeat_poll()
+                self.last_run_poll = self.s._clock()
             if self.outbox.pending or self.s._clock() - self.last_post >= HEARTBEAT_SECONDS:
                 self._post()
             if not self.engine.running:
@@ -205,15 +349,24 @@ class _RunSession:
         for event in self.engine.new_events():
             self.outbox.add(event)
             self._announce(event)
+            if event.get("event") in _FLUSH_NOW:
+                self._post()
 
     def _announce(self, event: dict) -> None:
         kind = event.get("event")
-        if kind == ev.RUN_FINISHED:
+        if kind in (ev.RUN_FINISHED, ev.PROFILE_SYNC_FINISHED):
             self.saw_finish = True
-        if kind in self.counts:
+        if self.is_profile_sync:
+            if kind == ev.PROFILE_SECTION_UPDATED:
+                self.counts["updated"] += 1
+            elif kind == ev.PROFILE_SECTION_SKIPPED:
+                self.counts["skipped"] += 1
+        elif kind in self.counts:
             self.counts[kind] += 1
         if kind == ev.LOGIN_REQUIRED:
-            logger.warning("Sign in to LinkedIn in the browser window that just opened. The run continues after that.")
+            site = str(event.get("platform") or "linkedin").strip() or "linkedin"
+            label = "Naukri" if site.lower() == "naukri" else "LinkedIn"
+            logger.warning("Sign in to %s in the browser window that just opened. The run continues after that.", label)
         elif kind == ev.APPLIED:
             logger.info("Applied: %s at %s", event.get("title", ""), event.get("company", ""))
         elif kind == ev.FAILED:
@@ -223,6 +376,8 @@ class _RunSession:
                         event.get("applied", 0), event.get("failed", 0), event.get("skipped", 0))
 
     def _enforce_limit(self) -> None:
+        if self.is_profile_sync:
+            return
         if self.remaining is not None and self.outbox.count(ev.APPLIED) >= self.remaining and self.control != "stop":
             logger.info("This month's application limit is reached; stopping after the current job.")
             self.control = "stop"

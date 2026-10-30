@@ -87,6 +87,60 @@ def _application_limit_reached() -> bool:
         return False
 
 
+def _apply_profile_refresh() -> None:
+    """Hot-reload Master Profile / custom QA written by the supervisor for the next job."""
+    run_config = os.environ.get("APPLYXAI_RUN_CONFIG")
+    if not run_config:
+        return
+    refresh_path = os.path.join(os.path.dirname(run_config), "profile_refresh.json")
+    if not os.path.isfile(refresh_path):
+        return
+    try:
+        with open(refresh_path, encoding="utf-8") as fh:
+            blob = json.load(fh)
+        os.remove(refresh_path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return
+    if not isinstance(blob, dict):
+        return
+    try:
+        with open(run_config, encoding="utf-8") as fh:
+            config = json.load(fh)
+        if not isinstance(config, dict):
+            return
+        qa = blob.get("application_qa") if isinstance(blob.get("application_qa"), dict) else {}
+        values = blob.get("values") if isinstance(blob.get("values"), dict) else {}
+        applyxai = config.setdefault("applyxai", {})
+        if "human_questions" in qa:
+            applyxai["human_questions"] = qa.get("human_questions") or []
+        if "ai_policy" in qa:
+            applyxai["ai_policy"] = qa.get("ai_policy") or applyxai.get("ai_policy")
+        if "education" in qa:
+            applyxai["education"] = qa.get("education") or []
+        questions = config.setdefault("questions", {})
+        personals = config.setdefault("personals", {})
+        for key, value in values.items():
+            if key in personals or key in ("first_name", "last_name", "phone_number", "linkedIn", "website"):
+                personals[key] = value
+            elif key in ("user_information_all",):
+                questions[key] = value
+            elif key in questions:
+                questions[key] = value
+        with open(run_config, "w", encoding="utf-8") as fh:
+            json.dump(config, fh, ensure_ascii=False, indent=2)
+        import importlib
+        import config.applyxai as ax
+        import config.personals as personals_mod
+        import config.questions as questions_mod
+        import config._overrides as overrides
+        importlib.reload(overrides)
+        overrides.apply(ax.__name__, ax.__dict__)
+        overrides.apply(personals_mod.__name__, personals_mod.__dict__)
+        overrides.apply(questions_mod.__name__, questions_mod.__dict__)
+    except Exception:
+        pass
+
+
 def checkpoint(sleep=time.sleep) -> None:
     '''
     Called between jobs. Returns immediately when no supervisor is attached. While the
@@ -95,6 +149,7 @@ def checkpoint(sleep=time.sleep) -> None:
     '''
     if not os.environ.get(CONTROL_ENV):
         return
+    _apply_profile_refresh()
     if _application_limit_reached():
         emit("limit_reached", applied=_applied)
         raise StopRequested()

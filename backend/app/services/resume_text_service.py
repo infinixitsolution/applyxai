@@ -22,11 +22,28 @@ _SUMMARY_HEADERS = frozenset(
 _SKILLS_HEADERS = frozenset(
     {"skills", "technical skills", "core competencies", "technologies", "tools", "tech stack"}
 )
+_LANGUAGE_HEADERS = frozenset({"languages", "spoken languages", "language known", "languages known"})
 _EDUCATION_HEADERS = frozenset(
-    {"education", "academic background", "qualifications", "academics", "education & training"}
+    {
+        "education", "academic background", "qualifications", "academics", "education & training",
+        "educational qualification", "educational qualifications", "academic details",
+        "academic qualifications", "education details", "qualification",
+    }
 )
 _EXPERIENCE_HEADERS = frozenset(
-    {"experience", "work experience", "professional experience", "employment", "employment history", "work history"}
+    {
+        "experience", "work experience", "professional experience", "employment",
+        "employment history", "work history", "professional history", "career history",
+        "work experience details",
+    }
+)
+_PROJECT_HEADERS = frozenset(
+    {
+        "projects", "project", "academic projects", "academic project",
+        "personal projects", "key projects", "major projects", "mini projects",
+        "project experience", "project work", "major project", "mini project",
+        "capstone", "capstone project", "academic project details",
+    }
 )
 _LINKEDIN_RE = re.compile(r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+/?", re.I)
 _URL_RE = re.compile(r"https?://[^\s)>]+", re.I)
@@ -88,25 +105,136 @@ def extract_text(path: Path, file_type: str) -> str:
     return text
 
 
+_SKIP_SKILL_TOKENS = {
+    "skills",
+    "technical",
+    "technical skills",
+    "core competencies",
+    "technologies",
+    "tools",
+    "tech stack",
+    "other",
+    "education",
+    "languages",
+    "objective",
+    "experience",
+    "projects",
+    "summary",
+    "administration",
+    "client-side",
+    "server-side",
+    "automation",
+    "database",
+    "service now administration knowledge",
+}
+
+_SKILL_CANON = {
+    "servicenow": "ServiceNow",
+    "service now": "ServiceNow",
+    "itsm": "ITSM",
+    "itil": "ITIL",
+    "sql": "SQL",
+    "basic sql": "SQL",
+    "javascript": "JavaScript",
+    "js": "JavaScript",
+    "html": "HTML",
+    "css": "CSS",
+    "rest": "REST",
+    "soap": "SOAP",
+    "gliderecord": "GlideRecord",
+    "glidesystem": "GlideSystem",
+    "acls": "ACLs",
+    "acl": "ACLs",
+    "slas": "SLAs",
+    "sla": "SLAs",
+    "kubernet": "Kubernetes",
+    "kubernetes": "Kubernetes",
+    "aws": "AWS",
+}
+
+_ITSM_SHORT = {
+    "incident": "Incident Management",
+    "problem": "Problem Management",
+    "change": "Change Management",
+    "request": "Request Management",
+    "knowledge": "Knowledge Management",
+}
+
+_NOT_SKILL_RE = re.compile(
+    r"\b(college|university|school|bangalore|bengaluru|mumbai|delhi|hyderabad|"
+    r"chennai|pune|fresher|objective|motivated|looking to|hands-on knowledge)\b",
+    re.I,
+)
+
+
+def skill_section_lines(text: str) -> list[str]:
+    """Lines under a Skills / Technical Skills heading, stopping at the next major section."""
+    return _slice_section(
+        _lines(text),
+        "skills",
+        stop_kinds=frozenset({"education", "experience", "summary", "projects", "languages"}),
+    )
+
+
+def clean_skill_token(raw: str) -> str:
+    """Normalize one skill label; empty if it is a header, city, degree, or sentence."""
+    token = re.sub(r"^[\s•·\-–—*]+", "", raw or "")
+    token = re.sub(r"\s+", " ", token).strip(" :-\t")
+    token = re.sub(r"^(basic|hands[- ]on|working)\s+", "", token, flags=re.I)
+    if not token or len(token) < 2 or len(token) > 64:
+        return ""
+    key = token.lower()
+    if key in _SKIP_SKILL_TOKENS:
+        return ""
+    if _NOT_SKILL_RE.search(token):
+        return ""
+    if re.search(r"\b(19|20)\d{2}\b", token) or re.search(r"\b(mca|mba|bca|b\.?tech|b\.?e\.?)\b", key):
+        return ""
+    if token.endswith(".") or len(token.split()) > 6:
+        return ""
+    if key in _ITSM_SHORT:
+        return _ITSM_SHORT[key]
+    if key in _SKILL_CANON:
+        return _SKILL_CANON[key]
+    return token
+
+
 def guess_skills_from_text(text: str, profile_skills: list[str]) -> list[str]:
     """Heuristic skill list: profile skills plus tokens from a Skills section."""
     found: list[str] = []
     seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        token = clean_skill_token(raw)
+        if not token:
+            return
+        key = token.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(token)
+
     for s in profile_skills or []:
-        key = s.strip()
-        if key and key.lower() not in seen:
-            seen.add(key.lower())
-            found.append(key)
-    lower = text.lower()
-    for header in ("skills", "technical skills", "core competencies"):
-        idx = lower.find(header)
-        if idx >= 0:
-            chunk = text[idx : idx + 2500]
+        add(s)
+    for line in skill_section_lines(text):
+        if section_kind(line) in {"skills", "education", "experience", "summary", "projects", "languages"}:
+            continue
+        body = re.sub(r"^[\s•·\-–—*]+", "", line)
+        if ":" in body:
+            left, right = body.split(":", 1)
+            add(left)
+            body = right
+        for part in re.split(r"[,|;/•·]", body):
+            add(part)
+    if not found:
+        lower = (text or "").lower()
+        for header in ("skills", "technical skills", "core competencies"):
+            idx = lower.find(header)
+            if idx < 0:
+                continue
+            chunk = text[idx : idx + 1200]
             for part in re.split(r"[,|\n•·]", chunk):
-                token = part.strip(" :-\t")
-                if 2 <= len(token) <= 64 and token.lower() not in seen:
-                    seen.add(token.lower())
-                    found.append(token)
+                add(part)
             break
     return found[:80]
 
@@ -124,19 +252,35 @@ def humanize_line(text: str) -> str:
 
 def section_kind(line: str) -> str | None:
     t = re.sub(r"[^a-zA-Z\s&]", "", (line or "").strip()).lower()
+    t = re.sub(r"\s+", " ", t).strip()
     if t in _SUMMARY_HEADERS:
         return "summary"
     if t in _SKILLS_HEADERS:
         return "skills"
-    if t in _EDUCATION_HEADERS:
+    if t in _LANGUAGE_HEADERS:
+        return "languages"
+    if t in _PROJECT_HEADERS or t.startswith(
+        ("academic project", "major project", "mini project", "personal project", "key project", "project work", "capstone")
+    ):
+        return "projects"
+    if t in _EDUCATION_HEADERS or t.startswith(("education", "educational", "academic ")):
         return "education"
-    if t in _EXPERIENCE_HEADERS:
+    if t in _EXPERIENCE_HEADERS or t.startswith(("work experience", "professional experience", "employment")):
         return "experience"
     return None
 
 
 def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in (text or "").splitlines()]
+
+
+def project_section_lines(text: str) -> list[str]:
+    """Lines under a Projects / Academic Projects heading, if present."""
+    return _slice_section(
+        _lines(text),
+        "projects",
+        stop_kinds=frozenset({"education", "experience", "skills", "summary"}),
+    )
 
 
 def _slice_section(lines: list[str], header_kind: str, *, stop_kinds: frozenset[str]) -> list[str]:
@@ -165,7 +309,10 @@ def _parse_education_lines(chunk: list[str]) -> list[dict]:
             if block:
                 entries.append(_education_from_block(block))
             block = [line]
-        elif line.lower().startswith(("b.", "b.s", "b.a", "m.", "m.s", "mba", "phd", "bachelor", "master")):
+        elif re.match(
+            r"^(b\.?\s*tech|b\.?\s*e\.?|btech|be\b|b\.s|b\.a|m\.?\s*tech|m\.s|mba|ph\.?d|diploma|bachelor|master)",
+            line.lower(),
+        ):
             if block:
                 entries.append(_education_from_block(block))
             block = [line]
@@ -587,12 +734,12 @@ def heuristic_profile_intake(text: str) -> dict:
     summary = extract_summary_block(text)
     title, company = guess_current_role(text)
     years = guess_experience_years(text)
-    edu_chunk = _slice_section(lines, "education", stop_kinds=frozenset({"experience", "skills", "summary"}))
-    exp_chunk = _slice_section(lines, "experience", stop_kinds=frozenset({"education", "skills", "summary"}))
+    edu_chunk = _slice_section(lines, "education", stop_kinds=frozenset({"experience", "skills", "summary", "projects", "languages"}))
+    exp_chunk = _slice_section(lines, "experience", stop_kinds=frozenset({"education", "skills", "summary", "projects", "languages"}))
     education = _parse_education_lines(edu_chunk)
     work_history = _parse_experience_lines(exp_chunk)
-    if not work_history and title:
-        work_history = [{"title": title, "company": company or "", "location": "", "start": "", "end": "Present", "summary": ""}]
+    if not work_history and title and company:
+        work_history = [{"title": title, "company": company, "location": "", "start": "", "end": "Present", "summary": ""}]
     has_masters = any(
         "master" in (e.get("degree") or "").lower() or "mba" in (e.get("degree") or "").lower() for e in education
     )

@@ -94,7 +94,7 @@ export function PendingQuestionsModal({
       </ul>
       <p className="mt-4 text-xs text-slate-500">
         You can also edit these under{" "}
-        <Link to="/app/preferences" className="font-medium text-brand-600 hover:underline">Preferences → Custom questions</Link>.
+        <Link to="/app/questions" className="font-medium text-brand-600 hover:underline">Custom Application Questions</Link>.
       </p>
     </Modal>
   );

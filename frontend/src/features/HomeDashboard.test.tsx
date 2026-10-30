@@ -37,7 +37,23 @@ describe("HomeDashboard", () => {
           },
         });
       }
-      if (url.includes("/automation/overview")) return ok({ devices: [], runs: [] });
+      if (url.includes("/automation") && !url.includes("/dashboard")) {
+        return ok({
+          active: null,
+          recent: [],
+          devices: [],
+          agent_online: false,
+          readiness: { ready: true, problems: [] },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 0, limit: 1, remaining: 1 },
+            mock_interviews: { used: 0, limit: 2, remaining: 2, unlimited: false },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+          enabled_sources: ["linkedin"],
+        });
+      }
       throw new Error(`unexpected fetch ${url}`);
     }));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -86,7 +102,23 @@ describe("HomeDashboard", () => {
           },
         });
       }
-      if (url.includes("/automation/overview")) return ok({ devices: [], runs: [] });
+      if (url.includes("/automation") && !url.includes("/dashboard")) {
+        return ok({
+          active: null,
+          recent: [],
+          devices: [],
+          agent_online: false,
+          readiness: { ready: true, problems: [] },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 0, limit: 1, remaining: 1 },
+            mock_interviews: { used: 0, limit: 2, remaining: 2, unlimited: false },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+          enabled_sources: ["linkedin"],
+        });
+      }
       throw new Error(`unexpected fetch ${url}`);
     }));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -101,5 +133,8 @@ describe("HomeDashboard", () => {
     expect(screen.getByText("Average score")).toBeTruthy();
     expect(screen.getByText("72")).toBeTruthy();
     expect(screen.getByText(/Engineer · Acme/)).toBeTruthy();
+    const report = screen.getByRole("link", { name: /Engineer · Acme/i });
+    expect(report.getAttribute("href")).toBe("/app/mock-interview/11111111-1111-1111-1111-111111111111/report");
+    expect(screen.getByRole("link", { name: "Open mock interviews" }).getAttribute("href")).toBe("/app/mock-interview");
   });
 });

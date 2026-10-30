@@ -22,11 +22,6 @@ class PartnerTaxIn(BaseModel):
     payout_ifsc: str | None = Field(default=None, max_length=20)
 
 
-class KycDocumentIn(BaseModel):
-    filename: str = Field(min_length=1, max_length=255)
-    note: str = Field(default="", max_length=255)
-
-
 class CampaignIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     note: str = Field(default="", max_length=255)

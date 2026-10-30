@@ -1,18 +1,22 @@
 import type {
-  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminCompany, AdminCompanyDetail, AdminEmailStatus, AdminPlatformSettings, EmailTemplates, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
+  AdminAnalytics, AdminApplication, AdminAuditEntry, AdminCompany, AdminCompanyDetail, AdminEmailStatus, AdminPayment, AdminPlatformSettings, EmailTemplates, GstPlatformSettings, GstPreviewTotals, TaxInvoiceRecord, TestEmailResult, AdminLogLine, AdminPlan, AdminRun, AdminSubscription, AdminUser,
   AdminInstituteDetail, AdminPartnerDetail, AdminUserDetail, AdminWorkers, AgentDevice, Application, ApplicationDetail, ApplicationStatus,
   InterviewType, MockInterviewCompleteResult, MockInterviewFeedback, MockInterviewFeedbackJob, MockInterviewPresenterSettings, MockInterviewSessionDetail, MockInterviewSessionSummary, MockInterviewTurnResult,
-  Institute, InstituteAssignment, InstituteDashboard, Partner, PartnerCampaign, PartnerCommission,
+  Institute, InstituteAssignment, InstituteDashboard, InstituteSeat, InstituteStudentDetail, Partner, PartnerCampaign, PartnerCommission,
   PartnerDashboard, PartnerPayout, SeatCounts,
   PlatformCms, PublicSite,
-  AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, DesktopAgentInfo, JobWithApplication, LogLevel,
+  AutomationOverview, AutomationRun, BillingOverview, CheckoutResult, DashboardStats, DesktopAgentInfo, JobWithApplication, LogLevel, PaymentRecord,
   LiveInterviewSession, Notification, Page, Plan, PlanUpdate, PreferenceOptions, Profile, ProfileInput, Resume, ResumeTemplate, RunLogLine, SearchConfig,
   SupportMessage, SupportThread,
   SearchConfigOut, Subscription, SubscriptionStatus, Usage, User,
+  OutreachBulkActionResult, OutreachBulkImportResult, OutreachCampaignSettings, OutreachLead, OutreachLeadChatMessage, OutreachLeadDashboardStats, OutreachLeadMessage, OutreachProfileCompletion, OutreachScrapeJob, OutreachWhatsappChatThread, OutreachWhatsappRecentSend, OutreachWhatsappStatus,
 } from "../types";
 import { ApiError, buildUrl, request, requestFull } from "./api";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Firecrawl + profile completion can run several minutes per batch. */
+const OUTREACH_TIMEOUT_MS = 300_000;
 
 async function waitForMockInterviewFeedbackJob(
   jobId: string,
@@ -108,6 +112,126 @@ export const auth = {
 export const profile = {
   get: () => request<Profile>("/profile"),
   update: (body: ProfileInput) => request<Profile>("/profile", { method: "PUT", body }),
+  patchSection: (section: string, data: unknown) =>
+    request<Profile>(`/profile/sections/${section}`, { method: "PATCH", body: { data } }),
+  enhance: () =>
+    request<{
+      source: "ai" | "heuristic";
+      steps: { id: string; ok: boolean; source?: string; detail?: string }[];
+      percent: number;
+      missing: { section: string; label: string; hint?: string; ai?: boolean }[];
+      profile: Profile;
+    }>("/profile/ai-enhance", { method: "POST", timeoutMs: 180_000 }),
+  completeProfessional: () =>
+    request<{
+      source: "ai" | "heuristic";
+      headline: string;
+      summary: string;
+      filled: string[];
+      profile: Profile;
+    }>("/profile/sections/professional/ai-complete", { method: "POST" }),
+  enhanceCareer: () =>
+    request<{
+      source: "ai" | "heuristic";
+      preferred_roles: string[];
+      preferred_locations: string[];
+      desired_industries: string[];
+      profile: Profile;
+    }>("/profile/sections/career/ai-enhance", { method: "POST" }),
+  fillCommonAnswers: () =>
+    request<{
+      source: "ai" | "heuristic";
+      filled: string[];
+      skipped_verified: string[];
+      profile: Profile;
+    }>("/profile/sections/common_answers/ai-fill", { method: "POST" }),
+  fillScreening: () =>
+    request<{
+      source: "ai" | "heuristic";
+      filled: string[];
+      answers: Record<string, unknown>;
+    }>("/profile/sections/screening/ai-fill", { method: "POST" }),
+  fillEmployment: () =>
+    request<{
+      source: "ai" | "heuristic";
+      kind: "fresher" | "experienced";
+      status: string;
+      note: string;
+      jobs: { title: string; company: string; location: string; start: string; end: string; summary: string }[];
+      experience_years: number | null;
+      profile: Profile;
+    }>("/profile/sections/employment/ai-fill", { method: "POST" }),
+  fillProjects: () =>
+    request<{
+      source: "ai" | "heuristic";
+      kind: "academic" | "professional";
+      added: string[];
+      projects: { id: string; title: string; description: string; role: string; technologies: string }[];
+      profile: Profile;
+    }>("/profile/sections/projects/ai-fill", { method: "POST" }),
+  fillSkills: () =>
+    request<{
+      source: "ai" | "heuristic";
+      skills: string[];
+      rows: { id: string; name: string; category: string; years: string; proficiency: string; description: string }[];
+      profile: Profile;
+    }>("/profile/sections/skills/ai-fill", { method: "POST", timeoutMs: 120_000 }),
+  taxonomies: () =>
+    request<{
+      industries: { id: string; label: string }[];
+      departments: { id: string; label: string }[];
+      job_roles: { id: string; label: string }[];
+      education_levels: string[];
+      employment_types: string[];
+      skill_categories: string[];
+    }>("/profile/taxonomies"),
+  uploadPhoto: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Profile>("/profile/photo", { method: "POST", form });
+  },
+  deletePhoto: () => request<Profile>("/profile/photo", { method: "DELETE" }),
+};
+
+export const profileLinkedIn = {
+  syncPlan: () =>
+    request<{
+      snapshot: Record<string, unknown>;
+      plan: { section: string; action: string; preview?: string; policy?: string; reason?: string }[];
+      settings: Record<string, unknown>;
+    }>("/profile/linkedin/sync-plan"),
+  aiComplete: () =>
+    request<{ headline: string; about: string; skills: string[]; experience_bullets: unknown[]; unchanged?: boolean }>(
+      "/profile/linkedin/ai-complete",
+      { method: "POST" },
+    ),
+  applyAiDraft: (draft: Record<string, unknown>) =>
+    request<Profile>("/profile/linkedin/apply-ai-draft", { method: "POST", body: { draft } }),
+};
+
+export const customQuestions = {
+  list: () => request<import("../types").CustomQuestionsList>("/questions"),
+  syncFromProfile: () =>
+    request<{
+      source: "ai" | "heuristic";
+      updated: string[];
+      dropped_standard: string[];
+      deduped_from: number;
+      items: import("../types").HumanQuestion[];
+      total: number;
+    }>("/questions/sync-from-profile", { method: "POST", timeoutMs: 180_000 }),
+  replace: (items: import("../types").HumanQuestion[]) =>
+    request<import("../types").CustomQuestionsList>("/questions", { method: "PUT", body: { items } }),
+  patch: (id: string, body: Partial<import("../types").HumanQuestion>) =>
+    request<import("../types").HumanQuestion>(`/questions/${id}`, { method: "PATCH", body }),
+  remove: (id: string) => request<{ deleted: boolean }>(`/questions/${id}`, { method: "DELETE" }),
+};
+
+export const automationSettings = {
+  get: () => request<import("../types").AutomationSettingsOut>("/settings/automation"),
+  patch: (changes: Record<string, unknown>) =>
+    request<import("../types").AutomationSettingsOut>("/settings/automation", { method: "PATCH", body: changes }),
+  reset: () => request<import("../types").AutomationSettingsOut>("/settings/automation/reset", { method: "POST" }),
 };
 
 export const preferences = {
@@ -259,8 +383,16 @@ export const notifications = {
 
 export const automation = {
   overview: () => request<AutomationOverview>("/automation"),
-  start: (body: { dry_run: boolean; resume_mode: import("../types").ResumeRunMode }) =>
-    request<AutomationRun>("/automation/start", { method: "POST", body }),
+  getRun: (id: string) => request<AutomationRun>(`/automation/${id}`),
+  start: (body: {
+    dry_run: boolean;
+    resume_mode: import("../types").ResumeRunMode;
+    sources: Array<"linkedin" | "naukri">;
+    switch_after?: number;
+  }) => request<AutomationRun>("/automation/start", { method: "POST", body }),
+  profileSyncReadiness: () => request<{ ready: boolean; problems: string[] }>("/automation/profile-sync/readiness"),
+  profileSyncStart: (body: { dry_run?: boolean; include_photo?: boolean; sections?: string[]; overwrite_sections?: string[] }) =>
+    request<AutomationRun>("/automation/profile-sync/start", { method: "POST", body }),
   pause: (id: string) => request<AutomationRun>(`/automation/${id}/pause`, { method: "POST" }),
   resume: (id: string) => request<AutomationRun>(`/automation/${id}/resume`, { method: "POST" }),
   stop: (id: string) => request<AutomationRun>(`/automation/${id}/stop`, { method: "POST" }),
@@ -289,10 +421,13 @@ export const plans = {
 
 export const billing = {
   overview: () => request<BillingOverview>("/billing"),
+  payments: (query: Paged & { status?: string }) => request<Page<PaymentRecord>>("/billing/payments", { query }),
   checkout: (plan: string) => request<CheckoutResult>("/billing/checkout", { method: "POST", body: { plan } }),
   confirm: (body: { payment_id: string; subscription_id: string; signature: string }) =>
     request<{ subscription: Subscription }>("/billing/confirm", { method: "POST", body }),
   cancel: () => request<{ subscription: Subscription }>("/billing/cancel", { method: "POST" }),
+  invoices: (query?: Paged) => request<Page<TaxInvoiceRecord>>("/billing/invoices", { query }),
+  invoicePdfUrl: (id: string) => buildUrl(`/billing/invoices/${id}/pdf`),
 };
 
 type Paged = { page?: number; page_size?: number };
@@ -333,12 +468,17 @@ export const admin = {
   revokePlan: (id: string) => request<AdminUserDetail>(`/admin/users/${id}/revoke-plan`, { method: "POST" }),
   subscriptions: (query: Paged & { status?: SubscriptionStatus | ""; plan?: string }) =>
     request<Page<AdminSubscription>>("/admin/subscriptions", { query }),
+  payments: (query: Paged & { status?: string; q?: string }) =>
+    request<Page<AdminPayment>>("/admin/payments", { query }),
   runs: (query: Paged & { status?: string }) => request<Page<AdminRun>>("/admin/automation-jobs", { query }),
   stopRun: (id: string) => request<AutomationRun>(`/admin/automation-jobs/${id}/stop`, { method: "POST" }),
   applications: (query: Paged & { status?: ApplicationStatus | ""; q?: string }) =>
     request<Page<AdminApplication>>("/admin/applications", { query }),
-  companies: (query: Paged & { q?: string }) => request<Page<AdminCompany>>("/admin/companies", { query }),
+  companies: (query: Paged & { q?: string; sort?: string; filter?: "" | "applied" | "search" | "jobs" }) =>
+    request<Page<AdminCompany>>("/admin/companies", { query }),
   company: (name: string) => request<AdminCompanyDetail>("/admin/companies/detail", { query: { name } }),
+  enrichCompany: (name: string) =>
+    request<AdminCompanyDetail>("/admin/companies/enrich", { method: "POST", query: { name } }),
   logs: (query: Paged & { level: LogLevel[]; q?: string }) => request<Page<AdminLogLine>>("/admin/logs", { query }),
   audit: (query: Paged) => request<Page<AdminAuditEntry>>("/admin/audit-log", { query }),
   workers: () => request<AdminWorkers>("/admin/workers"),
@@ -363,16 +503,38 @@ export const admin = {
     base_url: string;
     api_key?: string;
     models: { fast: string; strong: string; embedding: string };
-    features: { applications: boolean; resume: boolean; mock_interview?: boolean };
+    features: {
+      applications: boolean;
+      resume: boolean;
+      mock_interview?: boolean;
+      profile_sync?: boolean;
+      outreach?: boolean;
+    };
     mock_interview_presenter?: MockInterviewPresenterSettings;
+    elevenlabs_api_key?: string;
+    mock_interview_voice?: {
+      provider: "elevenlabs" | "openai";
+      elevenlabs_agent_id: string;
+      elevenlabs_model_id: string;
+    };
   }) => request<{ ai: AdminPlatformSettings["ai"] }>("/admin/settings/ai", { method: "PUT", body }),
   testAi: () => request<{ ok: boolean; reply: string }>("/admin/settings/ai/test", { method: "POST" }),
+  testElevenLabs: (body?: { elevenlabs_api_key?: string }) =>
+    request<{ ok: boolean; message: string; tier?: string }>("/admin/settings/ai/test-elevenlabs", {
+      method: "POST",
+      body: body ?? {},
+    }),
   updatePayments: (body: {
     provider: "null" | "razorpay" | "stripe";
     key_id: string;
     key_secret?: string;
     webhook_secret?: string;
   }) => request<{ payments: AdminPlatformSettings["payments"] }>("/admin/settings/payments", { method: "PUT", body }),
+  updateGst: (body: GstPlatformSettings) =>
+    request<{ gst: GstPlatformSettings }>("/admin/settings/gst", { method: "PUT", body }),
+  gstPreview: (query: { base_cents: number; buyer_state_code?: string }) =>
+    request<GstPreviewTotals>("/admin/settings/gst/preview", { query }),
+  taxInvoices: (query: Paged) => request<Page<TaxInvoiceRecord>>("/admin/billing/tax-invoices", { query }),
   testPayments: () =>
     request<{ ok: boolean; mode: string; test_checkout_hint?: string; message?: string }>(
       "/admin/settings/payments/test",
@@ -380,6 +542,19 @@ export const admin = {
     ),
   syncRazorpayPlans: () =>
     request<{ created: { code: string; provider_plan_id: string }[] }>("/admin/settings/payments/sync-plans", { method: "POST" }),
+  updateJobSources: (body: { linkedin: boolean; naukri: boolean }) =>
+    request<{ job_sources: NonNullable<AdminPlatformSettings["job_sources"]> }>("/admin/settings/job-sources", { method: "PUT", body }),
+  updateOutreach: (body: {
+    firecrawl_api_key?: string;
+    campaign?: Partial<OutreachCampaignSettings>;
+    whatsapp_provider?: "bridge" | "cloud";
+  }) =>
+    request<{ outreach: NonNullable<AdminPlatformSettings["outreach"]> }>("/admin/settings/outreach", { method: "PUT", body }),
+  testOutreach: (body?: { firecrawl_api_key?: string }) =>
+    request<{ ok: boolean; message: string; remaining_credits?: number; plan_credits?: number }>(
+      "/admin/settings/outreach/test",
+      { method: "POST", body: body ?? {} },
+    ),
   updateLiveInterview: (body: { enabled: boolean; display_name: string; price_cents: number }) =>
     request<{ live_interview: NonNullable<AdminPlatformSettings["live_interview"]> }>("/admin/settings/live-interview", { method: "PUT", body }),
   liveInterviews: () => request<{ sessions: LiveInterviewSession[] }>("/admin/live-interviews").then((d) => d.sessions),
@@ -449,18 +624,118 @@ export const admin = {
     request<PartnerCommission>(`/admin/commissions/${id}/status`, { method: "POST", body: { status } }),
   setPayoutStatus: (id: string, status: string, note?: string) =>
     request<PartnerPayout>(`/admin/payouts/${id}/status`, { method: "POST", body: { status, note } }),
+  outreachStartScrape: (body: {
+    query: string;
+    location?: string;
+    sources: string[];
+    max_results: number;
+    public_listing_attestation: boolean;
+  }) =>
+    request<OutreachScrapeJob>("/admin/outreach/scrape-jobs", {
+      method: "POST",
+      body,
+      timeoutMs: OUTREACH_TIMEOUT_MS,
+    }),
+  outreachScrapeJobs: (query: Paged) =>
+    request<Page<OutreachScrapeJob>>("/admin/outreach/scrape-jobs", { query }),
+  outreachScrapeJob: (id: string) => request<OutreachScrapeJob>(`/admin/outreach/scrape-jobs/${id}`),
+  payPayoutNow: (id: string, note?: string) =>
+    request<PartnerPayout>(`/admin/payouts/${id}/pay`, { method: "POST", body: { note } }),
+  outreachLeadStats: () => request<OutreachLeadDashboardStats>("/admin/outreach/leads/stats"),
+  outreachLeads: (
+    query: Paged & {
+      job_id?: string;
+      status?: string;
+      source?: string;
+      profile_complete?: boolean;
+      q?: string;
+    },
+  ) => request<Page<OutreachLead>>("/admin/outreach/leads", { query }),
+  outreachBulkImportLeads: (body: { contacts: string; enrich?: boolean }) =>
+    request<OutreachBulkImportResult>("/admin/outreach/leads/bulk-import", {
+      method: "POST",
+      body,
+    }),
+  outreachBulkLeadAction: (body: { lead_ids: string[]; action: "complete" | "enhance" }) =>
+    request<OutreachBulkActionResult>("/admin/outreach/leads/bulk-action", {
+      method: "POST",
+      body,
+      timeoutMs: OUTREACH_TIMEOUT_MS,
+    }),
+  outreachLead: (id: string) => request<OutreachLead>(`/admin/outreach/leads/${id}`),
+  outreachUpdateLead: (id: string, body: { payload: Record<string, unknown> }) =>
+    request<OutreachLead>(`/admin/outreach/leads/${id}`, { method: "PATCH", body }),
+  outreachCompleteProfile: (id: string) =>
+    request<{ lead: OutreachLead; completion: OutreachProfileCompletion }>(
+      `/admin/outreach/leads/${id}/complete-profile`,
+      { method: "POST", timeoutMs: OUTREACH_TIMEOUT_MS },
+    ),
+  outreachGenerateProposal: (id: string) =>
+    request<OutreachLead>(`/admin/outreach/leads/${id}/generate-proposal`, { method: "POST" }),
+  outreachSend: (id: string, body: { channels: string[]; approve: boolean }) =>
+    request<{ sent: Record<string, string>; lead: OutreachLead }>(`/admin/outreach/leads/${id}/send`, { method: "POST", body }),
+  outreachConvert: (id: string) =>
+    request<{ institute_id: string; email: string }>(`/admin/outreach/leads/${id}/convert`, { method: "POST" }),
+  outreachWhatsappStatus: () => request<OutreachWhatsappStatus>("/admin/outreach/whatsapp/status"),
+  outreachWhatsappReset: () =>
+    request<OutreachWhatsappStatus & { reset: { ok?: boolean; error?: string } }>("/admin/outreach/whatsapp/reset", {
+      method: "POST",
+    }),
+  outreachWhatsappRecentSends: (limit = 15) =>
+    request<{ items: OutreachWhatsappRecentSend[] }>("/admin/outreach/whatsapp/recent-sends", { query: { limit } }),
+  outreachWhatsappSyncChats: (query?: { limit?: number }) =>
+    request<{
+      synced: boolean;
+      chats: number;
+      messages_imported: number;
+      leads_touched?: number;
+      bridge_total?: number;
+      reason?: string;
+    }>("/admin/outreach/whatsapp/sync-chats", { method: "POST", query }),
+  outreachWhatsappChatThreads: (query: Paged & { q?: string }) =>
+    request<Page<OutreachWhatsappChatThread>>("/admin/outreach/whatsapp/chat-threads", { query }),
+  outreachProposalImageInfo: () =>
+    request<{ url: string; exists: boolean; updated_at: number | null }>("/admin/outreach/proposal-image"),
+  outreachProposalImageUpload: (form: FormData) =>
+    request<{ url: string }>("/admin/outreach/proposal-image", { method: "POST", form }),
+  outreachWhatsappTestSend: (body: { phone: string; text: string }) =>
+    request<{ sent: boolean; result: Record<string, unknown> }>("/admin/outreach/whatsapp/test-send", {
+      method: "POST",
+      body,
+    }),
+  outreachLeadChat: (id: string) =>
+    request<{ items: OutreachLeadChatMessage[]; whatsapp_phone: string }>(`/admin/outreach/leads/${id}/chat`),
+  outreachLeadChatSync: (id: string) =>
+    request<{ imported: number; items: OutreachLeadChatMessage[]; whatsapp_phone: string }>(
+      `/admin/outreach/leads/${id}/chat/sync`,
+      { method: "POST" },
+    ),
+  outreachLeadChatSend: (id: string, body: { channel: string; text: string }) =>
+    request<{ message: OutreachLeadChatMessage }>(`/admin/outreach/leads/${id}/chat`, {
+      method: "POST",
+      body,
+    }),
+  outreachLeadChatSendAttachment: (id: string, form: FormData) =>
+    request<{ message: OutreachLeadChatMessage }>(`/admin/outreach/leads/${id}/chat/attachment`, {
+      method: "POST",
+      form,
+    }),
 };
 
 export const institute = {
   me: () => request<{ institute: Institute; role: string }>("/institute/me"),
   dashboard: () => request<InstituteDashboard>("/institute/dashboard"),
   students: (query: Paged & { status?: string } = {}) => request<Page<InstituteAssignment>>("/institute/students", { query }),
-  invite: (email: string, note = "") =>
-    request<{ assignment: InstituteAssignment }>("/institute/students/invite", { method: "POST", body: { email, note } }),
+  student: (id: string) => request<InstituteStudentDetail>(`/institute/students/${id}`),
+  invite: (body: { name: string; phone: string; email: string; note?: string }) =>
+    request<{ assignment: InstituteAssignment }>("/institute/students/invite", {
+      method: "POST",
+      body: { name: body.name, phone: body.phone, email: body.email, note: body.note || "" },
+    }),
   release: (id: string) => request<{ assignment: InstituteAssignment }>(`/institute/students/${id}/release`, { method: "POST" }),
   suspend: (id: string) => request<{ assignment: InstituteAssignment }>(`/institute/students/${id}/suspend`, { method: "POST" }),
   invitations: () => request<{ items: InstituteAssignment[] }>("/institute/invitations"),
-  seats: () => request<{ items: { id: string; status: string; created_at: string }[]; counts: SeatCounts }>("/institute/seats"),
+  seats: () => request<{ items: InstituteSeat[]; counts: SeatCounts }>("/institute/seats"),
   plans: () => request<{ plans: Plan[] }>("/institute/plans").then((d) => d.plans),
   subscription: () => request<{ subscription: Subscription | null; seats: SeatCounts }>("/institute/subscription"),
   checkout: (plan: string) => request<CheckoutResult>("/institute/subscription/checkout", { method: "POST", body: { plan } }),
@@ -468,6 +743,21 @@ export const institute = {
   profile: () => request<Institute>("/institute/profile"),
   saveProfile: (body: Partial<Institute>) => request<Institute>("/institute/profile", { method: "PUT", body }),
   saveSettings: (body: Record<string, unknown>) => request<Institute>("/institute/settings", { method: "PUT", body }),
+  outreachStartScrape: (body: {
+    query: string;
+    location?: string;
+    sources: string[];
+    max_results: number;
+    public_listing_attestation: boolean;
+  }) => request<OutreachScrapeJob>("/institute/outreach/scrape-jobs", { method: "POST", body, timeoutMs: OUTREACH_TIMEOUT_MS }),
+  outreachScrapeJobs: (query: Paged) => request<Page<OutreachScrapeJob>>("/institute/outreach/scrape-jobs", { query }),
+  outreachScrapeJob: (id: string) => request<OutreachScrapeJob>(`/institute/outreach/scrape-jobs/${id}`),
+  outreachLeads: (query: Paged & { job_id?: string; status?: string; q?: string } = {}) =>
+    request<Page<OutreachLead>>("/institute/outreach/leads", { query }),
+  outreachLead: (id: string) => request<OutreachLead>(`/institute/outreach/leads/${id}`),
+  outreachLeadChat: (id: string) => request<{ items: OutreachLeadMessage[]; whatsapp_phone: string }>(`/institute/outreach/leads/${id}/chat`),
+  outreachLeadChatSend: (id: string, text: string) =>
+    request<unknown>(`/institute/outreach/leads/${id}/chat`, { method: "POST", body: { channel: "whatsapp", text } }),
 };
 
 export const partner = {
@@ -487,7 +777,12 @@ export const partner = {
   marketing: () => request<{ referral_path: string; assets: { title: string; text: string }[] }>("/partner/marketing"),
   links: () => request<{ referral_path: string; campaigns: PartnerCampaign[] }>("/partner/links"),
   saveProfile: (body: Partial<Partner>) => request<Partner>("/partner/profile", { method: "PUT", body }),
-  addKyc: (filename: string, note = "") => request<Partner>("/partner/kyc", { method: "POST", body: { filename, note } }),
+  addKyc: (file: File, note = "") => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("note", note);
+    return request<Partner>("/partner/kyc", { method: "POST", form });
+  },
   saveTax: (body: Partial<Partner>) => request<Partner>("/partner/tax", { method: "PUT", body }),
 };
 
@@ -498,5 +793,7 @@ export const invites = {
 
 export const referrals = {
   capture: (code: string, campaign?: string) =>
-    request<{ referral_code: string; organization: string; redirect: string }>(`/r/${code}`, { query: { c: campaign } }),
+    request<{ referral_code: string; organization: string; redirect: string; kind?: string }>(`/r/${code}`, { query: { c: campaign } }),
+  me: () =>
+    request<{ referral_code: string; referral_path: string; attributed: number; converted: number }>("/referrals/me"),
 };

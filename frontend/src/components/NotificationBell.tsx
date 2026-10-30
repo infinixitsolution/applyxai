@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { formatRelative } from "../lib/format";
 import { notificationLink } from "../lib/notificationLink";
 import { formatNotificationType } from "../lib/notificationLabel";
+import { AUTOMATION_LIVE_POLL_MS, useAutomationOverview } from "../hooks/useAutomationOverview";
 import { notifications } from "../services/endpoints";
 import { cx } from "./ui";
 
@@ -22,10 +23,11 @@ export function NotificationBell() {
     queryFn: notifications.preferences,
     staleTime: 5 * 60_000,
   });
+  const { data: automation } = useAutomationOverview();
   const { data } = useQuery({
     queryKey: ["notifications", "bell"],
     queryFn: () => notifications.list({ page_size: 6 }),
-    refetchInterval: open ? 15_000 : 60_000,
+    refetchInterval: automation?.active ? AUTOMATION_LIVE_POLL_MS : open ? 15_000 : 60_000,
     refetchOnWindowFocus: true,
   });
   const readAll = useMutation({

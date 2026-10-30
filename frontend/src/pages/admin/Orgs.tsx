@@ -1200,6 +1200,11 @@ export function AdminPartnerPage() {
     onSuccess: () => refresh("Payout updated."),
     onError: (e) => toast.error(errorMessage(e)),
   });
+  const payNow = useMutation({
+    mutationFn: (pid: string) => admin.payPayoutNow(pid),
+    onSuccess: () => refresh("RazorpayX payout submitted."),
+    onError: (e) => toast.error(errorMessage(e)),
+  });
 
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
@@ -1334,12 +1339,19 @@ export function AdminPartnerPage() {
           {p.kyc_documents.length === 0 ? <p className="text-sm text-slate-500">No documents recorded.</p> : (
             <ul className="divide-y divide-slate-100 text-sm">
               {p.kyc_documents.map((d) => (
-                <li key={`${d.filename}-${d.uploaded_at}`} className="flex items-center justify-between gap-3 py-2">
+                <li key={`${d.id || d.filename}-${d.uploaded_at}`} className="flex items-center justify-between gap-3 py-2">
                   <span>
                     <span className="font-medium text-slate-800">{d.filename}</span>
                     {d.note && <span className="ml-2 text-slate-500">{d.note}</span>}
                   </span>
-                  <span className="text-slate-500">{formatDate(d.uploaded_at)}</span>
+                  <span className="flex items-center gap-3 text-slate-500">
+                    {formatDate(d.uploaded_at)}
+                    {d.id && (
+                      <a className="font-medium text-brand-700 hover:underline" href={`/api/admin/partners/${p.id}/kyc/${d.id}/file`}>
+                        Download
+                      </a>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -1424,8 +1436,12 @@ export function AdminPartnerPage() {
                       </>
                     )}
                     {row.status === "approved" && (
-                      <Button size="sm" variant="secondary" loading={payout.isPending}
-                              onClick={() => payout.mutate({ pid: row.id, next: "paid" })}>Mark paid</Button>
+                      <>
+                        <Button size="sm" loading={payNow.isPending}
+                                onClick={() => payNow.mutate(row.id)}>Pay now</Button>
+                        <Button size="sm" variant="secondary" loading={payout.isPending}
+                                onClick={() => payout.mutate({ pid: row.id, next: "paid" })}>Mark paid</Button>
+                      </>
                     )}
                   </span>
                 </li>

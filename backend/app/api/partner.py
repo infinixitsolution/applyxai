@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import require_partner
 from backend.app.core.database import get_db
 from backend.app.core.errors import ok
-from backend.app.schemas.partner import CampaignIn, EnrollInstituteIn, KycDocumentIn, PartnerProfileIn, PartnerTaxIn, PayoutIn
+from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
+from backend.app.schemas.partner import CampaignIn, EnrollInstituteIn, PartnerProfileIn, PartnerTaxIn, PayoutIn
 from backend.app.services import partner_service
 
 router = APIRouter(prefix="/partner", tags=["partner"])
@@ -104,11 +108,30 @@ def put_profile(body: PartnerProfileIn, ctx=Depends(require_partner), db: Sessio
 
 
 @router.post("/kyc")
-def add_kyc(body: KycDocumentIn, ctx=Depends(require_partner), db: Session = Depends(get_db)):
+async def add_kyc(
+    file: UploadFile = File(...),
+    note: str = Form(""),
+    ctx=Depends(require_partner),
+    db: Session = Depends(get_db),
+    limiter: RateLimiter = Depends(get_rate_limiter),
+):
     _user, partner = ctx
-    partner_service.add_kyc_document(db, partner, body.filename, body.note)
+    limiter.hit("20/hour", "kyc-upload", str(partner.id))
+    await partner_service.add_kyc_upload(db, partner, file, note)
     db.commit()
     return ok(partner_service.partner_out(db, partner))
+
+
+@router.get("/kyc/{doc_id}/file")
+def download_kyc(doc_id: uuid.UUID, ctx=Depends(require_partner)):
+    _user, partner = ctx
+    path, filename, media_type = partner_service.kyc_stored_file(partner, doc_id)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 @router.put("/tax")

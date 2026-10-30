@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
@@ -103,6 +104,77 @@ describe("ResumesDashboard", () => {
     );
     expect(await screen.findByText("Default for automation")).toBeTruthy();
     expect(screen.getAllByText("Main CV").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /fill profile/i })).toBeTruthy();
+  });
+
+  it("posts make-default when Default is clicked", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("/resumes/templates")) return ok({ templates: [] });
+      if (url.includes("/resumes/r2/default") && method === "POST") {
+        return ok({
+          id: "r2", name: "Alt CV", filename: "alt.pdf", is_default: true, file_type: "pdf",
+          file_size: 800, created_at: "2026-10-02T00:00:00Z",
+        });
+      }
+      if (url.includes("/resumes") && !url.includes("templates")) {
+        return ok({
+          resumes: [
+            {
+              id: "r1", name: "Main CV", filename: "cv.pdf", is_default: true, file_type: "pdf",
+              file_size: 1200, created_at: "2026-10-01T00:00:00Z",
+            },
+            {
+              id: "r2", name: "Alt CV", filename: "alt.pdf", is_default: false, file_type: "pdf",
+              file_size: 800, created_at: "2026-10-02T00:00:00Z",
+            },
+          ],
+          limit: 3,
+        });
+      }
+      if (url.includes("/dashboard/stats")) {
+        return ok({
+          applications_by_status: { applied: 0, failed: 0, skipped: 0, queued: 0, running: 0, discovered: 0, external: 0, cancelled: 0 },
+          total_applied: 0, applied_today: 0, success_rate: 0, daily: [], top_companies: [], recent_applications: [],
+          automation: { active: null, last: null },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 1, limit: 3, remaining: 2 },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+        });
+      }
+      if (url.includes("/automation/overview")) {
+        return ok({
+          devices: [], active: null, recent: [], agent_online: false,
+          readiness: { ready: false, problems: [] },
+          usage: {
+            plan: "free", plan_name: "Free", period: "2026-10", resets_at: "2026-11-01T00:00:00+00:00",
+            applications: { used: 0, limit: 10, remaining: 10 },
+            resumes: { used: 1, limit: 3, remaining: 2 },
+            jobs_discovered: 0, runtime_seconds: 0, limit_reached: false,
+          },
+          resume_tailor: { mode: "default", resume_ai_available: false, master_skills_ready: false, can_tailor: false },
+        });
+      }
+      throw new Error(`${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <ResumesDashboard />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Alt CV")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /^default$/i }));
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/resumes/r2/default") && String(init?.method || "").toUpperCase() === "POST")).toBe(true);
   });
 
   it("shows built resumes section for automation copies", async () => {

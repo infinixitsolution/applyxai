@@ -159,4 +159,22 @@ describe("BillingPage", () => {
     expect(await screen.findByText(/4111 1111 1111 1111/)).toBeInTheDocument();
     expect(screen.getByText("No payments yet")).toBeInTheDocument();
   });
+
+  it("shows campus-managed billing without plan checkout", async () => {
+    mockApi({
+      "GET /api/billing": overview({
+        managed_by_institute: true,
+        institute_name: "Acme College",
+        checkout_available: false,
+        usage: { ...usage, plan: "campus", plan_name: "Campus" },
+      }),
+      "GET /api/plans": { plans },
+    });
+    renderPage();
+    expect(await screen.findByText(/managed by/i)).toBeInTheDocument();
+    expect(screen.getByText("Acme College")).toBeInTheDocument();
+    expect(screen.getAllByText("Campus").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Upgrade/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel plan" })).not.toBeInTheDocument();
+  });
 });

@@ -4,6 +4,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_mailer, require_admin
@@ -31,9 +32,12 @@ from backend.app.schemas.admin import (
 from backend.app.schemas.institute import PasswordIn
 from backend.app.schemas.live_interview import SupportMessageIn
 from backend.app.schemas.platform_settings import (
-    AiIn, AuthEmailIn, CmsIn, EmailTemplatesIn, LiveInterviewSettingsIn, NotificationsIn, PaymentsIn, SmtpIn,
+    AiIn, AuthEmailIn, CmsIn, EmailTemplatesIn, ElevenLabsTestIn, GstSettingsIn, JobSourcesIn,
+    LiveInterviewSettingsIn, NotificationsIn, OutreachSettingsIn, OutreachTestIn, PaymentsIn, SmtpIn,
 )
+from backend.app.services import gst_service
 from backend.app.services import ai_service
+from backend.app.services import firecrawl_client
 from backend.app.services.ai_service import AiTask
 from backend.app.services import admin_service, auth_service, live_interview_service, platform_settings_service as ps, support_service
 from backend.app.services.email_service import Email, EmailSender, branded, sample_email, verification_email
@@ -120,6 +124,12 @@ def subscriptions(status: SubscriptionStatus | None = None, plan: str | None = Q
     return ok(admin_service.list_subscriptions(db, params, status=status.value if status else None, plan=plan))
 
 
+@router.get("/payments", summary="All payment charges across users")
+def payments(status: str | None = Query(None, max_length=32), q: str | None = Query(None, max_length=255),
+             params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
+    return ok(admin_service.list_payments(db, params, status=status, q=q))
+
+
 @router.get("/automation-jobs", summary="All automation runs")
 def automation_jobs(status: Literal["active", "queued", "running", "paused", "completed", "failed", "cancelled"] | None = None,
                     params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
@@ -140,14 +150,26 @@ def applications(status: ApplicationStatus | None = None, q: str | None = Query(
 
 
 @router.get("/companies", summary="Companies users searched for or that searches returned")
-def companies(q: str | None = Query(None, max_length=200),
-              params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
-    return ok(admin_service.list_companies(db, params, q=q))
+def companies(
+    q: str | None = Query(None, max_length=200),
+    sort: str | None = Query(None, max_length=32, description="e.g. -last_seen, company, -jobs"),
+    company_filter: str | None = Query(None, max_length=16, alias="filter", description="applied | search | jobs"),
+    params: PageParams = Depends(page_params),
+    db: Session = Depends(get_db),
+):
+    return ok(admin_service.list_companies(db, params, q=q, sort=sort, filter=company_filter))
 
 
 @router.get("/companies/detail", summary="One company's jobs, applications, and contacts")
 def company_detail(name: str = Query(min_length=1, max_length=255), db: Session = Depends(get_db)):
     return ok(admin_service.company_detail(db, name))
+
+
+@router.post("/companies/enrich", summary="Search the web for HR contacts and job links (Firecrawl)")
+def enrich_company(name: str = Query(min_length=1, max_length=255), db: Session = Depends(get_db),
+                   limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("20/hour", "admin-company-enrich", name.strip().lower())
+    return ok(admin_service.enrich_company_directory(db, name))
 
 
 @router.get("/logs", summary="Automation log lines across all runs")
@@ -245,6 +267,16 @@ def notifications_broadcast(body: BroadcastNotificationsIn, admin: User = Depend
     return ok(result)
 
 
+@router.put("/settings/job-sources", summary="Activate LinkedIn and Naukri for automation runs")
+def put_settings_job_sources(body: JobSourcesIn, admin: User = Depends(require_admin),
+                             db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("30/hour", "admin-settings", str(admin.id))
+    saved = ps.update_job_sources(db, body)
+    admin_service.audit_settings(db, admin, "settings.job_sources", saved)
+    db.commit()
+    return ok({"job_sources": saved})
+
+
 @router.put("/settings/live-interview", summary="Per-interview live coach price")
 def put_settings_live_interview(body: LiveInterviewSettingsIn, admin: User = Depends(require_admin),
                                 db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
@@ -253,6 +285,32 @@ def put_settings_live_interview(body: LiveInterviewSettingsIn, admin: User = Dep
     admin_service.audit_settings(db, admin, "settings.live_interview", {"price_cents": saved["price_cents"], "enabled": saved["enabled"]})
     db.commit()
     return ok({"live_interview": saved})
+
+
+@router.put("/settings/outreach", summary="Institute outreach integrations (Firecrawl)")
+def put_settings_outreach(body: OutreachSettingsIn, admin: User = Depends(require_admin),
+                          db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("30/hour", "admin-settings", str(admin.id))
+    saved = ps.update_outreach(db, body)
+    admin_service.audit_settings(db, admin, "settings.outreach", {"firecrawl_configured": saved["firecrawl_api_key_configured"]})
+    db.commit()
+    return ok({"outreach": saved})
+
+
+@router.post("/settings/outreach/test", summary="Verify Firecrawl API key")
+def post_settings_outreach_test(body: OutreachTestIn, admin: User = Depends(require_admin),
+                                  db: Session = Depends(get_db), limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("20/hour", "admin-outreach-test", str(admin.id))
+    override = body.firecrawl_api_key.strip() or None
+    try:
+        result = firecrawl_client.verify_credentials(api_key=override, db=db)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError("FIRECRAWL_ERROR", str(exc), 502) from exc
+    admin_service.audit_settings(db, admin, "settings.outreach_test", {"ok": True})
+    db.commit()
+    return ok(result)
 
 
 @router.get("/live-interviews", summary="Live interview sessions")
@@ -281,6 +339,45 @@ def admin_support_reply(thread_id: uuid.UUID, body: SupportMessageIn, admin: Use
     result = support_service.post_admin_message(db, thread_id, body.body)
     db.commit()
     return ok(result)
+
+
+@router.put("/settings/gst", summary="Platform GST profile and invoice series")
+def put_settings_gst(body: GstSettingsIn, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+                       limiter: RateLimiter = Depends(get_rate_limiter)):
+    limiter.hit("30/hour", "admin-settings", str(admin.id))
+    gst = ps.update_gst(db, body)
+    admin_service.audit_settings(db, admin, "settings.gst", {"enabled": gst.get("enabled"), "configured": gst.get("configured")})
+    db.commit()
+    return ok({"gst": gst})
+
+
+@router.get("/settings/gst/preview", summary="Preview exclusive GST split for a pre-tax amount")
+def get_settings_gst_preview(
+    base_cents: int = Query(..., ge=0, le=100_000_000),
+    buyer_state_code: str | None = Query(None, max_length=2),
+    db: Session = Depends(get_db),
+):
+    settings_row = gst_service.get_effective_gst(db)
+    totals = gst_service.compute_exclusive_totals(
+        base_cents,
+        float(settings_row.get("rate_percent") or 0),
+        str(settings_row.get("state_code") or ""),
+        buyer_state_code,
+    )
+    return ok(
+        {
+            "base_cents": base_cents,
+            "rate_percent": settings_row.get("rate_percent"),
+            "supplier_state_code": settings_row.get("state_code"),
+            "buyer_state_code": (buyer_state_code or "").strip(),
+            **totals,
+        }
+    )
+
+
+@router.get("/billing/tax-invoices", summary="List tax invoices (drafts and issued)")
+def list_tax_invoices_admin(params: PageParams = Depends(page_params), db: Session = Depends(get_db)):
+    return ok(gst_service.list_tax_invoices(db, params))
 
 
 @router.put("/settings/payments", summary="Razorpay keys and payment mode")
@@ -327,9 +424,40 @@ def put_settings_ai(body: AiIn, admin: User = Depends(require_admin), db: Sessio
                     limiter: RateLimiter = Depends(get_rate_limiter)):
     limiter.hit("30/hour", "admin-settings", str(admin.id))
     ai = ps.update_ai(db, body)
-    admin_service.audit_settings(db, admin, "settings.ai", {"enabled": ai.get("enabled"), "provider": ai.get("provider")})
+    admin_service.audit_settings(
+        db,
+        admin,
+        "settings.ai",
+        {
+            "enabled": ai.get("enabled"),
+            "provider": ai.get("provider"),
+            "elevenlabs_configured": ai.get("elevenlabs_api_key_configured"),
+        },
+    )
     db.commit()
     return ok({"ai": ai})
+
+
+@router.post("/settings/ai/test-elevenlabs", summary="Verify ElevenLabs API key for mock interview TTS")
+def post_settings_ai_test_elevenlabs(
+    body: ElevenLabsTestIn,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    from backend.app.services import elevenlabs_client
+
+    limiter.hit("20/hour", "admin-elevenlabs-test", str(admin.id))
+    override = body.elevenlabs_api_key.strip() or None
+    try:
+        result = elevenlabs_client.verify_credentials(api_key=override, db=db)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError("ELEVENLABS_ERROR", str(exc), 502) from exc
+    admin_service.audit_settings(db, admin, "settings.elevenlabs_test", {"ok": True})
+    db.commit()
+    return ok(result)
 
 
 @router.post("/settings/ai/test", summary="Verify the configured AI provider responds")
@@ -576,6 +704,20 @@ def partner_status(partner_id: uuid.UUID, body: dict, admin: User = Depends(requ
     return ok(partner_service.partner_out(db, partner))
 
 
+@router.get("/partners/{partner_id}/kyc/{doc_id}/file")
+def partner_kyc_file(partner_id: uuid.UUID, doc_id: uuid.UUID, admin: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    from backend.app.services import partner_service
+    partner = partner_service.get_partner(db, partner_id)
+    path, filename, media_type = partner_service.kyc_stored_file(partner, doc_id)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
+
+
 @router.post("/partners/{partner_id}/kyc")
 def partner_kyc(partner_id: uuid.UUID, body: dict, admin: User = Depends(require_admin),
                 db: Session = Depends(get_db)):
@@ -636,6 +778,16 @@ def commission_status(commission_id: uuid.UUID, body: dict, admin: User = Depend
     admin_service._audit(db, admin, "commission.status", None, target_label=str(commission_id), status=status.value)
     db.commit()
     return ok(partner_service.commission_out(row))
+
+
+@router.post("/payouts/{payout_id}/pay")
+def payout_pay_now(payout_id: uuid.UUID, body: dict | None = None, admin: User = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    from backend.app.services import partner_service, razorpayx_service
+    row = razorpayx_service.pay_now(db, payout_id, note=str((body or {}).get("note") or ""))
+    admin_service._audit(db, admin, "payout.pay", None, target_label=str(payout_id), transfer=row.provider_transfer_id)
+    db.commit()
+    return ok(partner_service.payout_out(row))
 
 
 @router.post("/payouts/{payout_id}/status")

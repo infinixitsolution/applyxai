@@ -557,9 +557,12 @@ def text_question(bot, monkeypatch, label_text, value=""):
     # Real human_type sleeps between keystrokes, and does nothing at all for "".
     monkeypatch.setattr(bot, "human_type",
                         lambda target, text: setattr(target, "value", target.value + (text or "")))
+    text_xpath = ".//input[@type='text' or @type='number' or @type='tel' or @type='email']"
     field = FakeTextInput(value)
-    question = FakeElement(children={".//input[@type='text']": field,
-                                     ".//label[@for]": FakeElement(text=label_text)})
+    question = FakeElement(children={
+        text_xpath: field,
+        ".//label[@for]": FakeElement(text=label_text),
+    })
     return FakeElement(children={".//div[@data-test-form-element]": [question]}), field
 
 

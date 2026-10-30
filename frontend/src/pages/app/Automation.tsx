@@ -3,12 +3,16 @@ import { Bot, CheckCircle2, Copy, Laptop, Monitor, Pause, Play, ShieldCheck, Squ
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AgentDownloadPanel } from "../../components/AgentDownloadPanel";
+import { DesktopAgentPanel } from "../../components/DesktopAgentPanel";
 import { PendingQuestionsModal } from "../../components/PendingQuestionsModal";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { RunStatusBadge } from "../../components/RunStatusBadge";
 import { Alert, Badge, Button, ButtonLink, Card, cx, EmptyState, PageHeader, ProgressBar, Spinner } from "../../components/ui";
 import { agentServerUrl } from "../../lib/config";
+import { isDesktopAutomationHost, isDesktopHost } from "../../lib/desktop";
+import { AUTOMATION_LIVE_POLL_MS, useActiveRunLive, useAutomationOverview } from "../../hooks/useAutomationOverview";
+import { useDesktopAutoLink } from "../../hooks/useDesktopAutoLink";
 import { wakeDesktopAgent } from "../../lib/wakeDesktopAgent";
 import { formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
@@ -22,8 +26,6 @@ import type {
   RunLogLine,
 } from "../../types";
 
-const LIVE_POLL_MS = 3000;
-const IDLE_POLL_MS = 15000;
 const LOG_POLL_MS = 2500;
 const LOG_PAGE = 200;
 const MAX_LOG_LINES = 1000;
@@ -34,10 +36,8 @@ export function AutomationPage() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState(false);
   const [pendingItems, setPendingItems] = useState<PendingFormQuestion[]>([]);
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["automation"],
-    queryFn: automation.overview,
-    refetchInterval: (q) => (q.state.data?.active || connectOpen ? LIVE_POLL_MS : IDLE_POLL_MS),
+  const { data, isLoading, error } = useAutomationOverview({
+    liveBoost: connectOpen,
   });
 
   // When a run ends, the dashboard, applications, usage, and notifications have all changed.
@@ -58,6 +58,12 @@ export function AutomationPage() {
     }
     previousActive.current = activeId;
   }, [activeId, client]);
+
+  const serverLinked = (data?.devices.length ?? 0) > 0;
+  const { linking: desktopLinking, linkError: desktopLinkError } = useDesktopAutoLink({
+    serverHasDevice: serverLinked,
+    enabled: Boolean(data),
+  });
 
   useEffect(() => {
     if (params.get("pending") !== "1") return;
@@ -80,20 +86,40 @@ export function AutomationPage() {
     <>
       <PageHeader title="Automation" description="Start, pause, and watch your job applications as they happen."
                   actions={
-                    <Button variant="secondary" className="w-full sm:w-auto" onClick={() => setConnectOpen(true)}>
-                      <Laptop className="h-4 w-4" aria-hidden /> {data.devices.length ? "Switch computer" : "Connect a computer"}
-                    </Button>
+                    !isDesktopHost ? (
+                      <Button variant="secondary" className="w-full sm:w-auto" onClick={() => setConnectOpen(true)}>
+                        <Laptop className="h-4 w-4" aria-hidden />{" "}
+                        {data.devices.length ? "Switch computer" : "Connect a computer"}
+                      </Button>
+                    ) : undefined
                   } />
-      <AutomationStatusStrip overview={data} onConnect={() => setConnectOpen(true)} />
+      <AutomationStatusStrip
+        overview={data}
+        onConnect={() => setConnectOpen(true)}
+        desktopLinking={desktopLinking}
+        desktopLinkError={desktopLinkError}
+      />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {data.active
             ? <ActiveRunCard run={data.active} agentOnline={data.agent_online} />
-            : <StartCard overview={data} onConnect={() => setConnectOpen(true)} />}
+            : (
+              <StartCard
+                overview={data}
+                onConnect={() => setConnectOpen(true)}
+                desktopLinking={desktopLinking}
+                desktopLinkError={desktopLinkError}
+              />
+            )}
           {shownRun && <RunLog key={shownRun.id} run={shownRun} live={shownRun.id === data.active?.id} />}
         </div>
         <div className="space-y-6">
-          <DevicesCard devices={data.devices} onConnect={() => setConnectOpen(true)} />
+          <DevicesCard
+            devices={data.devices}
+            onConnect={() => setConnectOpen(true)}
+            desktopLinking={desktopLinking}
+            desktopLinkError={desktopLinkError}
+          />
           <Card title="This month">
             <ProgressBar label="Applications" value={data.usage.applications.used} max={data.usage.applications.limit} />
             <p className="mt-3 text-xs text-slate-500">
@@ -103,7 +129,9 @@ export function AutomationPage() {
           <RecentRuns runs={data.recent.filter((r) => r.id !== data.active?.id)} />
         </div>
       </div>
-      <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} knownIds={data.devices.map((d) => d.id)} />
+      {!isDesktopHost && (
+        <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} knownIds={data.devices.map((d) => d.id)} />
+      )}
       <PendingQuestionsModal
         open={pendingOpen}
         onClose={() => setPendingOpen(false)}
@@ -114,10 +142,28 @@ export function AutomationPage() {
 }
 
 // ------------------------------------------------------------------------------------------ start
-function StartCard({ overview, onConnect }: { overview: AutomationOverview; onConnect: () => void }) {
+function StartCard({
+  overview,
+  onConnect,
+  desktopLinking,
+  desktopLinkError,
+}: {
+  overview: AutomationOverview;
+  onConnect: () => void;
+  desktopLinking?: boolean;
+  desktopLinkError?: string | null;
+}) {
   const client = useQueryClient();
   const toast = useToast();
   const [dryRun, setDryRun] = useState(false);
+  const enabledSources = overview.enabled_sources?.length
+    ? overview.enabled_sources
+    : (["linkedin", "naukri"] as Array<"linkedin" | "naukri">);
+  const linkedinAvailable = enabledSources.includes("linkedin");
+  const naukriAvailable = enabledSources.includes("naukri");
+  const [useLinkedIn, setUseLinkedIn] = useState(linkedinAvailable);
+  const [useNaukri, setUseNaukri] = useState(naukriAvailable && !linkedinAvailable);
+  const [switchAfter, setSwitchAfter] = useState(10);
   const tailorSnap = overview.resume_tailor;
   const [resumeMode, setResumeMode] = useState<ResumeRunMode>(tailorSnap?.mode ?? "default");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -126,9 +172,27 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
   useEffect(() => {
     if (tailorSnap?.mode) setResumeMode(tailorSnap.mode);
   }, [tailorSnap?.mode]);
+  useEffect(() => {
+    if (!linkedinAvailable) setUseLinkedIn(false);
+    if (!naukriAvailable) setUseNaukri(false);
+    if (linkedinAvailable && !naukriAvailable) setUseLinkedIn(true);
+    if (naukriAvailable && !linkedinAvailable) setUseNaukri(true);
+  }, [linkedinAvailable, naukriAvailable]);
+
+  const selectedSources = [
+    ...(useLinkedIn ? ["linkedin" as const] : []),
+    ...(useNaukri ? ["naukri" as const] : []),
+  ];
+  const bothSources = selectedSources.length > 1;
+  const sourcesValid = selectedSources.length > 0 && (!bothSources || switchAfter >= 1);
 
   const start = useMutation({
-    mutationFn: (mode: ResumeRunMode) => automation.start({ dry_run: dryRun, resume_mode: mode }),
+    mutationFn: (mode: ResumeRunMode) => automation.start({
+      dry_run: dryRun,
+      resume_mode: mode,
+      sources: selectedSources,
+      ...(bothSources ? { switch_after: switchAfter } : {}),
+    }),
     onSuccess: () => {
       toast.success(dryRun ? "Practice run queued." : "Run queued.");
       wakeDesktopAgent();
@@ -139,7 +203,8 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
     onError: (e) => toast.error(errorMessage(e)),
   });
   const { readiness, devices, usage } = overview;
-  const canStart = readiness.ready && devices.length > 0 && !usage.limit_reached;
+  const computerReady = devices.length > 0;
+  const canStart = readiness.ready && computerReady && !usage.limit_reached && sourcesValid && !desktopLinking;
   const aiReady = tailorSnap?.resume_ai_available ?? false;
   const skillsReady = tailorSnap?.master_skills_ready ?? false;
   const canPickTailor = tailorSnap?.can_tailor ?? false;
@@ -156,7 +221,8 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
           <Laptop className="h-6 w-6 shrink-0 text-brand-600" aria-hidden />
           <p>
             The run happens in a browser on <strong>your own computer</strong>, using your saved preferences, answers,
-            and default resume. You sign in to LinkedIn there yourself, so ApplyXAI never receives your password.
+            and default resume. You sign in to LinkedIn and Naukri there (or save logins on this PC in Desktop), so
+            ApplyXAI never receives your passwords.
           </p>
         </div>
         <div className="flex gap-3">
@@ -169,30 +235,60 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
             <p className="font-medium">Finish setting up first:</p>
             <ul className="mt-1 list-disc pl-5">{readiness.problems.map((p) => <li key={p}>{p}</li>)}</ul>
             <p className="mt-2 flex flex-wrap gap-x-3">
-              <Link className="font-medium underline" to="/app/profile">Profile</Link>
-              <Link className="font-medium underline" to="/app/preferences">Preferences</Link>
+              <Link className="font-medium underline" to="/app/profile">Master Profile</Link>
+              <Link className="font-medium underline" to="/app/questions">Custom Questions</Link>
+              <Link className="font-medium underline" to="/app/settings/automation">Automation Settings</Link>
+              <Link className="font-medium underline" to="/app/automation/search">Job search</Link>
               <Link className="font-medium underline" to="/app/resumes">Resumes</Link>
             </p>
           </Alert>
         )}
+        {isDesktopAutomationHost() && (
+          <DesktopAgentPanel
+            className="mt-2"
+            serverLinked={computerReady}
+            linking={desktopLinking}
+            linkError={desktopLinkError}
+          />
+        )}
+        {isDesktopAutomationHost() && (
+          <p className="text-sm text-slate-600">
+            LinkedIn / Naukri passwords: save them under{" "}
+            <Link className="font-medium text-brand-600 underline" to="/app/job-logins">
+              Job logins
+            </Link>{" "}
+            (stored only on this PC). Automation opens an isolated Chrome window — not your personal Chrome profiles.
+          </p>
+        )}
         {devices.length === 0 && (
-          <Alert kind="info">
-            <p>
-              Install the ApplyXAI desktop agent on your computer, then connect it to this account.
-            </p>
-            <div className="mt-3">
-              <AgentDownloadPanel />
-            </div>
-            <p className="mt-3">
-              Already installed?{" "}
-              <button type="button" onClick={onConnect} className="font-medium underline">Connect a computer</button>
-            </p>
+          <Alert kind={desktopLinkError ? "error" : "info"}>
+            {isDesktopHost ? (
+              <p>
+                {desktopLinkError
+                  ? desktopLinkError
+                  : desktopLinking
+                    ? "Linking this computer to your account… Start run will unlock when linking finishes."
+                    : "This computer links to your account automatically after sign-in."}
+              </p>
+            ) : (
+              <>
+                <p>
+                  Install <strong>ApplyXAI Desktop</strong> on this computer (one installer), sign in, and connect it to this account.
+                </p>
+                <div className="mt-3">
+                  <AgentDownloadPanel />
+                </div>
+                <p className="mt-3">
+                  Already installed?{" "}
+                  <button type="button" onClick={onConnect} className="font-medium underline">Connect a computer</button>
+                </p>
+              </>
+            )}
           </Alert>
         )}
         {devices.length > 0 && !overview.agent_online && (
           <Alert kind="info">
-            None of your computers is online. You can still start: the run waits until you open{" "}
-            <code>{AGENT} run</code> in the ApplyXAI folder.
+            None of your computers is online. You can still queue a run — open <strong>ApplyXAI Desktop</strong> on this PC to pick it up.
           </Alert>
         )}
         {usage.limit_reached && (
@@ -205,7 +301,8 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <p className="text-sm font-medium text-slate-900">Resume for this run</p>
           <p className="mt-1 text-xs text-slate-600">
-            Tailor builds a JD-matched resume per job (when match ≥60%) and uploads it to LinkedIn.
+            Tailor builds a JD-matched resume per job (when match ≥60%) and attaches it during apply on LinkedIn or
+            Naukri.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -257,6 +354,43 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
             </p>
           )}
         </div>
+
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium text-slate-900">Job sources</legend>
+          <p className="text-sm text-slate-500">
+            {linkedinAvailable && naukriAvailable
+              ? "Choose LinkedIn, Naukri, or both. With both, the run switches site after the number of successful applications you set."
+              : "Your administrator has activated this job source for runs."}
+          </p>
+          {linkedinAvailable && (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={useLinkedIn}
+                     disabled={!naukriAvailable}
+                     onChange={(e) => setUseLinkedIn(e.target.checked)} />
+              <span className="font-medium text-slate-900">LinkedIn</span>
+            </label>
+          )}
+          {naukriAvailable && (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={useNaukri}
+                     disabled={!linkedinAvailable}
+                     onChange={(e) => setUseNaukri(e.target.checked)} />
+              <span className="font-medium text-slate-900">Naukri</span>
+            </label>
+          )}
+          {bothSources && (
+            <label className="block max-w-xs">
+              <span className="text-sm font-medium text-slate-900">Jobs before switching</span>
+              <input
+                type="number"
+                min={1}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={switchAfter}
+                onChange={(e) => setSwitchAfter(Number(e.target.value))}
+              />
+            </label>
+          )}
+        </fieldset>
 
         <label className="flex items-start gap-2">
           <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300" checked={dryRun}
@@ -343,6 +477,15 @@ function StartCard({ overview, onConnect }: { overview: AutomationOverview; onCo
 }
 
 // ------------------------------------------------------------------------------------------ active run
+function sourceProgress(run: AutomationRun): string | null {
+  const label = run.active_source === "naukri" ? "Naukri" : "LinkedIn";
+  if (run.switch_after && run.switch_after > 0) {
+    return `${label} · ${run.source_submitted ?? 0} of ${run.switch_after}`;
+  }
+  if ((run.sources ?? []).length > 1) return label;
+  return (run.sources ?? []).length ? label : null;
+}
+
 function statusLine(run: AutomationRun, agentOnline: boolean): string {
   if (run.control === "stop") {
     return run.stop_reason === "plan_limit"
@@ -353,14 +496,15 @@ function statusLine(run: AutomationRun, agentOnline: boolean): string {
     if (run.claimed) return "Your computer is opening the browser\u2026";
     return agentOnline
       ? "Waiting for your computer to pick this up\u2026"
-      : `Waiting for a computer. Run ${AGENT} run in the ApplyXAI folder on a connected computer to begin.`;
+      : "Waiting for a computer. Open ApplyXAI Desktop on a linked PC to begin.";
   }
   if (run.status === "paused") return "Paused. Resume when you're ready.";
   if (run.control === "pause") return "Pausing after the current job\u2026";
   return run.current_job ? run.current_job : "Running\u2026";
 }
 
-function ActiveRunCard({ run, agentOnline }: { run: AutomationRun; agentOnline: boolean }) {
+function ActiveRunCard({ run: overviewRun, agentOnline }: { run: AutomationRun; agentOnline: boolean }) {
+  const run = useActiveRunLive(overviewRun) ?? overviewRun;
   const client = useQueryClient();
   const toast = useToast();
   const [confirmStop, setConfirmStop] = useState(false);
@@ -386,6 +530,7 @@ function ActiveRunCard({ run, agentOnline }: { run: AutomationRun; agentOnline: 
     <Card title={<span className="flex items-center gap-2">Current run <RunStatusBadge status={run.status} />
       {run.dry_run && <Badge tone="amber">Practice</Badge>}</span>}>
       <p className="text-sm text-slate-700" aria-live="polite">{statusLine(run, agentOnline)}</p>
+      {sourceProgress(run) && <p className="mt-1 text-sm font-medium text-slate-900">{sourceProgress(run)}</p>}
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {counters.map((c) => (
           <div key={c.label} className="rounded-lg bg-slate-50 p-3">
@@ -484,22 +629,40 @@ function RunLog({ run, live }: { run: AutomationRun; live: boolean }) {
 }
 
 // ------------------------------------------------------------------------------------------ devices
-function AutomationStatusStrip({ overview, onConnect }: { overview: AutomationOverview; onConnect: () => void }) {
+function AutomationStatusStrip({
+  overview,
+  onConnect,
+  desktopLinking,
+  desktopLinkError,
+}: {
+  overview: AutomationOverview;
+  onConnect: () => void;
+  desktopLinking?: boolean;
+  desktopLinkError?: string | null;
+}) {
   const { devices, agent_online, active, readiness } = overview;
   const computer = devices[0] ?? null;
   let headline = "Connect your computer to run applications";
-  let detail = "Install the desktop agent, approve the connection in your browser, then start a run.";
+  let detail = "Install ApplyXAI Desktop, connect this computer, then start a run.";
+  if (!computer && isDesktopHost) {
+    headline = desktopLinkError ? "Could not link this computer" : "Setting up this computer";
+    detail = desktopLinkError
+      ? desktopLinkError
+      : desktopLinking
+        ? "Linking to your account… This usually takes a few seconds after sign-in."
+        : "Stay signed in — ApplyXAI Desktop links this PC automatically.";
+  }
   if (computer) {
     headline = computer.online ? `${computer.name} is online` : `${computer.name} is offline`;
     detail = computer.online
-      ? "The agent is ready. Start or resume a run from the panel on the left."
-      : "Open the desktop agent and click Start Agent, or connect a different computer.";
+      ? "Ready to run. Start or resume from the panel on the left."
+      : "Open ApplyXAI Desktop on this computer, or connect a different one.";
   } else if (!readiness.ready) {
     detail = "Finish profile, preferences, and resume setup, then connect one computer.";
   }
   if (active) {
     headline = active.control === "pause" ? "Run paused" : "Run in progress";
-    detail = active.current_job || "Your agent is working through saved job preferences.";
+    detail = active.current_job || "Automation is running on your computer using saved job preferences.";
   }
 
   return (
@@ -514,7 +677,7 @@ function AutomationStatusStrip({ overview, onConnect }: { overview: AutomationOv
             <p className="mt-0.5 text-sm text-slate-300">{detail}</p>
           </div>
         </div>
-        {!computer && (
+        {!computer && !isDesktopHost && (
           <Button variant="secondary" size="sm" className="shrink-0 border-white/20 bg-white/10 text-white hover:bg-white/20" onClick={onConnect}>
             Connect computer
           </Button>
@@ -524,7 +687,17 @@ function AutomationStatusStrip({ overview, onConnect }: { overview: AutomationOv
   );
 }
 
-function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect: () => void }) {
+function DevicesCard({
+  devices,
+  onConnect,
+  desktopLinking,
+  desktopLinkError,
+}: {
+  devices: AgentDevice[];
+  onConnect: () => void;
+  desktopLinking?: boolean;
+  desktopLinkError?: string | null;
+}) {
   const client = useQueryClient();
   const toast = useToast();
   const [removing, setRemoving] = useState<AgentDevice | null>(null);
@@ -546,7 +719,7 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
           <h2 className="text-sm font-semibold text-slate-900">Active computer</h2>
           <p className="mt-0.5 text-xs text-slate-500">One computer per account. Connecting a new one replaces the previous.</p>
         </div>
-        {active && (
+        {active && !isDesktopHost && (
           <button type="button" onClick={onConnect} className="shrink-0 text-xs font-medium text-brand-600 hover:underline">
             Replace
           </button>
@@ -564,7 +737,7 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
               <Badge tone={active.online ? "green" : "slate"}>{active.online ? "Online" : "Offline"}</Badge>
             </div>
             <p className="text-xs text-slate-500">
-              {active.online ? "Agent is polling" : active.last_seen_at ? `Last seen ${formatRelative(active.last_seen_at)}` : "Not seen yet"}
+              {active.online ? "Online" : active.last_seen_at ? `Last seen ${formatRelative(active.last_seen_at)}` : "Not seen yet"}
               {active.platform && ` · ${active.platform}`}
             </p>
           </div>
@@ -575,11 +748,24 @@ function DevicesCard({ devices, onConnect }: { devices: AgentDevice[]; onConnect
         </div>
       ) : (
         <div className="mt-4 text-sm text-slate-600">
-          <p>No computer linked yet.</p>
-          <div className="mt-3">
-            <AgentDownloadPanel />
-          </div>
-          <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={onConnect}>Connect a computer</Button>
+          {isDesktopHost ? (
+            <>
+              <p>{desktopLinkError ? desktopLinkError : desktopLinking ? "Linking this computer…" : "Pairing this PC after sign-in…"}</p>
+              {isDesktopAutomationHost() && (
+                <div className="mt-3">
+                  <DesktopAgentPanel serverLinked={false} linking={desktopLinking} linkError={desktopLinkError} />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p>No computer linked yet.</p>
+              <div className="mt-3">
+                <AgentDownloadPanel />
+              </div>
+              <Button className="mt-3 w-full" size="sm" variant="secondary" onClick={onConnect}>Connect a computer</Button>
+            </>
+          )}
         </div>
       )}
       <ConfirmDialog open={removing !== null} onClose={() => setRemoving(null)} title="Disconnect this computer?" danger
@@ -611,7 +797,7 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
   const [devOpen, setDevOpen] = useState(false);
   const code = useMutation({ mutationFn: automation.pairingCode });
   const devices = useQuery({ queryKey: ["automation", "devices"], queryFn: automation.devices, enabled: open,
-                             refetchInterval: open ? LIVE_POLL_MS : false });
+                             refetchInterval: open ? AUTOMATION_LIVE_POLL_MS : false });
   const { mutate, reset } = code;
   useEffect(() => {
     if (open) {
@@ -636,7 +822,7 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-500" aria-hidden />
           <p className="font-medium text-slate-900">{connected.name} is now your active computer</p>
-          <p>Any previous computer was disconnected. Click <strong>Start Agent</strong> in the desktop app, then start a run from this page.</p>
+          <p>Any previous computer was disconnected. Keep ApplyXAI Desktop open, then start a run from this page.</p>
         </div>
       ) : (
         <ol className="space-y-5">
@@ -646,25 +832,19 @@ function ConnectDialog({ open, onClose, knownIds }: { open: boolean; onClose: ()
             </Alert>
           )}
           <li>
-            <p className="font-medium text-slate-900">1. Install and open the ApplyXAI desktop agent on this computer.</p>
+            <p className="font-medium text-slate-900">1. Install and open ApplyXAI Desktop on this computer.</p>
             <div className="mt-2">
               <AgentDownloadPanel />
             </div>
-            <p className="mt-2 text-sm text-slate-600">
-              Or run from source with <code>{AGENT}</code>.
-            </p>
           </li>
           <li>
-            <p className="font-medium text-slate-900">2. Click <strong>Connect — Live</strong> (or <strong>Connect — Local</strong> while developing).</p>
+            <p className="font-medium text-slate-900">2. Sign in on Desktop — this computer links automatically.</p>
             <p className="mt-1 text-sm text-slate-600">
-              Your browser opens here — sign in if needed and approve the computer. No server URL or pairing code is required.
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Live: <code>https://applyxai.com</code> · Local dev: <code>http://localhost:5173</code> (with the web app and API running).
+              No separate connect step. Keep ApplyXAI Desktop open while runs are queued.
             </p>
           </li>
           <li>
-            <p className="font-medium text-slate-900">3. Click <strong>Start Agent</strong> and leave the app running.</p>
+            <p className="font-medium text-slate-900">3. Start a run from Automation and watch progress here.</p>
           </li>
           <li className="text-xs text-slate-500">
             LinkedIn sign-in happens in Chrome on this computer. Your LinkedIn password never goes to ApplyXAI.

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ApplyXAI Live Capture</title>
+  </head>
+  <body>
+    <script>
+      /** @typedef {{ speaker: string; data: ArrayBuffer }} ClipMessage */
+      const RATE = 16000;
+      const CHUNK_SECONDS = 0.25;
+      const MIN_VOICED = 3;
+
+      function rms(samples) {
+        if (!samples.length) return 0;
+        let sum = 0;
+        for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
+        return Math.sqrt(sum / samples.length);
+      }
+
+      function encodeWav(samples, sampleRate) {
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+        const write = (offset, str) => {
+          for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+        };
+        write(0, "RIFF");
+        view.setUint32(4, 36 + samples.length * 2, true);
+        write(8, "WAVE");
+        write(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        write(36, "data");
+        view.setUint32(40, samples.length * 2, true);
+        let offset = 44;
+        for (let i = 0; i < samples.length; i += 1) {
+          const s = Math.max(-1, Math.min(1, samples[i]));
+          view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+          offset += 2;
+        }
+        return buffer;
+      }
+
+      function resample(input, sourceRate, targetRate) {
+        if (sourceRate === targetRate) return input;
+        const outLen = Math.max(1, Math.round((input.length * targetRate) / sourceRate));
+        const out = new Float32Array(outLen);
+        for (let i = 0; i < outLen; i += 1) {
+          const pos = (i * sourceRate) / targetRate;
+          const idx = Math.floor(pos);
+          const frac = pos - idx;
+          const a = input[idx] ?? 0;
+          const b = input[idx + 1] ?? a;
+          out[i] = a + (b - a) * frac;
+        }
+        return out;
+      }
+
+      class StreamCapture {
+        constructor(speaker, stream, onClip, thresholds, sharedLevels) {
+          this.speaker = speaker;
+          this.onClip = onClip;
+          this.threshold = thresholds.threshold;
+          this.quietChunks = thresholds.quietChunks;
+          this.sharedLevels = sharedLevels;
+          this.ctx = new AudioContext();
+          this.source = this.ctx.createMediaStreamSource(stream);
+          this.processor = this.ctx.createScriptProcessor(4096, 1, 1);
+          this.speech = [];
+          this.voiced = 0;
+          this.quiet = 0;
+          this.source.connect(this.processor);
+          this.processor.connect(this.ctx.destination);
+          this.processor.onaudioprocess = (event) => {
+            const input = event.inputBuffer.getChannelData(0);
+            const chunk = new Float32Array(input.length);
+            chunk.set(input);
+            const level = rms(chunk);
+            let loud = false;
+            if (speaker === "interviewer") {
+              this.sharedLevels.loopRms = level;
+              loud = level >= this.threshold;
+            } else {
+              const loop = this.sharedLevels.loopRms;
+              loud = level >= 0.006 && !(loop >= 0.01 && level < loop * 1.6);
+            }
+            if (loud) {
+              this.voiced += 1;
+              this.quiet = 0;
+              this.speech.push(chunk);
+            } else if (this.speech.length) {
+              this.quiet += 1;
+              this.speech.push(chunk);
+              if (this.quiet >= this.quietChunks) this.flush();
+            }
+          };
+        }
+
+        flush() {
+          if (this.voiced < MIN_VOICED) {
+            this.speech = [];
+            this.voiced = 0;
+            this.quiet = 0;
+            return;
+          }
+          let total = 0;
+          for (const part of this.speech) total += part.length;
+          const merged = new Float32Array(total);
+          let offset = 0;
+          for (const part of this.speech) {
+            merged.set(part, offset);
+            offset += part.length;
+          }
+          const atRate = resample(merged, this.ctx.sampleRate, RATE);
+          const wav = encodeWav(atRate, RATE);
+          this.onClip(this.speaker, wav);
+          this.speech = [];
+          this.voiced = 0;
+          this.quiet = 0;
+        }
+
+        stop() {
+          this.processor.disconnect();
+          this.source.disconnect();
+          void this.ctx.close();
+        }
+      }
+
+      let captures = [];
+
+      window.startLiveCapture = async () => {
+        const sharedLevels = { loopRms: 0 };
+        const display = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: { suppressLocalAudioPlayback: false },
+        });
+        const audioTracks = display.getAudioTracks();
+        if (!audioTracks.length) {
+          display.getTracks().forEach((t) => t.stop());
+          throw new Error(
+            "No system audio in that share. Choose a tab or window and turn on Share audio / Include computer sound.",
+          );
+        }
+        display.getVideoTracks().forEach((t) => t.stop());
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const send = (speaker, buffer) => {
+          window.captureBridge.sendClip(speaker, buffer);
+        };
+        captures = [
+          new StreamCapture("interviewer", display, send, { threshold: 0.01, quietChunks: 3 }, sharedLevels),
+          new StreamCapture("candidate", mic, send, { threshold: 0.006, quietChunks: 6 }, sharedLevels),
+        ];
+        return true;
+      };
+
+      window.stopLiveCapture = () => {
+        captures.forEach((c) => c.stop());
+        captures = [];
+      };
+    </script>
+  </body>
+</html>

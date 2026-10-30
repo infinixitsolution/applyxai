@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Info, Loader2 } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   formatUsageCap,
@@ -55,10 +55,10 @@ export function ButtonLink({ to, variant = "primary", size = "md", className, ch
   return <Link to={to} className={cx(buttonClass(variant, size), className)}>{children}</Link>;
 }
 
-export function Card({ title, actions, children, className }:
-  { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+export function Card({ title, actions, children, className, ...rest }:
+  { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string } & Omit<HTMLAttributes<HTMLElement>, "title">) {
   return (
-    <section className={cx(surfaceCardClass, "p-4 sm:p-5", className)}>
+    <section className={cx(surfaceCardClass, "p-4 sm:p-5", className)} {...rest}>
       {(title || actions) && (
         <header className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           {title && <h2 className="text-base font-semibold text-slate-900">{title}</h2>}
@@ -243,35 +243,50 @@ export function UserAvatar({ name, email }: { name: string; email?: string }) {
   );
 }
 
-export function ProgressBar({ value, max, label, usageKind }: {
-  value: number; max: number; label: string; usageKind?: UsageMeterKind;
+export function ProgressBar({ value, max, label, usageKind, successAtMax }: {
+  value: number; max: number; label: string; usageKind?: UsageMeterKind; successAtMax?: boolean;
 }) {
   const kind = usageKind ?? (label.toLowerCase().includes("resume") ? "resumes" : "applications");
   const unlimited = isUnlimitedUsageCap(max, kind);
   const pct = usageMeterPercent(value, max, kind);
   const atCap = !unlimited && max > 0 && value >= max;
+  const complete = Boolean(successAtMax && atCap);
+  const fillClass = complete
+    ? "bg-emerald-500"
+    : atCap
+      ? "bg-red-500"
+      : pct >= 80 && !unlimited
+        ? "bg-amber-500"
+        : "bg-brand-600";
+  const valueText = complete
+    ? "Complete"
+    : successAtMax
+      ? `${pct}% complete`
+      : unlimited
+        ? `${value} used, unlimited plan`
+        : `${pct}% of plan limit`;
   return (
     <div>
       <div className="mb-1.5 flex justify-between gap-2 text-sm">
-        <span className="text-slate-600">{label}</span>
-        <span className="shrink-0 font-medium tabular-nums text-slate-900">
+        <span className={complete ? "font-medium text-emerald-800" : "text-slate-600"}>{label}</span>
+        <span className={cx("shrink-0 font-medium tabular-nums", complete ? "text-emerald-800" : "text-slate-900")}>
           {value.toLocaleString()} / {formatUsageCap(max, kind)}
         </span>
       </div>
       <div
-        className="h-2.5 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200/60"
+        className={cx(
+          "h-2.5 overflow-hidden rounded-full ring-1",
+          complete ? "bg-emerald-100 ring-emerald-200/80" : "bg-slate-100 ring-slate-200/60",
+        )}
         role="progressbar"
         aria-label={label}
         aria-valuenow={value}
         aria-valuemin={0}
         aria-valuemax={unlimited ? undefined : max}
-        aria-valuetext={unlimited ? `${value} used, unlimited plan` : `${pct}% of plan limit`}
+        aria-valuetext={valueText}
       >
         <div
-          className={cx(
-            "h-full min-w-[6px] rounded-full transition-[width] duration-300",
-            atCap ? "bg-red-500" : pct >= 80 && !unlimited ? "bg-amber-500" : "bg-brand-600",
-          )}
+          className={cx("h-full min-w-[6px] rounded-full transition-[width] duration-300", fillClass)}
           style={{ width: `${pct}%` }}
         />
       </div>

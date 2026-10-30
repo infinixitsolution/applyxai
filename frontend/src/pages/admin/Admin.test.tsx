@@ -106,6 +106,27 @@ const adminSettings: AdminPlatformSettings = {
     provider: "null", key_id: "", key_secret_configured: false, webhook_secret_configured: false,
     ready: false, source: "environment", razorpay_mode: "unknown", live_checkout: false, test_checkout: false,
   },
+  gst: {
+    enabled: false,
+    legal_name: "",
+    trade_name: "",
+    address_line1: "",
+    address_line2: "",
+    city: "",
+    state: "",
+    state_code: "",
+    pin: "",
+    country: "India",
+    gstin: "",
+    pan: "",
+    sac_code: "998313",
+    rate_percent: 18,
+    pricing_tax_exclusive: true,
+    invoice_prefix: "AXAI",
+    invoice_next_number: 1,
+    invoice_footer_note: "",
+    configured: false,
+  },
   infrastructure: {
     app_env: "development", app_version: "test", database: "sqlite", redis_url_set: false, cors_origins: ["http://localhost:5173"],
     payment_provider: "null", payment_keys_configured: false,
@@ -414,8 +435,11 @@ describe("admin area", () => {
     });
     renderAt("/admin/companies/Acme", <Route path="/admin/companies/:company" element={<AdminCompanyPage />} />);
     expect(await screen.findByRole("heading", { name: "Acme" })).toBeInTheDocument();
-    expect(screen.getByText("Company overview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByText("Automation funnel")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Jobs \(\d+\)/ }));
     expect(screen.getAllByText("Backend Engineer").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: /Contacts \(\d+\)/ }));
     expect(screen.getByText("Priya Shah")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "hiring@acme.com" })).toHaveAttribute("href", "mailto:hiring@acme.com");
     expect(screen.getByText("+91 98450 11223")).toBeInTheDocument();
@@ -562,7 +586,11 @@ describe("admin area", () => {
     };
     const detail: AdminInstituteDetail = {
       institute,
-      dashboard: { institute, subscription: sub, students: 1, pending_invites: 0, seats, recent_assignments: [student] },
+      dashboard: {
+        institute, subscription: sub, students: 1, pending_invites: 0, seats,
+        activity: { searched: 0, applied: 0, skipped: 0, failed: 0, success_rate: null, daily: [] },
+        recent_assignments: [student],
+      },
       login: {
         id: "u2", email: "priya.riverside@example.com", first_name: "Priya", last_name: "Rao",
         is_active: true, is_verified: true, last_login_at: null, created_at: "2026-10-09T00:00:00+00:00",

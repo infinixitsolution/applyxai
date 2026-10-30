@@ -4,8 +4,11 @@ Engine events: what modules/run_hooks.py writes, one JSON object per line.
 Every event has "event" and "ts" (ISO-8601, UTC). Outcome events carry the LinkedIn job id:
 
     run_started     search_terms
-    login_required  (the user has to sign in to LinkedIn in the opened browser)
-    job_started     job_id, title, company, work_location, work_style
+    login_required  platform (the user has to sign in to that site in the opened browser)
+    source_started  source
+    source_switched source, submitted_on_previous
+    source_blocked  source, reason
+    job_started     job_id, title, company, work_location, work_style, platform, job_link
     applied         job_id, title, company, work_location, work_style, description,
                     experience_required, reposted, date_listed, date_applied, job_link, application_link
     external        same fields as applied; the job uses an external application site
@@ -22,6 +25,9 @@ from datetime import datetime, timezone
 
 RUN_STARTED = "run_started"
 LOGIN_REQUIRED = "login_required"
+SOURCE_STARTED = "source_started"
+SOURCE_SWITCHED = "source_switched"
+SOURCE_BLOCKED = "source_blocked"
 JOB_STARTED = "job_started"
 APPLIED = "applied"
 EXTERNAL = "external"
@@ -33,8 +39,26 @@ LIMIT_REACHED = "limit_reached"
 RUN_FINISHED = "run_finished"
 FORM_QUESTION = "form_question"
 
+PROFILE_SYNC_STARTED = "profile_sync_started"
+PROFILE_SECTION_STARTED = "profile_section_started"
+PROFILE_SECTION_UPDATED = "profile_section_updated"
+PROFILE_SECTION_SKIPPED = "profile_section_skipped"
+PROFILE_MANUAL_REQUIRED = "profile_manual_required"
+PROFILE_SYNC_FINISHED = "profile_sync_finished"
+
 OUTCOMES = {APPLIED, EXTERNAL, FAILED, SKIPPED}
-KNOWN_EVENTS = OUTCOMES | {RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, LIMIT_REACHED, RUN_FINISHED, FORM_QUESTION}
+SOURCE_EVENTS = {SOURCE_STARTED, SOURCE_SWITCHED, SOURCE_BLOCKED}
+PROFILE_EVENTS = {
+    PROFILE_SYNC_STARTED,
+    PROFILE_SECTION_STARTED,
+    PROFILE_SECTION_UPDATED,
+    PROFILE_SECTION_SKIPPED,
+    PROFILE_MANUAL_REQUIRED,
+    PROFILE_SYNC_FINISHED,
+}
+KNOWN_EVENTS = OUTCOMES | SOURCE_EVENTS | PROFILE_EVENTS | {
+    RUN_STARTED, LOGIN_REQUIRED, JOB_STARTED, PAUSED, RESUMED, LIMIT_REACHED, RUN_FINISHED, FORM_QUESTION,
+}
 
 
 def validate_event(event) -> dict | None:
@@ -43,6 +67,12 @@ def validate_event(event) -> dict | None:
         return None
     if event["event"] == FORM_QUESTION:
         return event if str(event.get("label") or "").strip() else None
+    if event["event"] in SOURCE_EVENTS and event.get("source") not in ("linkedin", "naukri"):
+        return None
+    if event["event"] in PROFILE_EVENTS:
+        if event["event"] in {PROFILE_SECTION_STARTED, PROFILE_SECTION_UPDATED, PROFILE_SECTION_SKIPPED}:
+            return event if str(event.get("section") or "").strip() else None
+        return event
     if event["event"] in OUTCOMES | {JOB_STARTED} and not str(event.get("job_id") or "").strip():
         return None
     return event

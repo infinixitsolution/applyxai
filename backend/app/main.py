@@ -1,9 +1,9 @@
 """
 ApplyXAI API. Run from the project root:
 
-    uvicorn backend.app.main:app --reload --port 8000
+    uvicorn backend.app.main:app --reload --port 8010
 
-OpenAPI docs: http://127.0.0.1:8000/api/docs
+OpenAPI docs: http://127.0.0.1:8010/api/docs
 """
 
 import logging
@@ -15,8 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger("applyxai")
 
 from backend.app.api import (
-    admin, agent, applications, auth, automation, billing, dashboard, health, institute, jobs, live_interviews,
-    mock_interviews, notifications, partner, plans, profile, referrals, resumes, site, support,
+    admin, admin_outreach, agent, applications, auth, automation, billing, dashboard, health, institute,
+    institute_outreach, internal_outreach, jobs, live_interviews, mock_interviews, notifications, partner, plans, profile,
+    profile_linkedin, questions, referrals, resumes, settings_automation, site, support,
 )
 from backend.app.core.config import settings
 from backend.app.core.csrf import CSRFMiddleware
@@ -26,7 +27,16 @@ from backend.app.core.errors import register_error_handlers
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     from backend.app.core.database import SessionLocal
+    from backend.app.core.migrate import upgrade_head
     from backend.app.services import platform_settings_service as ps
+
+    if settings.APP_ENV in ("development", "test"):
+        try:
+            upgrade_head()
+        except Exception:
+            logger.exception(
+                "Database migration failed. Run: alembic -c backend/alembic.ini upgrade head"
+            )
 
     try:
         with SessionLocal() as db:
@@ -69,6 +79,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(auth.router, prefix="/api")
     app.include_router(profile.router, prefix="/api")
+    app.include_router(profile_linkedin.router, prefix="/api")
+    app.include_router(questions.router, prefix="/api")
+    app.include_router(settings_automation.router, prefix="/api")
     app.include_router(resumes.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(applications.router, prefix="/api")
@@ -82,11 +95,15 @@ def create_app() -> FastAPI:
     app.include_router(agent.router, prefix="/api")
     app.include_router(billing.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
+    app.include_router(admin_outreach.router, prefix="/api")
+    app.include_router(internal_outreach.router, prefix="/api")
     app.include_router(institute.router, prefix="/api")
+    app.include_router(institute_outreach.router, prefix="/api")
     app.include_router(institute.invites, prefix="/api")
     app.include_router(partner.router, prefix="/api")
     app.include_router(referrals.router, prefix="/api")
     app.include_router(site.router, prefix="/api")
+    app.include_router(site.public_files)
     return app
 
 

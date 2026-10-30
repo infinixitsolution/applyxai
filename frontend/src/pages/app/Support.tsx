@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { LiveInterviewFlow } from "../../features/LiveInterviewFlow";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "../../components/ui";
 import { formatDateTime } from "../../lib/format";
 import { errorMessage } from "../../services/api";
@@ -79,12 +80,6 @@ export function SupportPage() {
       await queryClient.invalidateQueries({ queryKey: ["support", "thread"] });
     },
   });
-  const requestToken = useMutation({
-    mutationFn: support.requestLiveInterview,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["support", "thread"] });
-    },
-  });
 
   const messages = query.data?.messages ?? [];
   useEffect(() => {
@@ -101,17 +96,19 @@ export function SupportPage() {
     <>
       <PageHeader
         title="Support"
-        description="Chat with ApplyXAI, or buy one live interview. The token is separate from your plan."
-        actions={<Button onClick={() => requestToken.mutate()} loading={requestToken.isPending}>Request live interview</Button>}
+        description="Chat with ApplyXAI and run live interview coaching from one place when using ApplyXAI Desktop."
       />
-      {(send.error || requestToken.error) && <Alert kind="error">{errorMessage(send.error || requestToken.error)}</Alert>}
+      {send.error && <Alert kind="error">{errorMessage(send.error)}</Alert>}
+      <div className="mb-6">
+        <LiveInterviewFlow messages={messages} />
+      </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <Card>
           {query.isPending ? <Spinner /> : query.error ? <Alert kind="error">{errorMessage(query.error)}</Alert> : (
             <div ref={scroller} className="flex max-h-[32rem] min-h-[16rem] flex-col gap-3 overflow-y-auto">
               {messages.length ? messages.map((m) => <Bubble key={m.id} message={m} />) : (
                 <EmptyState title="No messages yet">
-                  Ask a question, or request a live interview token. The reply shows up in this chat.
+                  Ask a question or use Request above to get a live interview token.
                 </EmptyState>
               )}
             </div>
@@ -126,15 +123,17 @@ export function SupportPage() {
             <Button type="submit" loading={send.isPending} disabled={!draft.trim()}>Send</Button>
           </form>
         </Card>
-        <Card title="Live interview">
-          <ol className="space-y-3 text-sm text-slate-700">
-            <li><Badge tone="brand">1</Badge> Request a token in this chat.</li>
-            <li><Badge tone="brand">2</Badge> Pay the link we send. One payment is one interview.</li>
-            <li><Badge tone="brand">3</Badge> Copy the 8-digit token from the chat.</li>
-            <li><Badge tone="brand">4</Badge> In the desktop agent, open Live interview, paste the token, and start.</li>
-          </ol>
-          <p className="mt-4 text-sm text-slate-500">
-            Answers in the popup are written as you, from your profile. The report lands under <Link className="font-medium text-brand-700 underline" to="/app/live-interviews">Live interviews</Link>.
+        <Card title="Tips">
+          <p className="text-sm text-slate-600">
+            After payment, your token appears in the chat and in the live interview panel above. In ApplyXAI Desktop, click{" "}
+            <strong>Start interview</strong> and use the floating coach during the call.
+          </p>
+          <p className="mt-3 text-sm text-slate-500">
+            Reports are saved under{" "}
+            <Link to="/app/live-interviews" className="font-medium text-brand-700 underline">
+              Live interviews
+            </Link>
+            .
           </p>
         </Card>
       </div>

@@ -9,6 +9,10 @@ overall verdict line.
 '''
 
 import logging
+import os
+
+# Importing modules.open_chrome normally launches Chrome at import time; keep tests headless.
+os.environ.setdefault("APPLYXAI_SKIP_CHROME_BOOTSTRAP", "1")
 
 import pytest
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from automation import events as ev
 from automation.company_contacts import extract_published_contacts, merge_contacts
 from backend.app.models import Application, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus
-from backend.app.services import application_service, notification_service, preferences_service
+from backend.app.services import application_service, linkedin_profile_sync_service as lp_sync, notification_service, preferences_service
 
 _STATUS_FOR_OUTCOME = {
     ev.APPLIED: ApplicationStatus.APPLIED,
@@ -25,6 +25,8 @@ _STATUS_FOR_OUTCOME = {
     ev.SKIPPED: ApplicationStatus.SKIPPED,
 }
 _JOB_URL = "https://www.linkedin.com/jobs/view/{}"
+_NAUKRI_JOB_URL = "https://www.naukri.com/job-listings-{}"
+_SOURCE_LABELS = {"linkedin": "LinkedIn", "naukri": "Naukri"}
 
 
 @dataclass
@@ -53,20 +55,70 @@ def _published_contacts(details: dict) -> list:
     return merge_contacts(extract_published_contacts(description), named, supplied)
 
 
+def _platform(details: dict) -> str:
+    name = _text(details.get("platform"), 32).lower()
+    return name if name in _SOURCE_LABELS else "linkedin"
+
+
+def _fallback_job_url(platform: str, job_id: str) -> str:
+    if platform == "naukri":
+        return _NAUKRI_JOB_URL.format(job_id)
+    return _JOB_URL.format(job_id)
+
+
+def _source_label(platform: str) -> str:
+    return _SOURCE_LABELS.get(platform, "LinkedIn")
+
+
 def _job_label(details: dict) -> str:
     title, company = _text(details.get("title"), 200), _text(details.get("company"), 200)
     return f"{title} at {company}" if title and company else title or f"job {details.get('job_id')}"
 
 
+def _record_discovered(db: Session, user_id: uuid.UUID, event: dict, details: dict,
+                       run: AutomationJob | None, count_usage: bool) -> None:
+    """Persist a job the engine opened so admin Companies and user Jobs stay in sync."""
+    company = _text(details.get("company"), 255)
+    if not company:
+        return
+    job_id = _text(event["job_id"], 64)
+    platform = _platform(details)
+    job_url = _text(details.get("job_link") or details.get("application_link"), 1024)
+    if not job_url.startswith("https://"):
+        job_url = _fallback_job_url(platform, job_id)
+    job = application_service.upsert_job(
+        db, external_id=job_id, platform=platform,
+        title=_text(details.get("title"), 500) or f"{_source_label(platform)} job {job_id}",
+        company=company,
+        location=_text(details.get("work_location"), 255),
+        work_setting=_text(details.get("work_style"), 32),
+        job_url=job_url,
+        description=_text(details.get("description"), 100_000),
+        published_contacts=_published_contacts(details) or None,
+    )
+    application_service.record_application(
+        db, user_id, job, ApplicationStatus.DISCOVERED,
+        automation_job_id=run.id if run else None,
+        count_usage=count_usage,
+    )
+    try:
+        from backend.app.services import company_directory_service
+
+        company_directory_service.schedule_enrichment(company)
+    except Exception:
+        pass
+
+
 def _record_outcome(db: Session, user_id: uuid.UUID, event: dict, details: dict,
                     run: AutomationJob | None, count_usage: bool) -> None:
     job_id = _text(event["job_id"], 64)
-    job_url = _text(details.get("job_link"), 1024)
+    platform = _platform(details)
+    job_url = _text(details.get("job_link") or details.get("application_link"), 1024)
     if not job_url.startswith("https://"):
-        job_url = _JOB_URL.format(job_id)
+        job_url = _fallback_job_url(platform, job_id)
     job = application_service.upsert_job(
-        db, external_id=job_id,
-        title=_text(details.get("title"), 500) or f"LinkedIn job {job_id}",
+        db, external_id=job_id, platform=platform,
+        title=_text(details.get("title"), 500) or f"{_source_label(platform)} job {job_id}",
         company=_text(details.get("company"), 255),
         location=_text(details.get("work_location"), 255),
         work_setting=_text(details.get("work_style"), 32),
@@ -138,7 +190,18 @@ def _log_message(event: dict, details: dict, stop_reason: str = "") -> tuple[str
         terms = ", ".join(_text(t, 100) for t in (event.get("search_terms") or [])[:10])
         return "info", f"Run started. Searching for: {terms}" if terms else "Run started."
     if kind == ev.LOGIN_REQUIRED:
-        return "warning", "Sign in to LinkedIn in the browser window ApplyXAI opened. The run continues once you're signed in."
+        source = _source_label(_platform(event))
+        return "warning", f"Sign in to {source} in the browser window ApplyXAI opened. The run continues once you're signed in."
+    if kind == ev.SOURCE_STARTED:
+        return "info", f"Applying on {_source_label(_platform({'platform': event.get('source')}))}."
+    if kind == ev.SOURCE_SWITCHED:
+        source = _source_label(_platform({"platform": event.get("source")}))
+        count = int(event.get("submitted_on_previous") or 0)
+        return "info", f"Switching to {source} after {count} application{'s' if count != 1 else ''}."
+    if kind == ev.SOURCE_BLOCKED:
+        source = _source_label(_platform({"platform": event.get("source")}))
+        reason = _text(event.get("reason"), 300) or "it cannot continue"
+        return "warning", f"{source} paused: {reason}"
     if kind == ev.JOB_STARTED:
         return "info", f"Looking at {_job_label(details)}."
     if kind == ev.APPLIED:
@@ -164,7 +227,47 @@ def _log_message(event: dict, details: dict, stop_reason: str = "") -> tuple[str
         if event.get("needs_answer"):
             return "warning", f"Need an answer: {label}"
         return "info", f"Form question: {label}"
+    if kind == ev.PROFILE_SYNC_STARTED:
+        sections = event.get("sections") or []
+        return "info", f"LinkedIn profile sync started ({len(sections)} section(s))."
+    if kind == ev.PROFILE_SECTION_STARTED:
+        return "info", f"Syncing {_text(event.get('section'), 40)}…"
+    if kind == ev.PROFILE_SECTION_UPDATED:
+        detail = _text(event.get("detail"), 200) or "updated"
+        return "info", f"LinkedIn {_text(event.get('section'), 40)}: {detail}"
+    if kind == ev.PROFILE_SECTION_SKIPPED:
+        return "info", f"Skipped {_text(event.get('section'), 40)}: {_text(event.get('reason'), 120)}"
+    if kind == ev.PROFILE_MANUAL_REQUIRED:
+        return "warning", f"Manual step: {_text(event.get('item'), 120)}"
+    if kind == ev.PROFILE_SYNC_FINISHED:
+        if event.get("error"):
+            return "error", f"Profile sync failed: {_text(event.get('error'), 500)}"
+        updated = int(event.get("updated") or 0)
+        skipped = int(event.get("skipped") or 0)
+        return "info", f"Profile sync finished. {updated} updated, {skipped} skipped."
     return "info", kind
+
+
+def _finish_profile_sync(db: Session, run: AutomationJob, event: dict, at: datetime) -> None:
+    run.finished_at = at
+    run.current_job = ""
+    if event.get("error"):
+        run.status = AutomationStatus.FAILED
+        run.error_message = _text(event.get("error"), 2000)
+    elif event.get("stopped"):
+        run.status = AutomationStatus.CANCELLED
+    else:
+        run.status = AutomationStatus.COMPLETED
+    updated = int(event.get("updated") or 0)
+    skipped = int(event.get("skipped") or 0)
+    failed = int(event.get("failed") or 0)
+    body = f"{updated} section(s) updated, {skipped} skipped, {failed} failed."
+    title = {AutomationStatus.FAILED: "LinkedIn profile sync failed",
+             AutomationStatus.CANCELLED: "LinkedIn profile sync stopped"}.get(run.status, "LinkedIn profile sync finished")
+    notification_service.notify_event(
+        db, run.user_id, "run_finished", link="/app/profile?linkedin_sync=1",
+        variables={"title": title, "message": body},
+    )
 
 
 def _finish(db: Session, run: AutomationJob, event: dict, at: datetime) -> None:
@@ -224,12 +327,21 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
             key = str(event["job_id"])
             details = {**result.context.get(key, {}), **{k: v for k, v in event.items() if v not in (None, "")}}
             if kind == ev.JOB_STARTED:
-                result.context[key] = {k: details.get(k) for k in ("title", "company", "work_location", "work_style")}
+                result.context[key] = {
+                    k: details.get(k) for k in (
+                        "title", "company", "work_location", "work_style", "job_link", "platform",
+                    )
+                }
+                _record_discovered(db, user_id, event, details, run, count_usage)
 
         if kind in _STATUS_FOR_OUTCOME:
+            job_key = str(event["job_id"])
+            seen_on_start = job_key in result.context
             _record_outcome(db, user_id, event, details, run, count_usage)
             setattr(result, kind, getattr(result, kind) + 1)
-            result.context.pop(str(event["job_id"]), None)
+            result.context.pop(job_key, None)
+            if run is not None and not seen_on_start:
+                run.total_jobs += 1
         elif kind == ev.FORM_QUESTION:
             job_id = str(event.get("job_id") or "")
             job_details = result.context.get(job_id, {}) if job_id else {}
@@ -242,20 +354,39 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
             run.started_at = run.started_at or at
         elif kind == ev.JOB_STARTED:
             run.current_job = _job_label(details)[:500]
+            run.total_jobs += 1
+        elif kind in (ev.SOURCE_STARTED, ev.SOURCE_SWITCHED):
+            result.context["active_source"] = event.get("source")
+            result.context["source_submitted"] = 0
+        elif kind == ev.SOURCE_BLOCKED:
+            result.context["blocked_source"] = event.get("source")
         elif kind == ev.PAUSED:
             run.status = AutomationStatus.PAUSED
         elif kind == ev.RESUMED:
             run.status = AutomationStatus.RUNNING
         elif kind in _STATUS_FOR_OUTCOME:
-            run.total_jobs += 1
             if kind == ev.APPLIED:
                 run.successful_count += 1
+                result.context["source_submitted"] = int(result.context.get("source_submitted") or 0) + 1
             elif kind == ev.FAILED:
                 run.failed_count += 1
             elif kind == ev.SKIPPED:
                 run.skipped_count += 1
         elif kind == ev.RUN_FINISHED:
             _finish(db, run, event, at)
+            result.finished = True
+        elif kind == ev.PROFILE_SYNC_STARTED:
+            run.status = AutomationStatus.RUNNING
+            run.started_at = run.started_at or at
+        elif kind == ev.PROFILE_SECTION_UPDATED:
+            run.successful_count += 1
+        elif kind == ev.PROFILE_SECTION_SKIPPED:
+            run.skipped_count += 1
+        elif kind == ev.PROFILE_SYNC_FINISHED:
+            if (run.run_kind or lp_sync.RUN_KIND_JOB_APPLY) == lp_sync.RUN_KIND_PROFILE_SYNC:
+                _finish_profile_sync(db, run, event, at)
+            else:
+                _finish(db, run, event, at)
             result.finished = True
         elif kind == ev.LIMIT_REACHED:
             if run.stop_reason:
@@ -268,5 +399,7 @@ def ingest_events(db: Session, user_id: uuid.UUID, events: list[dict], *,
             seq += 1
             db.add(AutomationLog(automation_job_id=run.id, user_id=user_id, seq=seq, ts=at,
                                  level=level, event=kind, message=message))
+    if run is not None:
+        run.ingest_context = result.context
     db.flush()
     return result

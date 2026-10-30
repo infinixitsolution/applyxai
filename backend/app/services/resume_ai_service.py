@@ -280,6 +280,41 @@ def _merge_intake_into_user(db: Session, user: User, intake: dict) -> None:
                 setattr(profile, key, incoming)
         elif _blank(current) and not _blank(incoming):
             setattr(profile, key, incoming)
+    if _blank(profile.preferred_locations) and intake.get("current_city"):
+        profile.preferred_locations = [intake["current_city"]]
+    _merge_intake_into_master(profile, intake)
+
+
+def _merge_intake_into_master(profile: UserProfile, intake: dict) -> None:
+    """Copy resume facts into empty Master Profile sections (city, LinkedIn, skill rows)."""
+    from backend.app.services.master_profile_service import ensure_master_data
+
+    master = ensure_master_data(profile)
+    personal = dict(master.get("personal") or {})
+    if _blank(personal.get("city")) and intake.get("current_city"):
+        personal["city"] = intake["current_city"]
+    if _blank(personal.get("phone")) and intake.get("phone"):
+        personal["phone"] = intake["phone"]
+    master["personal"] = personal
+    career = dict(master.get("career") or {})
+    if _blank(career.get("linkedin_url")) and intake.get("linkedIn"):
+        career["linkedin_url"] = intake["linkedIn"]
+    if _blank(career.get("portfolio_url")) and intake.get("website"):
+        career["portfolio_url"] = intake["website"]
+    master["career"] = career
+    if _blank(master.get("skills")) and intake.get("skills"):
+        master["skills"] = [
+            {
+                "id": str(uuid.uuid4()),
+                "name": skill,
+                "category": "",
+                "years": "",
+                "proficiency": "",
+                "description": "",
+            }
+            for skill in (intake.get("skills") or [])[:40]
+        ]
+    profile.master_data = master
 
 
 def _intake_application_answers(intake: dict) -> dict:
@@ -368,6 +403,11 @@ def intake_from_resume(db: Session, user: User, resume_id: uuid.UUID, *, apply: 
         _merge_intake_into_user(db, user, intake)
         _apply_intake_to_preferences(db, user, intake)
         _merge_search_from_intake(db, user.id, intake)
+        from backend.app.services import master_profile_service
+
+        prefs_row = db.scalar(select(ApplicationPreferences).where(ApplicationPreferences.user_id == user.id))
+        if user.profile is not None:
+            master_profile_service._sync_structured_to_engine(user.profile, user, prefs_row)
         if skills:
             resume.master_skills = skills[:80]
             resume.subskills_by_master = resume.subskills_by_master or {}
@@ -387,7 +427,9 @@ def intake_from_resume(db: Session, user: User, resume_id: uuid.UUID, *, apply: 
         db.refresh(resume)
         master_count = len(resume.master_skills or [])
 
-    profile_out = preferences_service.get_profile(db, user)
+    from backend.app.services import master_profile_service
+
+    profile_out = master_profile_service.master_profile_payload(db, user)
     prefs = preferences_service.get_application(db, user)
     cover_saved = (prefs.get("answers") or {}).get("cover_letter") or None
     return {

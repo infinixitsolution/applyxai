@@ -5,7 +5,7 @@ import hmac
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -86,6 +86,67 @@ def test_admin_price_change_is_saved_and_used_for_the_next_payment_link(admin, a
     assert "799" in link_msg["body"] and link_msg["meta"]["amount_cents"] == 79900
 
 
+def test_new_token_supersedes_other_active_sessions(alice, db):
+    _enable(db)
+    from backend.app.models import LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, SupportThread
+    from backend.app.services import live_interview_service
+
+    alice.post("/api/support/live-interview-request", headers=csrf_headers(alice))
+    thread = db.scalar(select(SupportThread).where(SupportThread.user_id == alice.user.id))
+    assert thread is not None
+    order1 = LiveInterviewOrder(user_id=alice.user.id, thread_id=thread.id, status="paid", amount_cents=49900)
+    order2 = LiveInterviewOrder(user_id=alice.user.id, thread_id=thread.id, status="paid", amount_cents=49900)
+    db.add_all([order1, order2])
+    db.flush()
+    db.add(LiveInterviewToken(user_id=alice.user.id, order_id=order1.id, code="11111111", status="unused"))
+    db.add(LiveInterviewToken(user_id=alice.user.id, order_id=order2.id, code="22222222", status="unused"))
+    db.commit()
+
+    first = live_interview_service.start_session(db, alice.user, code="11111111", application_id=None)
+    db.commit()
+    second = live_interview_service.start_session(db, alice.user, code="22222222", application_id=None)
+    db.commit()
+    assert first["id"] != second["id"]
+    old = db.get(LiveInterviewSession, uuid.UUID(first["id"]))
+    assert old is not None and old.status == "completed"
+    assert second["status"] == "active"
+
+
+def test_active_session_older_than_one_hour_closed_on_list(alice, db):
+    _enable(db)
+    from backend.app.models import LiveInterviewOrder, LiveInterviewSession, LiveInterviewToken, SupportThread
+
+    alice.post("/api/support/live-interview-request", headers=csrf_headers(alice))
+    thread = db.scalar(select(SupportThread).where(SupportThread.user_id == alice.user.id))
+    order = LiveInterviewOrder(user_id=alice.user.id, thread_id=thread.id, status="paid", amount_cents=49900)
+    db.add(order)
+    db.flush()
+    token = LiveInterviewToken(user_id=alice.user.id, order_id=order.id, code="33333333", status="reserved")
+    db.add(token)
+    db.flush()
+    stale_start = datetime.now(timezone.utc) - timedelta(hours=2)
+    session = LiveInterviewSession(
+        user_id=alice.user.id,
+        token_id=token.id,
+        status="active",
+        transcript=[],
+        started_at=stale_start,
+    )
+    db.add(session)
+    db.flush()
+    token.session_id = session.id
+    db.commit()
+
+    resp = alice.get("/api/live-interviews")
+    assert resp.status_code == 200, resp.text
+    row = next(item for item in resp.json()["data"]["sessions"] if item["id"] == str(session.id))
+    assert row["status"] == "completed"
+    db.expire_all()
+    stored = db.get(LiveInterviewSession, session.id)
+    assert stored is not None and stored.status == "completed"
+    assert stored.feedback.get("timed_out") is True
+
+
 def test_token_starts_once_and_resume_until_end(alice, db):
     _enable(db)
     resp = alice.post("/api/support/live-interview-request", headers=csrf_headers(alice))
@@ -98,11 +159,38 @@ def test_token_starts_once_and_resume_until_end(alice, db):
     ended = live_interview_service.end_session(db, alice.user, uuid.UUID(first["id"]))
     db.commit()
     assert ended["status"] == "completed"
+    restarted = live_interview_service.start_session(db, alice.user, code=code, application_id=None)
+    db.commit()
+    assert restarted["id"] == first["id"]
+    session = db.get(live_interview_service.LiveInterviewSession, uuid.UUID(restarted["id"]))
+    session.transcript = [{
+        "role": "candidate",
+        "text": "I led the migration of our billing service to Kubernetes last year.",
+        "at": datetime.now(timezone.utc).isoformat(),
+    }]
+    db.commit()
+    live_interview_service.end_session(db, alice.user, uuid.UUID(restarted["id"]))
+    db.commit()
     try:
         live_interview_service.start_session(db, alice.user, code=code, application_id=None)
         raise AssertionError("used token should not start")
     except Exception as exc:
         assert getattr(exc, "code", "") == "TOKEN_USED"
+
+
+def test_empty_auto_closed_session_does_not_burn_token(alice, db):
+    _enable(db)
+    code = _token(alice)
+    first = live_interview_service.start_session(db, alice.user, code=code, application_id=None)
+    db.commit()
+    session = db.get(live_interview_service.LiveInterviewSession, uuid.UUID(first["id"]))
+    live_interview_service._auto_complete_active_session(
+        db, session, summary="Ended automatically when the desktop app quit.",
+    )
+    db.commit()
+    again = live_interview_service.start_session(db, alice.user, code=code, application_id=None)
+    assert again["id"] == first["id"]
+    assert again["status"] == "active"
 
 
 def test_support_chat_round_trip(alice, admin, db):

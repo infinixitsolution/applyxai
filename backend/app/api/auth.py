@@ -31,11 +31,12 @@ def register(body: RegisterIn, request: Request, background: BackgroundTasks, db
              limiter: RateLimiter = Depends(get_rate_limiter), mailer: EmailSender = Depends(get_mailer)):
     limiter.hit("10/hour", "register", client_ip(request))
     referral = body.referral_code or request.cookies.get("ax_partner_ref", "")
+    candidate_ref = request.cookies.get("ax_cand_ref", "")
     user, token = auth_service.register(
         db, body.email, body.password, body.first_name, body.last_name,
         account_type=body.account_type, institute_name=body.institute_name, contact_name=body.contact_name,
         phone=body.phone, gstin=body.gstin, pan_number=body.pan_number, organization=body.organization,
-        referral_code=referral, agreed=body.agreed,
+        referral_code=referral, candidate_referral_code=candidate_ref, agreed=body.agreed,
     )
     if user is None:
         background.add_task(mailer.send, account_exists_email(auth_service.normalize_email(body.email), db))

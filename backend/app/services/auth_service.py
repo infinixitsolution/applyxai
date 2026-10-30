@@ -114,6 +114,7 @@ def register(
     pan_number: str = "",
     organization: str = "",
     referral_code: str = "",
+    candidate_referral_code: str = "",
     agreed: bool = False,
 ) -> tuple[User | None, str | None]:
     """
@@ -155,6 +156,11 @@ def register(
         )
     elif phone:
         db.add(UserProfile(user_id=user.id, phone=phone))
+    if account_type == "candidate":
+        from backend.app.services import candidate_referral_service
+        candidate_referral_service.ensure_user_code(db, user)
+        if candidate_referral_code:
+            candidate_referral_service.attribute_on_register(db, referred=user, code=candidate_referral_code)
     token = None
     if auth.require_verification:
         token = _issue_token(db, user, TokenPurpose.VERIFY_EMAIL, timedelta(hours=auth.verification_hours))

@@ -32,7 +32,8 @@ import {
 import { ApplicationDetailModal } from "./ApplicationDetailModal";
 import { formatDate, formatRelative, isUnlimitedUsageCap, STATUS_LABELS, STATUS_TONES } from "../lib/format";
 import { errorMessage } from "../services/api";
-import { automation, dashboard } from "../services/endpoints";
+import { AUTOMATION_LIVE_POLL_MS, useAutomationOverview } from "../hooks/useAutomationOverview";
+import { dashboard } from "../services/endpoints";
 import type { ApplicationStatus, AutomationRun, DashboardStats, MockInterviewSessionStatus } from "../types";
 
 const MI_STATUS_LABEL: Record<MockInterviewSessionStatus, string> = {
@@ -82,11 +83,12 @@ function RunSummary({ run, label }: { run: AutomationRun; label: string }) {
         <RunStatusBadge status={run.status} />
         {run.dry_run && <Badge tone="amber">Practice</Badge>}
       </div>
-      {run.current_job && run.status === "running" && (
-        <p className="text-slate-600 line-clamp-2">Working on: {run.current_job}</p>
+      {run.current_job && (run.status === "running" || run.status === "queued") && (
+        <p className="text-slate-600 line-clamp-2">{run.current_job}</p>
       )}
-      <p className="text-slate-600">
+      <p className="text-slate-600 tabular-nums">
         {run.successful_count} applied · {run.failed_count} failed · {run.skipped_count} skipped
+        {(run.total_jobs ?? 0) > 0 && ` · ${run.total_jobs} looked at`}
       </p>
       {run.started_at && <p className="text-xs text-slate-400">Started {formatRelative(run.started_at)}</p>}
     </div>
@@ -100,14 +102,10 @@ export function HomeDashboard() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: dashboard.stats,
-    refetchInterval: 30_000,
+    refetchInterval: (q) => (q.state.data?.automation?.active ? AUTOMATION_LIVE_POLL_MS : 5000),
   });
 
-  const automationQuery = useQuery({
-    queryKey: ["automation"],
-    queryFn: automation.overview,
-    staleTime: 20_000,
-  });
+  const automationQuery = useAutomationOverview();
 
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
@@ -144,7 +142,7 @@ export function HomeDashboard() {
         stats={data}
         agentOnline={auto?.agent_online}
         readinessReady={auto?.readiness.ready}
-        activeRun={data.automation.active}
+        activeRun={auto?.active ?? data.automation.active}
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -374,8 +372,8 @@ export function HomeDashboard() {
             {auto?.agent_online && (
               <p className="mb-3 text-sm text-emerald-700">Desktop agent is online and ready.</p>
             )}
-            {data.automation.active ? (
-              <RunSummary run={data.automation.active} label="Current run" />
+            {auto?.active ?? data.automation.active ? (
+              <RunSummary run={(auto?.active ?? data.automation.active)!} label="Current run" />
             ) : data.automation.last ? (
               <RunSummary run={data.automation.last} label="Last run" />
             ) : (

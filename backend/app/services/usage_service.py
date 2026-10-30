@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.plans import FREE_PLAN, MOCK_INTERVIEWS_UNLIMITED, PLAN_LIMITS, RESUMES_UNLIMITED
-from backend.app.models import MockInterviewSession, Plan, Subscription, SubscriptionStatus, UsageCounter
+from backend.app.models import MockInterviewSession, Plan, Subscription, SubscriptionStatus, UsageCounter, User
 
 _ENTITLED = (SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
 _COUNTERS = ("applications", "jobs_discovered", "runtime_seconds", "resumes_created")
@@ -28,6 +28,27 @@ def period_bounds(period: str) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _mock_interviews_unlimited_emails(db: Session | None) -> frozenset[str]:
+    from backend.app.core.config import get_settings
+
+    emails: set[str] = set()
+    raw = get_settings().MOCK_INTERVIEWS_UNLIMITED_EMAILS or ""
+    emails.update(part.strip().lower() for part in raw.split(",") if part.strip())
+    if db is not None:
+        from backend.app.services.platform_settings_service import list_mock_interviews_unlimited_emails
+
+        emails.update(list_mock_interviews_unlimited_emails(db))
+    return frozenset(emails)
+
+
+def user_has_unlimited_mock_interviews(db: Session, user_id: uuid.UUID) -> bool:
+    allow = _mock_interviews_unlimited_emails(db)
+    if not allow:
+        return False
+    email = db.scalar(select(User.email).where(User.id == user_id))
+    return (email or "").strip().lower() in allow
+
+
 def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
     """Limits of the user's entitled subscription, or the free plan.
 
@@ -43,7 +64,10 @@ def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
             if sub is not None and sub.status in _ENTITLED and (
                 sub.current_period_end is None or _aware(sub.current_period_end) > now
             ):
-                return _limits_of(sub.plan)
+                limits = _limits_of(sub.plan)
+                if user_has_unlimited_mock_interviews(db, user_id):
+                    limits = {**limits, "mock_interviews_per_month": MOCK_INTERVIEWS_UNLIMITED}
+                return limits
     subs = db.scalars(
         select(Subscription).where(
             Subscription.user_id == user_id,
@@ -54,9 +78,15 @@ def plan_limits(db: Session, user_id: uuid.UUID) -> dict:
     ).all()
     for sub in subs:
         if sub.current_period_end is None or _aware(sub.current_period_end) > now:
-            return _limits_of(sub.plan)
+            limits = _limits_of(sub.plan)
+            if user_has_unlimited_mock_interviews(db, user_id):
+                limits = {**limits, "mock_interviews_per_month": MOCK_INTERVIEWS_UNLIMITED}
+            return limits
     free = db.scalar(select(Plan).where(Plan.code == FREE_PLAN))
-    return _limits_of(free) if free is not None else {"plan": FREE_PLAN, **PLAN_LIMITS[FREE_PLAN]}
+    limits = _limits_of(free) if free is not None else {"plan": FREE_PLAN, **PLAN_LIMITS[FREE_PLAN]}
+    if user_has_unlimited_mock_interviews(db, user_id):
+        limits = {**limits, "mock_interviews_per_month": MOCK_INTERVIEWS_UNLIMITED}
+    return limits
 
 
 def _limits_of(plan: Plan) -> dict:

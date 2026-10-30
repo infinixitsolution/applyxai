@@ -173,7 +173,10 @@ def resolve_applied_resume_id(
         meta = resume.ai_metadata or {}
         if meta.get("generated_by") == "ai" and str(meta.get("job_id") or "") == key:
             return resume.id
-    return None
+    default = db.scalar(
+        select(Resume).where(Resume.user_id == user_id, Resume.is_default.is_(True))
+    )
+    return default.id if default is not None else None
 
 
 def record_application(db: Session, user_id: uuid.UUID, job: Job, status: ApplicationStatus, *,

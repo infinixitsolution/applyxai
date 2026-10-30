@@ -1,9 +1,23 @@
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.app.services.automation_service import MAX_BATCH_EVENTS
+
+JobSourceName = Literal["linkedin", "naukri"]
+
+
+ProfileSyncSection = Literal[
+    "photo", "headline", "about", "experience", "education", "skills", "location", "industry",
+]
+
+
+class StartProfileSyncIn(BaseModel):
+    dry_run: bool = False
+    include_photo: bool = True
+    sections: list[ProfileSyncSection] | None = None
+    overwrite_sections: list[ProfileSyncSection] = Field(default_factory=list)
 
 
 class StartRunIn(BaseModel):
@@ -13,6 +27,31 @@ class StartRunIn(BaseModel):
         default="default",
         description="default = upload default resume; tailor_if_gate = AI-tailor per job when JD matches.",
     )
+    sources: list[JobSourceName] = Field(
+        default_factory=lambda: ["linkedin"],
+        description="Job sites for this run. One site stays there. Both sites alternate.",
+    )
+    switch_after: int | None = Field(
+        default=None,
+        ge=1,
+        description="Successful applications on one site before switching. Required when both sites are selected.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_sources(self):
+        ordered: list[str] = []
+        for name in self.sources:
+            if name not in ordered:
+                ordered.append(name)
+        if not ordered:
+            raise ValueError("Choose at least one job source.")
+        self.sources = ordered
+        if len(ordered) > 1:
+            if self.switch_after is None:
+                raise ValueError("Set how many jobs to submit before switching sources.")
+        else:
+            self.switch_after = None
+        return self
 
 
 class PairIn(BaseModel):

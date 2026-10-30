@@ -38,6 +38,7 @@ import { ApplicationDetailModal, resumeKindLabel } from "../../features/Applicat
 import { formatDate, isUnlimitedUsageCap, safeExternalUrl, STATUS_LABELS, STATUS_TONES } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
+import { useLiveRunPoll } from "../../hooks/useAutomationOverview";
 import { applications, dashboard, resumes as resumesApi, type ApplicationFilters } from "../../services/endpoints";
 import { APPLICATION_STATUSES, type Application, type ApplicationStatus } from "../../types";
 
@@ -80,16 +81,20 @@ export function ApplicationsPage() {
     page_size: PAGE_SIZE,
   };
 
+  const livePoll = useLiveRunPoll();
   const statsQuery = useQuery({
     queryKey: ["dashboard"],
     queryFn: dashboard.stats,
-    staleTime: 60_000,
+    staleTime: livePoll ? 0 : 60_000,
+    refetchInterval: livePoll,
   });
 
   const listQuery = useQuery({
     queryKey: ["applications", "list", filters],
     queryFn: () => applications.list(filters),
     placeholderData: keepPreviousData,
+    staleTime: livePoll ? 0 : undefined,
+    refetchInterval: livePoll,
   });
 
   const resetPage = <T,>(setter: (v: T) => void) => (v: T) => {
@@ -432,7 +437,8 @@ function ApplicationRow({
   onResume: () => void;
 }) {
   const jobUrl = safeExternalUrl(app.job.job_url);
-  const meta = [app.job.location, app.job.work_setting, app.job.employment_type].filter(Boolean).join(" · ");
+  const sourceName = app.job.platform === "naukri" ? "Naukri" : app.job.platform === "linkedin" ? "LinkedIn" : app.job.platform;
+  const meta = [sourceName, app.job.location, app.job.work_setting, app.job.employment_type].filter(Boolean).join(" · ");
 
   return (
     <li className="group py-4 first:pt-0 last:pb-0">

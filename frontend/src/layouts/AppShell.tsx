@@ -1,16 +1,22 @@
 import { useMutation } from "@tanstack/react-query";
 import {
-  Bot, Briefcase, Building, Building2, CreditCard, FileText, Handshake, Headphones, LayoutDashboard, Link2, ListChecks, LogOut, MessageCircle, Mic,
-  Megaphone, Menu, Package, Receipt, ServerCog, Settings, Shield, SlidersHorizontal, UserRound, Users, Wallet, X,
+  Bot, Briefcase, Building, Building2, CreditCard, FileText, Handshake, Headphones, KeyRound, LayoutDashboard, Link2, ListChecks, LogOut, MessageCircle, MessageSquare, Mic,
+  Megaphone, Menu, Package, QrCode, Receipt, Search, ServerCog, Settings, Settings2, Shield, SlidersHorizontal,
+  UserRound, Users, Wallet, X,
+  type LucideIcon,
 } from "lucide-react";
+import { AdminOutreachAssistant } from "../components/AdminOutreachAssistant";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useSession, useSetSession } from "../auth/session";
 import { Logo } from "../components/Logo";
 import { AgentDownloadButton } from "../components/AgentDownloadButton";
+import { DesktopAutomationBootstrap } from "../components/DesktopAutomationBootstrap";
 import { CandidateWelcomeModal } from "../features/CandidateWelcomeModal";
 import { NotificationBell } from "../components/NotificationBell";
 import { cx, UserAvatar } from "../components/ui";
+import { LiveInterviewCoachHost, LiveInterviewCoachProvider } from "../features/LiveInterviewCoach";
+import { isDesktopAutomationHost } from "../lib/desktop";
 import { auth } from "../services/endpoints";
 
 const APP_NAV = [
@@ -22,9 +28,11 @@ const APP_NAV = [
   { to: "/app/support", label: "Support", icon: MessageCircle },
   { to: "/app/automation", label: "Automation", icon: Bot },
   { to: "/app/resumes", label: "Resumes", icon: FileText },
-  { to: "/app/preferences", label: "Preferences", icon: SlidersHorizontal },
-  { to: "/app/profile", label: "Profile", icon: UserRound },
+  { to: "/app/profile", label: "Master Profile", icon: UserRound },
+  { to: "/app/questions", label: "Custom Questions", icon: SlidersHorizontal },
+  { to: "/app/settings/automation", label: "Automation Settings", icon: Settings2 },
   { to: "/app/billing", label: "Billing", icon: CreditCard },
+  { to: "/app/payment-history", label: "Payment history", icon: Receipt },
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
 
@@ -32,8 +40,14 @@ const ADMIN_NAV = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/institutes", label: "Institutes", icon: Building2 },
+  { to: "/admin/outreach/scrape", label: "Outreach scrape", icon: Search },
+  { to: "/admin/outreach/leads", label: "Outreach leads", icon: Users },
+  { to: "/admin/outreach/chat", label: "WhatsApp chat", icon: MessageSquare },
+  { to: "/admin/outreach/templates", label: "Outreach templates", icon: FileText },
+  { to: "/admin/outreach/whatsapp", label: "Outreach WhatsApp", icon: QrCode },
   { to: "/admin/partners", label: "Partners", icon: Handshake },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
+  { to: "/admin/payments", label: "Payment history", icon: Wallet },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
   { to: "/admin/companies", label: "Companies", icon: Building },
@@ -43,14 +57,14 @@ const ADMIN_NAV = [
 ];
 
 const INSTITUTE_NAV = [
-  { to: "/institute", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/institute/students", label: "Students", icon: Users },
-  { to: "/institute/invitations", label: "Invitations", icon: FileText },
-  { to: "/institute/seats", label: "Seats", icon: Package },
-  { to: "/institute/subscription", label: "Subscription", icon: CreditCard },
-  { to: "/institute/reports", label: "Reports", icon: ListChecks },
-  { to: "/institute/profile", label: "Profile", icon: UserRound },
-  { to: "/institute/settings", label: "Settings", icon: Settings },
+  { to: "/institute", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Campus" },
+  { to: "/institute/students", label: "Students", icon: Users, group: "Campus" },
+  { to: "/institute/invitations", label: "Invitations", icon: FileText, group: "Campus" },
+  { to: "/institute/seats", label: "Seats", icon: Package, group: "Campus" },
+  { to: "/institute/subscription", label: "Subscription", icon: CreditCard, group: "Campus" },
+  { to: "/institute/reports", label: "Reports", icon: ListChecks, group: "Campus" },
+  { to: "/institute/profile", label: "Profile", icon: UserRound, group: "Account" },
+  { to: "/institute/settings", label: "Settings", icon: Settings, group: "Account" },
 ];
 
 const PARTNER_NAV = [
@@ -70,7 +84,15 @@ const PARTNER_NAV = [
 
 type Variant = "app" | "admin" | "institute" | "partner";
 
-function navFor(variant: Variant) {
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  group?: string;
+};
+
+function navFor(variant: Variant): NavItem[] {
   if (variant === "admin") return ADMIN_NAV;
   if (variant === "institute") return INSTITUTE_NAV;
   if (variant === "partner") return PARTNER_NAV;
@@ -78,23 +100,53 @@ function navFor(variant: Variant) {
 }
 
 function SidebarNav({ variant, onNavigate }: { variant: Variant; onNavigate?: () => void }) {
+  const { data: user } = useSession();
   const candidate = variant === "app";
   const adminNav = variant === "admin";
+  const instituteNav = variant === "institute";
+  let items = navFor(variant).filter((item) => !(candidate && user?.institute_managed && item.to === "/app/billing"));
+  if (candidate && isDesktopAutomationHost()) {
+    const automationIdx = items.findIndex((item) => item.to === "/app/automation");
+    if (automationIdx >= 0 && !items.some((item) => item.to === "/app/job-logins")) {
+      items = [
+        ...items.slice(0, automationIdx + 1),
+        { to: "/app/job-logins", label: "Job logins", icon: KeyRound },
+        ...items.slice(automationIdx + 1),
+      ];
+    }
+  }
+  let lastGroup = "";
   return (
     <nav className="flex flex-1 flex-col gap-0.5 px-3 py-4" aria-label="Main">
-      {navFor(variant).map(({ to, label, icon: Icon, end }) => (
-        <NavLink key={to} to={to} end={end} onClick={onNavigate}
-                 className={({ isActive }) => cx(
-                   "relative flex items-center gap-3 rounded-lg py-2.5 pl-3 pr-3 text-sm font-medium transition-colors",
-                   isActive && candidate && "bg-brand-50 pl-4 text-brand-700 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-brand-600",
-                   isActive && adminNav && "bg-slate-100 pl-4 text-slate-900 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-slate-900",
-                   isActive && !candidate && !adminNav && "bg-brand-50 text-brand-700",
-                   !isActive && "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                 )}>
-          <Icon className="h-5 w-5 shrink-0" aria-hidden />
-          {label}
-        </NavLink>
-      ))}
+      {items.map(({ to, label, icon: Icon, end, group }) => {
+        const showGroup = Boolean(group && group !== lastGroup);
+        const firstGroup = showGroup && !lastGroup;
+        if (group) lastGroup = group;
+        return (
+          <div key={to}>
+            {showGroup ? (
+              <p className={cx(
+                "mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400",
+                firstGroup ? "mt-0" : "mt-3",
+              )}>
+                {group}
+              </p>
+            ) : null}
+            <NavLink to={to} end={end} onClick={onNavigate}
+                     className={({ isActive }) => cx(
+                       "relative flex items-center gap-3 rounded-lg py-2.5 pl-3 pr-3 text-sm font-medium transition-colors",
+                       isActive && candidate && "bg-brand-50 pl-4 text-brand-700 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-brand-600",
+                       isActive && adminNav && "bg-slate-100 pl-4 text-slate-900 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-slate-900",
+                       isActive && instituteNav && "bg-brand-50 pl-4 text-brand-700 before:absolute before:inset-y-1.5 before:left-0 before:w-1 before:rounded-full before:bg-brand-600",
+                       isActive && !candidate && !adminNav && !instituteNav && "bg-brand-50 text-brand-700",
+                       !isActive && "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                     )}>
+              <Icon className="h-5 w-5 shrink-0" aria-hidden />
+              {label}
+            </NavLink>
+          </div>
+        );
+      })}
     </nav>
   );
 }
@@ -105,6 +157,17 @@ function CandidateSidebarFooter() {
       <p className="text-sm font-semibold text-slate-900">Your PC, your login</p>
       <p className="mt-1 text-xs leading-relaxed text-slate-600">
         Automation runs in Chrome on your computer. ApplyXAI never receives your LinkedIn password.
+      </p>
+    </div>
+  );
+}
+
+function InstituteSidebarFooter() {
+  return (
+    <div className="mx-3 mb-4 rounded-xl bg-gradient-to-br from-brand-50 to-white p-4 ring-1 ring-brand-100">
+      <p className="text-sm font-semibold text-slate-900">Institute pays</p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-600">
+        Students keep campus plan limits until you release them. Personal billing stays locked while they are assigned.
       </p>
     </div>
   );
@@ -131,7 +194,10 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
   const location = useLocation();
   const logout = useMutation({
     mutationFn: auth.logout,
-    onSettled: () => { setSession(null); navigate("/login", { replace: true }); },
+    onSettled: () => {
+      setSession(null);
+      navigate("/login", { replace: true });
+    },
   });
 
   useEffect(() => setDrawer(false), [location.pathname]);
@@ -152,10 +218,12 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
   return (
     <div className="min-h-screen bg-app-page font-sans text-slate-900">
       {variant === "app" && <CandidateWelcomeModal />}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200/80 bg-white md:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex flex-col border-r border-slate-200/80 bg-white md:flex">
         <div className="flex h-16 items-center border-b border-slate-100 px-6"><Brand variant={variant} /></div>
         <SidebarNav variant={variant} />
+        {variant === "admin" && <AdminOutreachAssistant />}
         {variant === "app" && <CandidateSidebarFooter />}
+        {variant === "institute" && <InstituteSidebarFooter />}
       </aside>
 
       {drawer && (
@@ -169,7 +237,9 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
               </button>
             </div>
             <SidebarNav variant={variant} onNavigate={() => setDrawer(false)} />
+            {variant === "admin" && <AdminOutreachAssistant />}
             {variant === "app" && <CandidateSidebarFooter />}
+            {variant === "institute" && <InstituteSidebarFooter />}
           </aside>
         </div>
       )}
@@ -190,7 +260,7 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
               <NotificationBell />
             </>
           )}
-          {(variant === "app" || variant === "admin") && user && (
+          {(variant === "app" || variant === "admin" || variant === "institute") && user && (
             <UserAvatar name={name} email={user.email} />
           )}
           <div className="hidden text-right text-sm sm:block">
@@ -202,7 +272,17 @@ export function AppShell({ variant = "app" }: { variant?: Variant }) {
             <LogOut className="h-5 w-5" />
           </button>
         </header>
-        <main className={cx("mx-auto px-4 py-8 sm:px-6", variant === "app" || variant === "admin" ? "max-w-7xl" : "max-w-6xl")}><Outlet /></main>
+        <main className={cx("mx-auto px-4 py-8 sm:px-6", variant === "partner" ? "max-w-6xl" : "max-w-7xl")}>
+          {variant === "app" ? (
+            <LiveInterviewCoachProvider>
+              <DesktopAutomationBootstrap />
+              <LiveInterviewCoachHost />
+              <Outlet />
+            </LiveInterviewCoachProvider>
+          ) : (
+            <Outlet />
+          )}
+        </main>
       </div>
     </div>
   );

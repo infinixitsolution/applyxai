@@ -90,4 +90,4 @@ What is implemented today. Planned hardening is listed at the end.
 
 ## Planned (later phases)
 
-- Enforce Content-Security-Policy (currently Report-Only in nginx snippet); structured JSON logs with secret redaction; dependency pinning
+- CSP is enforced in `scripts/nginx/applyxai-security-headers.conf` (Razorpay + Stripe allowlisted); structured JSON logs with secret redaction; dependency pinning

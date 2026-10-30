@@ -16,6 +16,15 @@ class HumanQuestionIn(BaseModel):
     answer: str = Field(min_length=1, max_length=MAX_ANSWER)
     field_types: list[str] = Field(default_factory=list, max_length=8)
     locked: bool = False
+    normalized_pattern: str = ""
+    input_type: str = "text"
+    verified: bool = False
+    company: str = Field(default="", max_length=200)
+    job_title: str = Field(default="", max_length=200)
+    usage_count: int = Field(default=0, ge=0)
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_used_at: str | None = None
 
     @field_validator("field_types")
     @classmethod

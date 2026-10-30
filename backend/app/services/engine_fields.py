@@ -38,6 +38,8 @@ _APPLICATION_EXCLUDED = {
     "auto_manage_driver", "safe_mode", "log_level", "keep_screen_awake",
 }
 _APPLICATION_SECTIONS = {"Profile", "Run settings"}
+_RUN_SETTINGS_SECTION = "Run settings"
+_PROFILE_ANSWER_SECTION = "Profile"
 
 
 def _fields():
@@ -51,6 +53,14 @@ SEARCH_EXTRA_FIELDS = {
 APPLICATION_FIELDS = {
     f["key"]: f for f in _fields()
     if f["section"] in _APPLICATION_SECTIONS and f["key"] not in _APPLICATION_EXCLUDED
+}
+RUN_SETTINGS_FIELDS = {
+    f["key"]: f for f in _fields()
+    if f["section"] == _RUN_SETTINGS_SECTION and f["key"] not in _APPLICATION_EXCLUDED
+}
+PROFILE_ANSWER_FIELDS = {
+    f["key"]: f for f in _fields()
+    if f["section"] == _PROFILE_ANSWER_SECTION and f["key"] not in _APPLICATION_EXCLUDED
 }
 
 

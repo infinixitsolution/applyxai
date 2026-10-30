@@ -13,6 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.core.plans import INTERNAL_PLAN_CODES
 from backend.app.models import BillingEvent, Payment, Plan, Subscription, SubscriptionStatus
 from backend.app.services import billing_service
 from backend.app.services.payments import get_payment_provider
@@ -139,7 +140,9 @@ def webhook(app, event, sub_id=None, payment=None, *, event_id=None, secret=WEBH
 # ----------------------------------------------------------------------------- plans
 def test_sync_plans_creates_paid_plans_once(db, razorpay):
     plans = {p.code: p for p in db.query(Plan).all()}
-    assert set(plans) == {"free", "starter", "pro", "premium", "campus", "campus_pro"}
+    public_codes = {"free", "starter", "pro", "premium", "campus", "campus_pro"}
+    assert set(plans) - INTERNAL_PLAN_CODES == public_codes
+    assert plans["unlimited"].provider_plan_id == ""
     assert plans["free"].provider_plan_id == "" and plans["pro"].provider_plan_id.startswith("plan_")
     created = razorpay.plans[plans["pro"].provider_plan_id]
     assert created["period"] == "monthly" and created["item"]["amount"] == plans["pro"].price_cents
@@ -173,6 +176,10 @@ def test_checkout_then_verified_payment_activates_the_plan(app, alice, razorpay,
     assert overview["payments"][0]["status"] == "captured"
     notes = [n["type"] for n in alice.get("/api/notifications").json()["data"]["items"]]
     assert "plan_active" in notes
+
+    page = alice.get("/api/billing/payments").json()["data"]
+    assert page["total"] == 1 and page["items"][0]["status"] == "captured"
+    assert alice.get("/api/billing/payments", params={"status": "failed"}).json()["data"]["total"] == 0
 
 
 def test_a_forged_or_unpaid_confirmation_grants_nothing(alice, razorpay):

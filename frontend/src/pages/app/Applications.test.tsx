@@ -29,6 +29,13 @@ function mockFetch(routes: Record<string, unknown>) {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
     const url = String(input).split("?")[0]!;
     if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+    if (url.includes("/automation")) {
+      return ok({
+        active: null, recent: [], devices: [], agent_online: false,
+        readiness: { ready: true, problems: [] },
+        usage: dashboardStats.usage, enabled_sources: ["linkedin"],
+      });
+    }
     if (url.includes("/applications/app1")) {
       return ok({ ...listItem, job: { ...listItem.job, description: "Build models." } });
     }

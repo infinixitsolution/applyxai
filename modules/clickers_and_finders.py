@@ -218,3 +218,85 @@ def text_input(actions: ActionChains, textInputEle: WebElement | bool, value: st
         actions.send_keys(Keys.ENTER).perform()
     else:
         logger.warning('%s input was not given!', textFieldName)
+
+
+EASY_APPLY_MODAL_XPATHS = (
+    "div.jobs-easy-apply-modal[role='dialog']",
+    "div.jobs-easy-apply-modal",
+    "div[role='dialog'][contains(@class,'jobs-easy-apply')]",
+    "div[data-test-modal][role='dialog'][contains(@class,'jobs-easy-apply')]",
+    "div[data-test-modal][role='dialog']",
+)
+
+EASY_APPLY_FOOTER_XPATHS = {
+    "submit": (
+        ".//button[@data-live-test-easy-apply-submit-button]",
+        ".//footer//button[@aria-label='Submit application']",
+        ".//button[@aria-label='Submit application']",
+        ".//button[normalize-space(.)='Submit application']",
+    ),
+    "review": (
+        ".//button[@aria-label='Review your application']",
+        ".//button[normalize-space(.)='Review']",
+    ),
+    "next": (
+        ".//button[@data-easy-apply-next-button]",
+        ".//button[@aria-label='Continue to next step']",
+        ".//button[contains(@aria-label,'next step')]",
+        ".//footer//button[contains(normalize-space(.),'Next')]",
+        ".//button[contains(normalize-space(.),'Next') and not(contains(@aria-label,'View next page'))]",
+    ),
+}
+
+
+def find_easy_apply_modal(driver: WebDriver, time: float = 8.0) -> WebElement:
+    '''Wait for a visible Easy Apply dialog; LinkedIn keeps the class but sometimes drops it briefly.'''
+    deadline = time.time() + time
+    last_exc: Exception | None = None
+    while time.time() < deadline:
+        for xpath in EASY_APPLY_MODAL_XPATHS:
+            try:
+                modal = pick_first_displayed(driver.find_elements(By.XPATH, xpath))
+                if modal:
+                    return modal
+            except Exception as exc:
+                last_exc = exc
+        sleep(0.25)
+    if last_exc:
+        raise last_exc
+    raise NoSuchElementException("Easy Apply modal not found")
+
+
+def easy_apply_modal_visible(driver: WebDriver) -> bool:
+    try:
+        for xpath in EASY_APPLY_MODAL_XPATHS:
+            if pick_first_displayed(driver.find_elements(By.XPATH, xpath)):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def find_easy_apply_footer_button(modal: WebElement, kind: str) -> WebElement | None:
+    for xpath in EASY_APPLY_FOOTER_XPATHS.get(kind, ()):
+        try:
+            button = pick_first_displayed(modal.find_elements(By.XPATH, xpath))
+            if not button:
+                continue
+            if button.is_enabled():
+                return button
+        except StaleElementReferenceException:
+            continue
+        except Exception:
+            continue
+    return None
+
+
+def click_easy_apply_footer_button(modal: WebElement, kind: str, *, scroll_top: bool = False) -> bool:
+    button = find_easy_apply_footer_button(modal, kind)
+    if not button:
+        return False
+    scroll_to_view(modal, button, scroll_top)
+    button.click()
+    buffer(click_gap)
+    return True

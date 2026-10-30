@@ -22,7 +22,7 @@ from automation.qa_resolver import can_use_ai
 
 from backend.app.services import application_ai_service
 from backend.app.services.ai_service import ai_available
-from backend.app.services.engine_fields import APPLICATION_FIELDS, validate_mapping
+from backend.app.services.engine_fields import APPLICATION_FIELDS, PROFILE_ANSWER_FIELDS, validate_mapping
 
 _QA_KEYS = frozenset({"human_questions", "ai_applications_enabled", "user_information_all", "ai_policy"})
 _MAX_PENDING_FORM_QUESTIONS = 120
@@ -72,6 +72,11 @@ def update_profile(db: Session, user: User, payload: ProfileIn) -> dict:
         if value is None and name != "experience_years":
             value = ""
         setattr(user.profile, name, value)
+    from backend.app.services import master_profile_service
+
+    if user.profile is not None:
+        prefs = db.scalar(select(ApplicationPreferences).where(ApplicationPreferences.user_id == user.id))
+        master_profile_service._sync_structured_to_engine(user.profile, user, prefs)
     db.commit()
     db.refresh(user)
     return get_profile(db, user)
@@ -104,6 +109,10 @@ def _application_row(db: Session, user: User) -> ApplicationPreferences:
 
 def _upsert_human_rule(human: list, entry: dict) -> None:
     pattern = str(entry.get("pattern") or "").strip()
+    from backend.app.services.master_profile_service import _is_standard_human_pattern
+
+    if _is_standard_human_pattern(pattern):
+        return
     for i, row in enumerate(human):
         if isinstance(row, dict) and str(row.get("pattern") or "").strip() == pattern:
             human[i] = entry
@@ -255,7 +264,7 @@ def _notify_form_question_needed(db: Session, user_id: uuid.UUID, item: dict) ->
 
 
 def capture_form_question(db: Session, user_id: uuid.UUID, event: dict, job_details: dict | None = None) -> None:
-    """Append a LinkedIn form question seen during automation (deduped by label + type)."""
+    """Append a form question seen during automation (LinkedIn or Naukri; deduped by label + type)."""
     user = db.get(User, user_id)
     if user is None:
         return
@@ -503,7 +512,7 @@ def get_application(db: Session, user: User) -> dict:
 def update_application(db: Session, user: User, changes: dict) -> dict:
     """Merge engine answer keys; null removes. QA keys replace when present."""
     answer_changes = {k: v for k, v in changes.items() if k not in _QA_KEYS}
-    cleaned = validate_mapping(APPLICATION_FIELDS, answer_changes, allow_null=True) if answer_changes else {}
+    cleaned = validate_mapping(PROFILE_ANSWER_FIELDS, answer_changes, allow_null=True) if answer_changes else {}
     prefs = _application_row(db, user)
     answers = dict(prefs.answers or {})
     for key, value in cleaned.items():

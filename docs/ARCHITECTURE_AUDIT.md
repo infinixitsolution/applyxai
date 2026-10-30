@@ -1,5 +1,17 @@
 # ApplyXAI — Architecture Audit
 
+> **Updated master audit (2026-10-16):** See **[AUDIT.md](./AUDIT.md)** for the current SaaS + desktop + engine architecture, test baseline, and findings. The sections below retain the **2026-10-07 historical snapshot** of the classic Flask-only era for comparison.
+
+---
+
+## Current architecture (2026-10-16 summary)
+
+ApplyXAI now ships **FastAPI** (`backend/app/main.py`), **React** (`frontend/`), **Alembic/PostgreSQL|SQLite**, **desktop agent/Electron** (`agent/`, `desktop/`, `automation/runner.py`), while preserving **`app.py` + `runAiBot.py`** classic mode. Default local API port: **8010** (`scripts/dev_api.ps1`). Full diagrams and flows: [AUDIT.md](./AUDIT.md).
+
+---
+
+# Historical architecture audit (2026-10-07)
+
 Audit date: 2026-10-07 · Audited commit: `e0b2401` (plus one uncommitted change in `modules/open_chrome.py`, see §9.1)
 Scope: read-only inspection. No application or automation code was changed during this audit.
 

@@ -1,4 +1,24 @@
-# ApplyXAI Agent Installer
+# ApplyXAI Desktop installer
+
+## One app, one installer (Windows)
+
+**`ApplyXAI-Desktop-Setup.exe`** is the only end-user download: the full ApplyXAI web app in Electron plus an embedded automation worker (`agent-worker.exe`). Users do **not** install a separate “desktop agent.”
+
+**Build (developers):**
+
+```powershell
+.\scripts\build_desktop.ps1
+```
+
+Output: `dist\ApplyXAI-Desktop-Setup.exe`
+
+The script builds the frontend with `VITE_AGENT_SERVER_URL=https://applyxai.com`, bundles it in Electron, and packages `agent-worker.exe` (PyInstaller) as a sidecar.
+
+---
+
+# Legacy ApplyXAI Agent Installer
+
+The agent-only installer remains for browser users who only need automation without the Electron shell.
 
 This installer makes the ApplyXAI Agent installable on any Windows laptop without requiring Python, PowerShell, or source code.
 

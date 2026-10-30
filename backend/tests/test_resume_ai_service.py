@@ -27,6 +27,28 @@ def test_heuristic_intake_finds_name_phone_and_summary():
     assert "Python" in (data["summary"] or "")
     assert data["current_title"]
     assert data["cover_letter"]
+    assert data["work_history"]
+
+
+def test_heuristic_intake_fills_education_from_qualification_heading():
+    text = (
+        "Shankar Murthy\n"
+        "DevOps Engineer\n\n"
+        "Educational Qualification\n"
+        "B.Tech Computer Science\n"
+        "ABC Institute of Technology\n"
+        "2016 - 2020\n\n"
+        "Work Experience\n"
+        "Junior DevOps Engineer\n"
+        "Eyes On Cloud\n"
+        "2024 - Present\n"
+        "Kubernetes, AWS, and ServiceNow ITSM.\n"
+    )
+    data = resume_text_service.heuristic_profile_intake(text)
+    assert data["education"]
+    assert any("B.Tech" in (e.get("degree") or "") or "Computer Science" in (e.get("field") or "") for e in data["education"])
+    assert data["work_history"]
+    assert any("DevOps" in (w.get("title") or "") for w in data["work_history"])
 
 
 def test_match_score_gate():

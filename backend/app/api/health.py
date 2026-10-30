@@ -19,4 +19,10 @@ def health(db: Session = Depends(get_db)):
     except Exception:
         logger.exception("Health check: database unreachable")
         return error_response(503, "DATABASE_UNAVAILABLE", "Database is unreachable")
-    return ok({"status": "ok", "app": settings.APP_NAME, "version": settings.APP_VERSION})
+    return ok({
+        "status": "ok",
+        "app": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "env": settings.APP_ENV,
+        "automation_poll": "resume-idle-v2",
+    })

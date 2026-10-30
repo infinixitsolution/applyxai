@@ -23,6 +23,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Embedded in access tokens; bumping it invalidates every outstanding session at once.
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Candidate-to-candidate share code (distinct from partner referral_code).
+    referral_code: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
 
     profile: Mapped["UserProfile | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan", passive_deletes=True
@@ -48,6 +50,9 @@ class UserProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     preferred_resume_template: Mapped[str] = mapped_column(String(32), default="modern", server_default="modern")
     education: Mapped[list] = mapped_column(JSONType, default=list)
     work_history: Mapped[list] = mapped_column(JSONType, default=list)
+    photo_storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    master_data: Mapped[dict] = mapped_column(JSONType, default=dict)
+    master_migrated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # Per-event email opt-out; empty dict = receive all types the platform allows.
     notification_email: Mapped[dict] = mapped_column(JSONType, default=dict)
 

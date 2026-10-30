@@ -87,3 +87,17 @@ def test_resolve_applied_resume_id_from_ai_metadata(db, user):
         db, user.id, job, event_resume_id=None, external_job_id="555",
     )
     assert resolved == tailored.id
+
+
+def test_resolve_applied_resume_id_falls_back_to_default(db, user):
+    job = Job(platform="linkedin", external_id="556", title="Support", company="Co", job_url="https://example.com/j/556")
+    master = Resume(
+        user_id=user.id, name="Master", filename="cv.pdf", storage_path="resumes/u/cv.pdf",
+        file_type="pdf", file_size=10, is_default=True,
+    )
+    db.add_all([job, master])
+    db.commit()
+    resolved = application_service.resolve_applied_resume_id(
+        db, user.id, job, event_resume_id=None, external_job_id="556",
+    )
+    assert resolved == master.id

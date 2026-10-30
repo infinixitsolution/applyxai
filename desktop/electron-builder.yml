@@ -1,0 +1,58 @@
+appId: com.applyxai.desktop
+productName: ApplyXAI
+copyright: Copyright © ApplyXAI
+
+directories:
+  output: ../dist
+  buildResources: build
+
+files:
+  - dist/**/*
+  - static/**/*
+  - package.json
+
+asarUnpack:
+  - dist/preload.js
+  - dist/liveInterviewCapturePreload.js
+  - "**/*.node"
+  - "**/node_modules/keytar/**"
+
+extraResources:
+  - from: dist/preload.js
+    to: preload.js
+  - from: resources/dist
+    to: app/dist
+    filter:
+      - "**/*"
+  - from: ../dist/agent-worker.exe
+    to: agent-worker.exe
+  - from: resources/agent-worker-v${version}.exe
+    to: agent-worker-v${version}.exe
+  - from: ../vendor
+    to: chromedriver
+    filter:
+      - "chromedriver-win64.exe"
+      - "chromedriver.exe"
+      - "chromedriver"
+      - "CHROMEDRIVER_VERSION.txt"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: ../agent/branding/applyxai.ico
+  artifactName: ApplyXAI-Desktop-Setup-v${version}.${ext}
+  signtoolOptions:
+    # electron-builder uses CSC_LINK / CSC_KEY_PASSWORD when present (Authenticode).
+    signingHashAlgorithms:
+      - sha256
+    publisherName: ApplyXAI
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ApplyXAI
+  artifactName: ApplyXAI-Desktop-Setup-v${version}.exe

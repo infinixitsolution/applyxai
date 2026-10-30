@@ -35,11 +35,17 @@ from selenium.webdriver.support.select import Select
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, NoSuchWindowException, ElementNotInteractableException, WebDriverException
 
+from modules.browser_session import session_lost
+
 from config.personals import *
 from config.questions import *
 from config.search import *
 from config.secrets import use_AI, username, password, ai_provider
-from config.applyxai import ai_use_platform_proxy, human_questions as qa_human_questions, ai_policy as qa_ai_policy, resume_mode as applyxai_resume_mode
+from config.applyxai import (
+    ai_use_platform_proxy, human_questions as qa_human_questions, ai_policy as qa_ai_policy,
+    resume_mode as applyxai_resume_mode, default_resume_id as applyxai_default_resume_id,
+    sources as applyxai_sources, switch_after as applyxai_switch_after,
+)
 from config.settings import *
 
 from modules.open_chrome import *
@@ -89,6 +95,42 @@ randomly_answered_questions = set()
 # Two identical passes in a row means the form can never advance on its own.
 unanswered_questions = set()
 _form_questions_emitted: set[tuple[str, str]] = set()
+_browser_recovery_attempts = 0
+_MAX_BROWSER_RECOVERIES = 2
+_SESSION_LOST_MSG = "The browser window was closed or the session became invalid."
+
+
+def _recover_browser_session() -> bool:
+    """Restart Chrome and return to LinkedIn when the WebDriver session dies mid-run."""
+    global driver, wait, actions, options, linkedIn_tab, tabs_count, _browser_recovery_attempts
+    if _browser_recovery_attempts >= _MAX_BROWSER_RECOVERIES:
+        return False
+    _browser_recovery_attempts += 1
+    print_lg(f"Browser session lost — restarting Chrome ({_browser_recovery_attempts}/{_MAX_BROWSER_RECOVERIES})…")
+    try:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        options, driver, actions, wait = createChromeSession()
+        tabs_count = len(driver.window_handles)
+        linkedIn_tab = driver.current_window_handle
+        sources = _selected_sources()
+        if "linkedin" in sources:
+            driver.get("https://www.linkedin.com/feed/")
+            if not is_logged_in_LN():
+                login_LN()
+            linkedIn_tab = driver.current_window_handle
+        elif "naukri" in sources:
+            from automation.sources.naukri import ensure_login
+            ensure_login(driver)
+            linkedIn_tab = driver.current_window_handle
+        driver.switch_to.window(linkedIn_tab)
+        return True
+    except Exception as exc:
+        logger.error("Could not restart Chrome after session loss: %s", exc, exc_info=exc)
+        return False
 
 
 def reset_form_question_emitter() -> None:
@@ -141,6 +183,8 @@ external_jobs_count = 0
 failed_count = 0
 skip_count = 0
 dailyEasyApplyLimitReached = False
+active_platform = "linkedin"
+_history_applied_base = ""
 
 re_experience = re.compile(r'[(]?\s*(\d+)\s*[)]?\s*[-to]*\s*\d*[+]*\s*year[s]?', re.IGNORECASE)
 
@@ -206,12 +250,26 @@ def fill_visible_input(by: str, value: str, text: str, time: float = 5.0) -> Non
     human_type(field, text)
 
 
+def _blocked_by_security_challenge(platform: str, submitted: int) -> tuple[str, int, str] | None:
+    """Leave this job site when it shows a captcha or checkpoint, and tell the app to sign in."""
+    from automation.sources.challenges import challenge_reason
+    reason = challenge_reason(driver, platform=platform)
+    if not reason:
+        return None
+    run_hooks.emit("login_required", platform=platform.lower())
+    print_lg(reason)
+    return "blocked", submitted, reason
+
+
 def is_logged_in_LN() -> bool:
     '''
     Function to check if user is logged-in in LinkedIn
     * Returns: `True` if user is logged-in or `False` if not
     '''
     # The feed URL now carries query params (?trk=...), so match a prefix, not the whole URL.
+    url = (driver.current_url or "").lower()
+    if "checkpoint" in url or "authwall" in url or "/uas/login" in url or "/login" in url.split("linkedin.com", 1)[-1]:
+        return False
     if driver.current_url.startswith("https://www.linkedin.com/feed"): return True
     if try_linkText(driver, "Sign in"): return False
     # click=False: this is a check, it must not press Sign in as a side effect.
@@ -233,7 +291,7 @@ def login_LN() -> None:
     if username == "username@example.com" and password == "example_password":
         pyautogui.alert("User did not configure username and password in secrets.py, hence can't login automatically! Please login manually!", "Login Manually","Okay")
         print_lg("User did not configure username and password in secrets.py, hence can't login automatically! Please login manually!")
-        run_hooks.emit("login_required")
+        run_hooks.emit("login_required", platform="linkedin")
         manual_login_retry(is_logged_in_LN, 2)
         return
     try:
@@ -263,7 +321,7 @@ def login_LN() -> None:
         return print_lg("Login successful!")
     except Exception as e:
         logger.warning("Seems like login attempt failed! Possibly due to wrong credentials or already logged in! Try logging in manually! %s", e)
-        run_hooks.emit("login_required")
+        run_hooks.emit("login_required", platform="linkedin")
         manual_login_retry(is_logged_in_LN, 2)
 #>
 
@@ -274,15 +332,24 @@ def get_applied_job_ids() -> set[str]:
     Function to get a `set` of applied job's Job IDs
     * Returns a set of Job IDs from existing applied jobs history csv file
     '''
-    job_ids: set[str] = set()
-    try:
-        with open(file_name, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            for row in reader:
-                job_ids.add(row[0])
-    except FileNotFoundError:
+    from automation.sources.history import read_job_ids
+    paths = [file_name]
+    if active_platform == "linkedin" and _history_applied_base and _history_applied_base != file_name:
+        paths.append(_history_applied_base)
+    job_ids = read_job_ids(*paths)
+    if not job_ids and not os.path.exists(file_name):
         print_lg(f"The CSV file '{file_name}' does not exist.")
     return job_ids
+
+
+def bind_source_history(platform: str) -> None:
+    '''Point the applied and failed CSVs at this site's own files.'''
+    global file_name, failed_file_name, active_platform, _history_applied_base
+    from automation.sources.history import paths_for
+    if not _history_applied_base:
+        _history_applied_base = file_name
+    active_platform = platform if platform in ("linkedin", "naukri") else "linkedin"
+    file_name, failed_file_name = paths_for(_history_applied_base, active_platform)
 
 
 
@@ -313,9 +380,10 @@ def recommended_filter_wait(gap: int) -> int:
     return 0 if gap < 1 else 1
 
 
-def apply_filters() -> None:
+def apply_filters() -> bool:
     '''
-    Function to apply job search filters
+    Apply LinkedIn job search filters. False when the panel cannot be set, so the
+    search term is skipped instead of running unfiltered.
     '''
     set_search_location()
 
@@ -366,12 +434,29 @@ def apply_filters() -> None:
         global pause_after_filters
         if pause_after_filters and "Turn off Pause after search" == pyautogui.confirm("These are your configured search results and filter. It is safe to change them while this dialog is open, any changes later could result in errors and skipping this search run.", "Please check your results", ["Turn off Pause after search", "Look's good, Continue"]):
             pause_after_filters = False
+        return True
 
     except Exception as e:
-        logger.warning("Setting the preferences failed!")
-        pyautogui.confirm(f"Faced error while applying filters. Please make sure correct filters are selected, click on show results and click on any button of this dialog, I know it sucks. Can't turn off Pause after search when error occurs! ERROR: {e}", ["Doesn't look good, but Continue XD", "Look's good, Continue"])
-        # print_lg(e)
+        logger.warning("Setting the preferences failed! %s", e)
+        print_lg("LinkedIn search filters could not be applied. This search term will be skipped instead of using unfiltered results.")
+        return False
 
+
+
+def wait_for_job_listings(*, attempts: int = 8, pause_sec: int = 5) -> bool:
+    '''LinkedIn often reloads slowly after filters; retry before giving up on this search.'''
+    xpath = "//li[@data-occludable-job-id]"
+    for attempt in range(attempts):
+        try:
+            WebDriverWait(driver, 45).until(EC.presence_of_all_elements_located((By.XPATH, xpath)))
+            return True
+        except Exception as exc:
+            if attempt + 1 >= attempts:
+                logger.warning("Job listings did not appear after filters: %s", exc)
+                return False
+            print_lg(f"Waiting for job results after filters ({attempt + 1}/{attempts})…")
+            buffer(pause_sec)
+    return False
 
 
 def get_page_info() -> tuple[WebElement | None, int | None]:
@@ -1484,9 +1569,71 @@ def answer_questions(
 
 # The apply button, Easy Apply or external. `id` is stable and semantic; the class is the
 # fallback for older renders. Never the design-system size token (artdeco-button--<n>).
-apply_button_xpath = ".//button[@id='jobs-apply-button-id' or contains(@class,'jobs-apply-button')]"
+# Company-site jobs often use an <a>, not a <button>, and say "Apply on company website".
+apply_button_xpath = (
+    ".//*[@id='jobs-apply-button-id' or contains(@class,'jobs-apply-button')]"
+    " | .//a[contains(normalize-space(.), 'Apply on company website')]"
+    " | .//a[contains(@aria-label, 'Apply') and not(contains(@aria-label, 'Easy Apply'))]"
+)
+external_continue_xpaths = (
+    ".//button[contains(@aria-label,'Continue to application')]",
+    ".//button[contains(normalize-space(.),'Continue to application')]",
+    ".//button[contains(normalize-space(.),'Continue applying')]",
+    ".//a[contains(normalize-space(.),'Continue to application')]",
+    ".//button[contains(@aria-label,'Continue') and not(contains(@aria-label,'next step'))]",
+)
 
-def external_apply(pagination_element: WebElement, job_id: str, job_link: str, resume: str, date_listed, application_link: str, screenshot_name: str) -> tuple[bool, str, int]:
+
+def _safe_linkedin_tab() -> str:
+    '''Return a live LinkedIn window handle; refresh the cache if Chrome closed the old one.'''
+    global linkedIn_tab
+    handles = driver.window_handles
+    if linkedIn_tab and linkedIn_tab in handles:
+        return linkedIn_tab
+    for handle in handles:
+        try:
+            driver.switch_to.window(handle)
+            if "linkedin.com" in (driver.current_url or "").lower():
+                linkedIn_tab = handle
+                return handle
+        except WebDriverException:
+            continue
+    linkedIn_tab = handles[0]
+    return linkedIn_tab
+
+
+def _click_external_apply_continue() -> None:
+    if wait_span_click(driver, "Continue", 1.5, True, False):
+        return
+    for xpath in external_continue_xpaths:
+        if wait_xp_click(driver, xpath, 1.5):
+            return
+
+
+def _dismiss_easy_apply_modal_if_open() -> None:
+    if not easy_apply_modal_visible(driver):
+        return
+    try:
+        discard_job()
+    except Exception as exc:
+        logger.warning("Couldn't dismiss Easy Apply modal before external apply: %s", exc)
+        try:
+            actions.send_keys(Keys.ESCAPE).perform()
+        except Exception:
+            pass
+
+
+def external_apply(
+    pagination_element: WebElement,
+    job_id: str,
+    job_link: str,
+    resume: str,
+    date_listed,
+    application_link: str,
+    screenshot_name: str,
+    *,
+    precaptured_link: str | None = None,
+) -> tuple[bool, str, int]:
     '''
     Function to open new tab and save external job application links
     '''
@@ -1501,32 +1648,72 @@ def external_apply(pagination_element: WebElement, job_id: str, job_link: str, r
             # Easy Apply detection was broken summarised as 0/0/0/0 - "it found no jobs".
             skip_count += 1
             return True, application_link, tabs_count
-    try:
-        # The design-system button SIZE class this used to also require (artdeco-button--<n>)
-        # has nothing to do with applying and churns with every restyle, so it's gone.
-        wait.until(EC.element_to_be_clickable((By.XPATH, apply_button_xpath))).click()
-        wait_span_click(driver, "Continue", 1, True, False)
-        windows = driver.window_handles
-        tabs_count = len(windows)
-        driver.switch_to.window(windows[-1])
-        application_link = driver.current_url
+    if precaptured_link:
+        application_link = precaptured_link
+        tabs_count = len(driver.window_handles)
+        try:
+            driver.switch_to.window(_safe_linkedin_tab())
+        except Exception:
+            pass
         print_lg('Got the external application link "{}"'.format(application_link))
-        if close_tabs and driver.current_window_handle != linkedIn_tab: driver.close()
-        driver.switch_to.window(linkedIn_tab)
         return False, application_link, tabs_count
+    try:
+        _dismiss_easy_apply_modal_if_open()
+        apply_button = pick_first_displayed(driver.find_elements(By.XPATH, apply_button_xpath))
+        if not apply_button:
+            apply_button = wait.until(EC.element_to_be_clickable((By.XPATH, apply_button_xpath)))
+        scroll_to_view(driver, apply_button)
+        tabs_before = len(driver.window_handles)
+        apply_button.click()
+        buffer(click_gap)
+        _click_external_apply_continue()
+        deadline = time.time() + 10
+        while time.time() < deadline and len(driver.window_handles) <= tabs_before:
+            time.sleep(0.25)
+        tabs_count = len(driver.window_handles)
+        if tabs_count > tabs_before:
+            driver.switch_to.window(driver.window_handles[-1])
+            application_link = driver.current_url
+            print_lg('Got the external application link "{}"'.format(application_link))
+            if close_tabs and driver.current_window_handle != _safe_linkedin_tab():
+                driver.close()
+            driver.switch_to.window(_safe_linkedin_tab())
+            return False, application_link, tabs_count
+        current = driver.current_url or ""
+        if current and "linkedin.com" not in current.lower():
+            application_link = current
+            print_lg('Got the external application link (same tab) "{}"'.format(application_link))
+            driver.back()
+            buffer(click_gap)
+            driver.switch_to.window(_safe_linkedin_tab())
+            return False, application_link, tabs_count
+        raise NoSuchElementException("Apply did not open an external application page.")
     except Exception as e:
-        # print_lg(e)
-        logger.warning("Failed to apply!")
-        failed_job(job_id, job_link, resume, date_listed, "Probably didn't find Apply button or unable to switch tabs.", e, application_link, screenshot_name)
-        global failed_count
-        failed_count += 1
+        # Company-site / Workday / ATS jobs are not something this bot can submit.
+        # Treat as skipped (not failed) so the Applications list does not look like a crash.
+        logger.warning("Company-site apply did not open a tab: %s", e)
+        skip_count += 1
+        failed_job(
+            job_id,
+            job_link,
+            resume,
+            date_listed,
+            "Not LinkedIn Easy Apply — this job applies on the company website. ApplyXAI cannot submit those automatically.",
+            e,
+            "Skipped",
+            screenshot_name,
+        )
+        try:
+            driver.switch_to.window(_safe_linkedin_tab())
+        except Exception:
+            pass
         return True, application_link, tabs_count
 
 
 
 # Easy Apply modal buttons. All of these are `type="button"`, so type is no help, and all of
 # them must be searched INSIDE the dialog: document-wide, "Next" also matches the search
-# results pagination control (aria-label "View next page").
+# results pagination control (aria-label "View next page"). Prefer `find_easy_apply_footer_button`.
 next_button_xpath = './/button[@aria-label="Continue to next step" or contains(normalize-space(.), "Next")]'
 review_button_xpath = './/button[@aria-label="Review your application" or normalize-space(.)="Review"]'
 submit_button_xpath = './/button[@aria-label="Submit application" or normalize-space(.)="Submit application"]'
@@ -1542,7 +1729,6 @@ easy_apply_locators = [
     ("in-app apply URL flag", ".//a[contains(@href, 'openSDUIApplyFlow=true')]"),
     ("aria-label", ".//button[contains(@class,'jobs-apply-button') and contains(@aria-label, 'Easy Apply')]"),
     ("button label", ".//button[contains(@class,'jobs-apply-button')][.//span[contains(normalize-space(.), 'Easy Apply')]]"),
-    ("apply button", apply_button_xpath),
 ]
 
 
@@ -1584,7 +1770,7 @@ def failed_job(job_id: str, job_link: str, resume: str, date_listed, error: str,
     Function to update failed jobs list in excel
     '''
     payload = dict(job_id=job_id, job_link=job_link, date_listed=date_listed, reason=error,
-                   detail=str(exception)[:1000], application_link=application_link)
+                   detail=str(exception)[:1000], application_link=application_link, platform=active_platform)
     if description and description != "Unknown":
         payload["description"] = description
     if contacts:
@@ -1634,7 +1820,7 @@ def submitted_jobs(job_id: str, title: str, company: str, work_location: str, wo
         job_id=job_id, title=title, company=company, work_location=work_location,
         work_style=work_style, description=description, experience_required=experience_required,
         reposted=reposted, date_listed=date_listed, date_applied=date_applied,
-        job_link=job_link, application_link=application_link,
+        job_link=job_link, application_link=application_link, platform=active_platform,
     )
     if resume_id:
         applied_payload["resume_id"] = resume_id
@@ -1672,8 +1858,7 @@ discard_button_xpath = ".//button[@data-control-name='discard_application_confir
 
 def easy_apply_modal_is_open() -> bool:
     '''True while an Easy Apply modal is still on screen and swallowing every click.'''
-    try: return any(m.is_displayed() for m in driver.find_elements(By.CLASS_NAME, "jobs-easy-apply-modal"))
-    except Exception: return False
+    return easy_apply_modal_visible(driver)
 
 # Function to discard the job application
 def discard_job() -> None:
@@ -1709,29 +1894,103 @@ def questions_are_stalled(previous_blocked: set | None) -> bool:
 
 
 
+def prepare_job_resume(job_id: str, title: str, company: str, description: str, skills="") -> tuple[str, str | None]:
+    '''Build the resume file for this job. An empty path means the file was not ready.'''
+    from automation.job_resume import prepare_resume_for_job, skills_for_filename, wait_until_file_ready
+    resume_upload_path = default_resume_path
+    applied_resume_id = None
+    resume_skills = skills_for_filename(skills, title)
+    if applyxai_resume_mode == "tailor_if_gate" and description and description != "Unknown":
+        from automation import job_resume
+        print_lg("Preparing a tailored resume. Apply waits until that file is ready.")
+        resume_upload_path, applied_resume_id = job_resume.resolve_upload_path(
+            resume_mode=applyxai_resume_mode,
+            default_path=default_resume_path,
+            job_id=job_id,
+            job_description=description,
+            job_title=title,
+            company=company,
+            cache_dir=generated_resume_path,
+            candidate=full_name,
+            skills=resume_skills,
+            experience=years_of_experience,
+        )
+        if applied_resume_id:
+            print_lg(f"Tailored resume saved ({os.path.basename(resume_upload_path)}).")
+        else:
+            print_lg("No tailored resume for this job. Apply will use the default resume.")
+    resume_upload_path = prepare_resume_for_job(
+        resume_upload_path,
+        job_id=job_id,
+        job_title=title,
+        company=company,
+        cache_dir=generated_resume_path,
+        candidate=full_name,
+        skills=resume_skills,
+        experience=years_of_experience,
+    )
+    print_lg(f"Job resume path: {resume_upload_path}")
+    if useNewResume:
+        print_lg(f"Waiting until the resume file is ready: {os.path.basename(resume_upload_path)}")
+        if not wait_until_file_ready(resume_upload_path):
+            if default_resume_path and default_resume_path != resume_upload_path and wait_until_file_ready(default_resume_path):
+                print_lg("Job-specific resume was not ready. Using the default resume file.")
+                resume_upload_path = default_resume_path
+            else:
+                print_lg("Resume file was not ready.")
+                return "", None
+        print_lg("Resume is ready. Applying now.")
+    return resume_upload_path, applied_resume_id
+
+
 # Function to apply to jobs
-def apply_to_jobs(search_terms: list[str]) -> None:
+def apply_to_jobs(search_terms: list[str], *, max_successful: int | None = None, cursor: dict | None = None) -> tuple[str, int, str]:
     applied_jobs = get_applied_job_ids()
     rejected_jobs = set()
     blacklisted_companies = set()
     global current_city, failed_count, skip_count, easy_applied_count, external_jobs_count, tabs_count, pause_before_submit, pause_at_failed_question, useNewResume
     current_city = current_city.strip()
+    cursor = cursor if isinstance(cursor, dict) else {}
+    if cursor.get("terms"):
+        terms = list(cursor["terms"])
+    else:
+        terms = list(search_terms)
+        if randomize_search_order:
+            shuffle(terms)
+        cursor["terms"] = terms
+    term_index = int(cursor.get("term_index") or 0)
+    seen = {str(item) for item in (cursor.get("seen") or [])}
+    submitted_batch = 0
+    halt = ""
 
-    if randomize_search_order:  shuffle(search_terms)
-    for searchTerm in search_terms:
+    for i, searchTerm in enumerate(terms):
+        if i < term_index:
+            continue
+        cursor["term_index"] = i
         driver.get(f"https://www.linkedin.com/jobs/search/?keywords={searchTerm}")
         print_lg("\n________________________________________________________________________________________________________________________\n")
         print_lg(f'\n>>>> Now searching for "{searchTerm}" <<<<\n\n')
+        halted = _blocked_by_security_challenge("LinkedIn", submitted_batch)
+        if halted:
+            return halted
 
-        apply_filters()
+        if not apply_filters():
+            print_lg(f'Filters failed for "{searchTerm}". Trying the next term.')
+            continue
+        halted = _blocked_by_security_challenge("LinkedIn", submitted_batch)
+        if halted:
+            return halted
 
         current_count = 0
         try:
+            if not wait_for_job_listings():
+                print_lg("No job listings visible after filters for this search term. Trying the next term.")
+                continue
             while current_count < switch_number:
-                # Wait until job listings are loaded
-                wait.until(EC.presence_of_all_elements_located((By.XPATH, "//li[@data-occludable-job-id]")))
 
                 pagination_element, current_page = get_page_info()
+                if current_page:
+                    cursor["page"] = current_page
 
                 # Find all job listings in current page
                 buffer(3)
@@ -1747,14 +2006,24 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                     if keep_screen_awake: pyautogui.press('shiftright')
                     if current_count >= switch_number: break
                     run_hooks.checkpoint()
+                    halted = _blocked_by_security_challenge("LinkedIn", submitted_batch)
+                    if halted:
+                        return halted
                     print_lg("\n-@-\n")
 
                     job_id,title,company,work_location,work_style,skip = get_job_main_details(job, blacklisted_companies, rejected_jobs)
+                    if job_id:
+                        if str(job_id) in seen:
+                            continue
+                        seen.add(str(job_id))
+                        cursor["seen"] = list(seen)
                     
                     if skip: continue
                     reset_form_question_emitter()
                     run_hooks.emit("job_started", job_id=job_id, title=title, company=company,
-                                   work_location=work_location, work_style=work_style)
+                                   work_location=work_location, work_style=work_style,
+                                   job_link="https://www.linkedin.com/jobs/view/" + job_id,
+                                   platform=active_platform)
                     # Redundant fail safe check for applied jobs!
                     try:
                         if job_id in applied_jobs or find_by_class(driver, "jobs-s-apply__application-link", 2):
@@ -1795,22 +2064,28 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                         hr_info_card = WebDriverWait(driver,2).until(EC.presence_of_element_located((By.CLASS_NAME, "hirer-card__hirer-information")))
                         hr_link = hr_info_card.find_element(By.TAG_NAME, "a").get_attribute("href")
                         hr_name = hr_info_card.find_element(By.TAG_NAME, "span").text
-                        # if connect_hr:
-                        #     driver.switch_to.new_window('tab')
-                        #     driver.get(hr_link)
-                        #     wait_span_click("More")
-                        #     wait_span_click("Connect")
-                        #     wait_span_click("Add a note")
-                        #     message_box = driver.find_element(By.XPATH, "//textarea")
-                        #     message_box.send_keys(connect_request_message)
-                        #     if close_tabs: driver.close()
-                        #     driver.switch_to.window(linkedIn_tab) 
-                        # def message_hr(hr_info_card):
-                        #     if not hr_info_card: return False
-                        #     hr_info_card.find_element(By.XPATH, ".//span[normalize-space()='Message']").click()
-                        #     message_box = driver.find_element(By.XPATH, "//div[@aria-label='Write a message…']")
-                        #     message_box.send_keys()
-                        #     try_xp(driver, "//button[normalize-space()='Send']")        
+                        if connect_hr:
+                            try:
+                                main_tab = driver.current_window_handle
+                                driver.switch_to.new_window('tab')
+                                driver.get(hr_link)
+                                wait_span_click("More")
+                                wait_span_click("Connect")
+                                note = (connect_request_message or "").strip()[:200]
+                                if note:
+                                    wait_span_click("Add a note")
+                                    message_box = driver.find_element(By.XPATH, "//textarea")
+                                    message_box.send_keys(note)
+                                wait_span_click("Send")
+                                if close_tabs:
+                                    driver.close()
+                                driver.switch_to.window(main_tab)
+                            except Exception as connect_exc:
+                                logger.warning("LinkedIn Connect to hiring manager failed: %s", type(connect_exc).__name__)
+                                try:
+                                    driver.switch_to.window(linkedIn_tab)
+                                except Exception:
+                                    pass 
                     except Exception as e:
                         print_lg(f'HR info was not given for "{title}" with Job ID: {job_id}!')
                         # print_lg(e)
@@ -1850,77 +2125,57 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             skills = "Error extracting skills"
 
                     uploaded = False
-                    resume_upload_path = default_resume_path
-                    applied_resume_id = None
-                    from automation.job_resume import prepare_resume_for_job, skills_for_filename
-
-                    resume_skills = skills_for_filename(skills, title)
-                    if applyxai_resume_mode == "tailor_if_gate" and description and description != "Unknown":
-                        from automation import job_resume
-                        print_lg("Preparing a tailored resume. Easy Apply waits until that file is ready.")
-                        resume_upload_path, applied_resume_id = job_resume.resolve_upload_path(
-                            resume_mode=applyxai_resume_mode,
-                            default_path=default_resume_path,
-                            job_id=job_id,
-                            job_description=description,
-                            job_title=title,
-                            company=company,
-                            cache_dir=generated_resume_path,
-                            candidate=full_name,
-                            skills=resume_skills,
-                            experience=years_of_experience,
-                        )
-                        if applied_resume_id:
-                            print_lg(f"Tailored resume saved ({os.path.basename(resume_upload_path)}).")
-                        else:
-                            print_lg("No tailored resume for this job. Easy Apply will use the default resume.")
-                    resume_upload_path = prepare_resume_for_job(
-                        resume_upload_path,
-                        job_id=job_id,
-                        job_title=title,
-                        company=company,
-                        cache_dir=generated_resume_path,
-                        candidate=full_name,
-                        skills=resume_skills,
-                        experience=years_of_experience,
-                    )
-                    print_lg(f"Job resume path: {resume_upload_path}")
-                    if useNewResume:
-                        from automation.job_resume import wait_until_file_ready
-                        print_lg(f"Waiting until the resume file is ready: {os.path.basename(resume_upload_path)}")
-                        if not wait_until_file_ready(resume_upload_path):
-                            print_lg("Resume file was not ready. Skipping this job instead of applying without it.")
-                            failed_job(job_id, job_link, resume, date_listed, "Resume was not ready", "The resume file was not ready, so this job was not applied.", "Skipped", screenshot_name)
-                            skip_count += 1
-                            continue
-                        print_lg("Resume is ready. Applying now.")
+                    from automation.job_resume import skills_for_filename as _skills_for_filename
+                    resume_skills = _skills_for_filename(skills, title)
+                    resume_upload_path, applied_resume_id = prepare_job_resume(job_id, title, company, description, skills)
+                    if useNewResume and not resume_upload_path:
+                        print_lg("Resume file was not ready. Skipping this job instead of applying without it.")
+                        failed_job(job_id, job_link, resume, date_listed, "Resume was not ready", "The resume file was not ready, so this job was not applied.", "Skipped", screenshot_name)
+                        skip_count += 1
+                        continue
                     # Is this an Easy Apply job? Try each locator in `easy_apply_locators` in
                     # turn and confirm by the modal opening; a new browser tab means external.
                     is_easy_apply = False
+                    detected_external = False
+                    precaptured_external_link: str | None = None
+                    try:
+                        top_apply = pick_first_displayed(driver.find_elements(By.XPATH, apply_button_xpath))
+                        if top_apply:
+                            scroll_to_view(driver, top_apply)
+                    except Exception:
+                        pass
                     for how, xpath in easy_apply_locators:
-                        apply_button = try_xp(driver, xpath, False)  # detect only, never click
+                        apply_button = pick_first_displayed(driver.find_elements(By.XPATH, xpath))
                         if not apply_button: continue
                         try:
                             tabs_open = len(driver.window_handles)
+                            scroll_to_view(driver, apply_button)
                             apply_button.click()
                             buffer(click_gap)
                             if len(driver.window_handles) > tabs_open:
-                                # A new tab opened -> external apply. Close it and return to LinkedIn.
                                 driver.switch_to.window(driver.window_handles[-1])
-                                if close_tabs and driver.current_window_handle != linkedIn_tab:
+                                precaptured_external_link = driver.current_url
+                                if close_tabs and driver.current_window_handle != _safe_linkedin_tab():
                                     driver.close()
-                                driver.switch_to.window(linkedIn_tab)
+                                driver.switch_to.window(_safe_linkedin_tab())
+                                detected_external = True
                                 print_lg(f"A new tab opened ({how}) - external application.")
                                 break
-                            find_by_class(driver, "jobs-easy-apply-modal", 3)
+                            find_easy_apply_modal(driver, 8)
                             is_easy_apply = True
                             print_lg(f"Easy Apply detected ({how}).")
                             break
                         except Exception as e:
                             print_lg(f"Easy Apply check '{how}' didn't pan out.", e)
-                            # Dismiss whatever popped up and let the next strategy try.
+                            if easy_apply_modal_visible(driver):
+                                is_easy_apply = True
+                                print_lg(f"Easy Apply modal visible after '{how}' — continuing in modal.")
+                                break
                             try: actions.send_keys(Keys.ESCAPE).perform()
                             except: pass
+                    if not is_easy_apply and not detected_external and easy_apply_modal_visible(driver):
+                        is_easy_apply = True
+                        print_lg("Easy Apply modal already open — continuing.")
                     if is_easy_apply:
                         try: 
                             # Bound before the try: the finally below scopes its clicks to the
@@ -1928,17 +2183,18 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             modal = driver
                             try:
                                 errored = ""
-                                modal = find_by_class(driver, "jobs-easy-apply-modal")
+                                modal = find_easy_apply_modal(driver, 8)
                                 # Stay on the first step when a resume still has to be attached.
                                 # Clicking Next here used to leave the resume step before the file was ready.
                                 if not useNewResume:
-                                    wait_xp_click(modal, next_button_xpath, 1)
+                                    click_easy_apply_footer_button(modal, "next")
                                 resume = "Previous resume"
-                                next_button = True
                                 questions_list = set()
                                 next_counter = 0
+                                resume_upload_tries = 0
                                 blocked_questions = None
-                                while next_button:
+                                ready_to_submit = False
+                                while not ready_to_submit:
                                     next_counter += 1
                                     if next_counter >= 15: 
                                         if pause_at_failed_question:
@@ -1968,6 +2224,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                         if on_resume_step or _resume_file_input(modal) is not None:
                                             if on_resume_step:
                                                 print_lg("Resume step is open. Waiting until it is attached before continuing.")
+                                            resume_upload_tries += 1
                                             uploaded, resume = upload_resume(
                                                 modal,
                                                 resume_upload_path,
@@ -1980,6 +2237,11 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                                 experience=years_of_experience,
                                             )
                                         if on_resume_step and not uploaded:
+                                            if resume_upload_tries >= 3:
+                                                raise Exception(
+                                                    "Could not attach the resume on LinkedIn's Easy Apply step. "
+                                                    "Check that a default resume is uploaded in ApplyXAI and try again."
+                                                )
                                             print_lg("Resume is not attached yet. Staying on this step.")
                                             buffer(2)
                                             advance = False
@@ -1989,10 +2251,24 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                         # Scoped to the dialog on purpose: a document-wide search
                                         # for "Next" matches the search results PAGINATION control
                                         # (aria-label "View next page") and paged away mid-application.
-                                        try: next_button = modal.find_element(By.XPATH, review_button_xpath)
-                                        except NoSuchElementException:  next_button = modal.find_element(By.XPATH, next_button_xpath)
-                                        try: next_button.click()
-                                        except ElementClickInterceptedException: break    # Happens when it tries to click Next button in About Company photos section
+                                        submit_btn = find_easy_apply_footer_button(modal, "submit")
+                                        review_btn = find_easy_apply_footer_button(modal, "review")
+                                        next_btn = find_easy_apply_footer_button(modal, "next")
+                                        if submit_btn and not review_btn and not next_btn:
+                                            ready_to_submit = True
+                                            break
+                                        try:
+                                            if review_btn:
+                                                scroll_to_view(modal, review_btn)
+                                                review_btn.click()
+                                            elif next_btn:
+                                                scroll_to_view(modal, next_btn)
+                                                next_btn.click()
+                                            else:
+                                                errored = "nose"
+                                                break
+                                        except ElementClickInterceptedException:
+                                            break
                                         buffer(click_gap)
 
                             except NoSuchElementException: errored = "nose"
@@ -2005,7 +2281,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                 if questions_list and errored != "stuck": 
                                     print_lg("Answered the following questions...", questions_list)
                                     print("\n\n" + "\n".join(str(question) for question in questions_list) + "\n\n")
-                                wait_xp_click(modal, review_button_xpath, 1, scrollTop=True)
+                                click_easy_apply_footer_button(modal, "review", scroll_top=True)
                                 cur_pause_before_submit = pause_before_submit
                                 if errored == "stuck":
                                     discard_reason = "Required questions left unanswered."
@@ -2019,7 +2295,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                     # try_xp(modal, ".//span[normalize-space(.)='Review']")
                                 if not discard_reason:
                                     follow_company(modal)
-                                    if wait_xp_click(modal, submit_button_xpath, 2, scrollTop=True): 
+                                    if click_easy_apply_footer_button(modal, "submit", scroll_top=True):
                                         date_applied = datetime.now()
                                         if not wait_span_click(driver, "Done", 2): actions.send_keys(Keys.ESCAPE).perform()
                                     elif errored != "stuck" and cur_pause_before_submit and "Yes" in pyautogui.confirm("You submitted the application, didn't you 😒?", "Failed to find Submit Application!", ["Yes", "No"]):
@@ -2038,7 +2314,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             # Not a failure: the dry run did what it was asked. Counting it as
                             # failed made a perfectly good stop_before_submit run read as 0/0/all-failed.
                             print_lg(str(e))
-                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link, reason="Dry run: stopped before submit")
+                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link, platform=active_platform, reason="Dry run: stopped before submit")
                             skip_count += 1
                             discard_job()
                             continue
@@ -2046,7 +2322,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                         except UnansweredQuestions as e:
                             print_lg(str(e))
                             print_lg("Add those answers to config/questions.py and re-run to apply to this job.")
-                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link,
+                            run_hooks.emit("skipped", job_id=job_id, job_link=job_link, platform=active_platform,
                                            reason="Required questions have no saved answer", detail=str(e)[:1000])
                             skip_count += 1
                             discard_job()
@@ -2062,22 +2338,47 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                             continue
                     else:
                         # Case 2: Apply externally
-                        skip, application_link, tabs_count = external_apply(pagination_element, job_id, job_link, resume, date_listed, application_link, screenshot_name)
+                        skip, application_link, tabs_count = external_apply(
+                            pagination_element,
+                            job_id,
+                            job_link,
+                            resume,
+                            date_listed,
+                            application_link,
+                            screenshot_name,
+                            precaptured_link=precaptured_external_link if detected_external else None,
+                        )
                         if dailyEasyApplyLimitReached:
                             print_lg("\n###############  Daily application limit for Easy Apply is reached!  ###############\n")
-                            return
+                            halt = "blocked"
+                            break
                         if skip: continue
 
-                    submitted_jobs(job_id, title, company, work_location, work_style, description, experience_required, skills, hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link, questions_list, connect_request, resume_id=applied_resume_id if uploaded else None, contacts=published_contacts)
+                    submitted_jobs(
+                        job_id, title, company, work_location, work_style, description, experience_required, skills,
+                        hr_name, hr_link, resume, reposted, date_listed, date_applied, job_link, application_link,
+                        questions_list, connect_request,
+                        resume_id=applied_resume_id or (applyxai_default_resume_id or None),
+                        contacts=published_contacts,
+                    )
 
                     print_lg(f'Successfully saved "{title} | {company}" job. Job ID: {job_id} info')
                     current_count += 1
-                    if application_link == "Easy Applied": easy_applied_count += 1
-                    else:   external_jobs_count += 1
+                    if application_link == "Easy Applied":
+                        easy_applied_count += 1
+                        submitted_batch += 1
+                        if max_successful is not None and submitted_batch >= max_successful:
+                            halt = "limit"
+                    else:
+                        external_jobs_count += 1
                     applied_jobs.add(job_id)
+                    if halt:
+                        break
 
 
 
+                if halt:
+                    break
                 # Switching to next page
                 if pagination_element == None:
                     print_lg("Couldn't find pagination element, probably at the end page of results!")
@@ -2088,10 +2389,18 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                 except NoSuchElementException:
                     print_lg(f"\n>-> Didn't find Page {current_page+1}. Probably at the end page of results!\n")
                     break
+            if halt:
+                break
 
-        except (NoSuchWindowException, WebDriverException) as e:
-            logger.error("The browser window was closed or the session became invalid. Stopping.", exc_info=e)
-            raise e  # let the outer handler deal with it
+        except WebDriverException as e:
+            if session_lost(e):
+                logger.error("%s Stopping this search pass.", _SESSION_LOST_MSG, exc_info=e)
+                if _recover_browser_session():
+                    print_lg("Chrome restarted — continuing with the next search term.")
+                    break
+                raise
+            logger.warning("Transient browser error while reading job listings: %s", e)
+            critical_error_log("In Applier (transient WebDriver)", e)
         except Exception as e:
             logger.error("Could not read the job listings.")
             critical_error_log("In Applier", e)
@@ -2099,8 +2408,31 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                 print_lg(driver.page_source, pretty=True)
             except Exception as dump_error:
                 logger.warning("Could not capture the page source; the browser may have crashed. %s", dump_error)
+        if halt == "limit":
+            break
+        cursor["term_index"] = i + 1
+        cursor["page"] = 1
+        if halt == "blocked":
+            break
 
-        
+    if halt == "blocked":
+        return "blocked", submitted_batch, "LinkedIn asked you to stop, or the daily Easy Apply limit was reached."
+    if halt == "limit":
+        return "limit", submitted_batch, ""
+    cursor["term_index"] = len(terms)
+    return "exhausted", submitted_batch, ""
+
+
+def _selected_sources() -> list[str]:
+    chosen = [name for name in (applyxai_sources or ["linkedin"]) if name in ("linkedin", "naukri")]
+    return chosen or ["linkedin"]
+
+
+def _emit_source(event: dict) -> None:
+    kind = event.pop("event")
+    run_hooks.emit(kind, **event)
+
+
 def run(total_runs: int) -> int:
     if dailyEasyApplyLimitReached:
         return total_runs
@@ -2108,7 +2440,41 @@ def run(total_runs: int) -> int:
     print_lg(f"Date and Time: {datetime.now()}")
     print_lg(f"Cycle number: {total_runs}")
     print_lg(f"Currently looking for jobs posted within '{date_posted}' and sorting them by '{sort_by}'")
-    apply_to_jobs(search_terms)
+    from automation.sources.rotation import Rotation
+    from automation.sources.naukri import apply_batch as apply_naukri_batch
+    sources = _selected_sources()
+    rotation = Rotation(sources, applyxai_switch_after if len(sources) > 1 else None)
+    while True:
+        source = rotation.current()
+        if source is None:
+            break
+        announcement = rotation.begin_slice()
+        if announcement:
+            _emit_source(dict(announcement))
+        bind_source_history(source)
+        budget = rotation.budget()
+        print_lg(f"Source: {source}. Applications before switching: {budget if budget is not None else 'entire search'}.")
+        if source == "naukri":
+            status, submitted, reason = apply_naukri_batch(
+                driver, search_terms, search_location, max_successful=budget, cursor=rotation.cursor(source),
+            )
+        else:
+            if not is_logged_in_LN():
+                login_LN()
+            linkedin_block = _blocked_by_security_challenge("LinkedIn", 0)
+            if linkedin_block:
+                status, submitted, reason = linkedin_block
+            elif not is_logged_in_LN():
+                status, submitted, reason = "blocked", 0, "Sign in to LinkedIn to continue."
+            else:
+                linkedin_cursor = rotation.cursor(source)
+                status, submitted, reason = apply_to_jobs(
+                    search_terms, max_successful=budget, cursor=linkedin_cursor,
+                )
+        for item in rotation.absorb(status, submitted, reason=reason):
+            _emit_source(dict(item))
+        if dailyEasyApplyLimitReached and source == "linkedin" and "naukri" not in sources:
+            break
     print_lg("########################################################################################################################\n")
     # Only wait between cycles when there is actually going to be another cycle. This used
     # to run at the end of every single run, which reads as a 10 minute hang.
@@ -2133,18 +2499,20 @@ def main() -> None:
         global linkedIn_tab, tabs_count, useNewResume, aiClient
         alert_title = "Error Occurred. Closing Browser!"
         validate_config()
-        run_hooks.emit("run_started", search_terms=search_terms)
+        global _browser_recovery_attempts
+        _browser_recovery_attempts = 0
+        run_hooks.emit("run_started", search_terms=search_terms, sources=_selected_sources())
         
         if not os.path.exists(default_resume_path):
             pyautogui.alert(text='Your default resume "{}" is missing! Please update it\'s folder path "default_resume_path" in config.py\n\nOR\n\nAdd a resume with exact name and path (check for spelling mistakes including cases).\n\n\nFor now the bot will continue using your previous upload from LinkedIn!'.format(default_resume_path), title="Missing Resume", button="OK")
             useNewResume = False
         
-        # Login to LinkedIn
         tabs_count = len(driver.window_handles)
-        driver.get("https://www.linkedin.com/login")
-        if not is_logged_in_LN(): login_LN()
-        
         linkedIn_tab = driver.current_window_handle
+        if "linkedin" in _selected_sources():
+            driver.get("https://www.linkedin.com/login")
+            if not is_logged_in_LN(): login_LN()
+            linkedIn_tab = driver.current_window_handle
 
         aiClient = None
         from automation import job_resume, qa_resolver
@@ -2175,9 +2543,13 @@ def main() -> None:
     except run_hooks.StopRequested:
         stop_requested = True
         print_lg("Stop requested. Finishing the run.")
-    except (NoSuchWindowException, WebDriverException) as e:
-        error_message = "The browser window was closed or the session became invalid."
-        logger.error("The browser window was closed or the session became invalid. Exiting.", exc_info=e)
+    except WebDriverException as e:
+        if session_lost(e):
+            error_message = _SESSION_LOST_MSG
+            logger.error("%s Exiting.", _SESSION_LOST_MSG, exc_info=e)
+        else:
+            error_message = str(e)[:1000]
+            critical_error_log("In Applier Main (WebDriver)", e)
     except Exception as e:
         error_message = str(e)
         critical_error_log("In Applier Main", e)

@@ -30,6 +30,7 @@ import { ApplicationDetailModal } from "./ApplicationDetailModal";
 import { formatRelative, safeExternalUrl, STATUS_LABELS, STATUS_TONES } from "../lib/format";
 import { useDebounced } from "../lib/useDebounced";
 import { errorMessage } from "../services/api";
+import { useLiveRunPoll } from "../hooks/useAutomationOverview";
 import { dashboard, jobs, preferences } from "../services/endpoints";
 import type { ApplicationStatus, JobWithApplication } from "../types";
 
@@ -128,18 +129,21 @@ export function JobsDashboard() {
   const [openId, setOpenId] = useState<string | null>(null);
   const search = useDebounced(q.trim());
 
+  const livePoll = useLiveRunPoll();
   const options = useQuery({ queryKey: ["preferences", "options"], queryFn: preferences.options, staleTime: Infinity });
 
   const statsQuery = useQuery({
     queryKey: ["jobs", "stats-pool"],
     queryFn: () => jobs.list({ page: 1, page_size: 100 }),
-    staleTime: 60_000,
+    staleTime: livePoll ? 0 : 60_000,
+    refetchInterval: livePoll,
   });
 
   const dashQuery = useQuery({
     queryKey: ["dashboard"],
     queryFn: dashboard.stats,
-    staleTime: 60_000,
+    staleTime: livePoll ? 0 : 60_000,
+    refetchInterval: livePoll,
   });
 
   const serverQuery = useQuery({
@@ -152,6 +156,8 @@ export function JobsDashboard() {
         page_size: PAGE_SIZE,
       }),
     placeholderData: keepPreviousData,
+    staleTime: livePoll ? 0 : undefined,
+    refetchInterval: livePoll,
     enabled: !statusFilter,
   });
 

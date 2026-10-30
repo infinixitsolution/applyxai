@@ -23,20 +23,34 @@ from pathlib import Path
 
 from agent.win_process import background_creationflags
 from automation import events as ev
+from automation.engine_lock import engine_lock
 from modules.run_hooks import CONTROL_ENV, EVENTS_ENV, MAX_APPLIED_ENV, PROFILE_ENV
 
 try:
-    from agent.engine_bootstrap import engine_argv, engine_root
+    from agent.engine_bootstrap import engine_argv, engine_root, profile_sync_script
 except ImportError:
     engine_root = lambda: Path(__file__).resolve().parent.parent  # type: ignore[assignment,misc]
 
-    def engine_argv() -> list[str]:
+    def engine_argv(*, profile_sync: bool = False) -> list[str]:
         root = Path(__file__).resolve().parent.parent
-        return [sys.executable, str(root / "runAiBot.py")]
+        name = "runLinkedInProfileSync.py" if profile_sync else "runAiBot.py"
+        return [sys.executable, str(root / name)]
+
+    def profile_sync_script() -> Path:
+        return Path(__file__).resolve().parent.parent / "runLinkedInProfileSync.py"
 
 
 ENGINE_ROOT = engine_root()
 ENGINE_SCRIPT = ENGINE_ROOT / "runAiBot.py"
+PROFILE_SYNC_SCRIPT = profile_sync_script()
+
+
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _get_python_exe() -> str:
+    return sys.executable
 RUN_CONFIG_ENV = "APPLYXAI_RUN_CONFIG"
 
 RUNNING, PAUSE, STOP = "run", "pause", "stop"
@@ -73,12 +87,25 @@ class EngineRun:
         self._popen = popen
         self._proc = None
         self._offset = 0
+        self._profile_sync = False
+        self._lock = engine_lock()
+
+    def _release_lock_if_idle(self) -> None:
+        if self._proc is None or self._proc.poll() is not None:
+            self._lock.release()
 
     # ---------------------------------------------------------------- lifecycle
-    def start(self, config: dict, *, max_applied: int | None = None, extra_env: dict | None = None) -> None:
+    def start(self, config: dict, *, max_applied: int | None = None, extra_env: dict | None = None,
+              profile_sync: bool = False) -> None:
         """Launch the engine. With `max_applied`, it stops by itself after that many applications."""
         if self._proc is not None:
             raise RunnerError("this run has already been started")
+        if not self._lock.acquire():
+            raise RunnerError(
+                "Another ApplyXAI automation session is already open in Chrome. "
+                "Close extra browsers, quit duplicate ApplyXAI Desktop windows, then try again.",
+            )
+        self._profile_sync = profile_sync
         for path in (self.dir, self.workspace.profile_dir, self.workspace.history_dir):
             path.mkdir(parents=True, exist_ok=True)
         self.config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -104,9 +131,17 @@ class EngineRun:
             kwargs["creationflags"] = background_creationflags(new_process_group=True)
         else:
             kwargs["start_new_session"] = True
-        cmd = engine_argv() if getattr(sys, "frozen", False) else [self._python, str(ENGINE_SCRIPT)]
-        with open(self.log_path, "w", encoding="utf-8") as log:
-            self._proc = self._popen(cmd, stdout=log, **kwargs)
+        if getattr(sys, "frozen", False):
+            cmd = engine_argv(profile_sync=self._profile_sync)
+        else:
+            script = PROFILE_SYNC_SCRIPT if self._profile_sync else ENGINE_SCRIPT
+            cmd = [self._python, str(script)]
+        try:
+            with open(self.log_path, "w", encoding="utf-8") as log:
+                self._proc = self._popen(cmd, stdout=log, **kwargs)
+        except Exception:
+            self._lock.release()
+            raise
 
     def pause(self) -> None:
         self._write_control(PAUSE)
@@ -145,10 +180,13 @@ class EngineRun:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        self._release_lock_if_idle()
 
     # ---------------------------------------------------------------- status
     @property
     def running(self) -> bool:
+        if self._proc is not None and self._proc.poll() is not None:
+            self._release_lock_if_idle()
         return self._proc is not None and self._proc.poll() is None
 
     @property

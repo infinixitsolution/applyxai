@@ -110,6 +110,29 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
     today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
     chart_start = today - timedelta(days=dashboard_service.CHART_DAYS - 1)
     daily = dashboard_service.daily_series(db, chart_start)
+    signups = {
+        (chart_start + timedelta(days=i)).date().isoformat(): 0
+        for i in range(dashboard_service.CHART_DAYS)
+    }
+    for (created_at,) in db.execute(select(User.created_at).where(User.created_at >= chart_start)):
+        day = created_at.date().isoformat()
+        if day in signups:
+            signups[day] += 1
+    revenue_daily = {
+        (chart_start + timedelta(days=i)).date().isoformat(): 0
+        for i in range(dashboard_service.CHART_DAYS)
+    }
+    for paid_at, amount in db.execute(
+        select(Payment.paid_at, Payment.amount_cents).where(
+            Payment.status.in_(("captured", "paid", "succeeded")),
+            Payment.paid_at >= chart_start,
+        )
+    ):
+        if paid_at is None:
+            continue
+        day = paid_at.date().isoformat()
+        if day in revenue_daily:
+            revenue_daily[day] += int(amount or 0)
 
     runs_by_status = {s.value: 0 for s in AutomationStatus}
     for status, n in db.execute(select(AutomationJob.status, func.count())
@@ -139,6 +162,37 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
             MockInterviewFeedbackJob.created_at >= now - timedelta(hours=24),
         )
     ) or 0
+    mi_daily = {
+        (chart_start + timedelta(days=i)).date().isoformat(): 0
+        for i in range(dashboard_service.CHART_DAYS)
+    }
+    for (created_at,) in db.execute(
+        select(MockInterviewSession.created_at).where(MockInterviewSession.created_at >= chart_start)
+    ):
+        if created_at is None:
+            continue
+        day = created_at.date().isoformat()
+        if day in mi_daily:
+            mi_daily[day] += 1
+    scores: list[float] = []
+    for (fb,) in db.execute(
+        select(MockInterviewSession.feedback).where(
+            MockInterviewSession.status == MockInterviewSessionStatus.COMPLETED,
+            MockInterviewSession.feedback.is_not(None),
+        )
+    ):
+        if isinstance(fb, dict):
+            raw = fb.get("overall_score")
+            if isinstance(raw, (int, float)):
+                scores.append(float(raw))
+    li_by_status: dict[str, int] = {"active": 0, "completed": 0}
+    for status, n in db.execute(select(LiveInterviewSession.status, func.count()).group_by(LiveInterviewSession.status)):
+        li_by_status[str(status)] = n
+    li_this_month = db.scalar(
+        select(func.count())
+        .select_from(LiveInterviewSession)
+        .where(LiveInterviewSession.created_at >= period_start)
+    ) or 0
 
     return {
         "users": users,
@@ -146,6 +200,8 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
                           "mrr_cents": mrr, "past_due": past_due},
         "revenue_30d_cents": revenue,
         "applications": {"this_month_by_status": by_status, "daily": [{"date": d, **v} for d, v in daily.items()]},
+        "signups_daily": [{"date": d, "applied": n, "failed": 0} for d, n in signups.items()],
+        "revenue_daily": [{"date": d, "applied": n, "failed": 0} for d, n in revenue_daily.items()],
         "automation": {"active_runs": active_runs, "last_24h_by_status": runs_by_status,
                        "devices": len(devices), "devices_online": sum(agent_service.is_online(d, now) for d in devices)},
         "mock_interviews": {
@@ -153,6 +209,14 @@ def analytics(db: Session, now: datetime | None = None) -> dict:
             "this_month": mi_this_month,
             "by_status": mi_by_status,
             "failed_feedback_jobs_24h": mi_failed_jobs_24h,
+            "average_score": round(sum(scores) / len(scores), 1) if scores else None,
+            "scored_sessions": len(scores),
+            "daily": [{"date": d, "applied": n, "failed": 0} for d, n in mi_daily.items()],
+        },
+        "live_interviews": {
+            "total_sessions": sum(li_by_status.values()),
+            "this_month": li_this_month,
+            "by_status": li_by_status,
         },
     }
 
@@ -566,6 +630,21 @@ def revoke_grant(db: Session, admin: User, user_id: uuid.UUID) -> dict:
 
 
 # ----------------------------------------------------------------------------- lists
+def list_payments(db: Session, params: PageParams, *, status: str | None = None, q: str | None = None) -> dict:
+    stmt = (select(Payment, User.email).join(User, User.id == Payment.user_id)
+            .order_by(Payment.created_at.desc(), Payment.id))
+    if status:
+        stmt = stmt.where(Payment.status == status)
+    if q and q.strip():
+        term = _like(q)
+        stmt = stmt.where(func.lower(User.email).like(term, escape="\\"))
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = db.execute(stmt.limit(params.page_size).offset((params.page - 1) * params.page_size)).all()
+    items = [{**billing_service.payment_out(p), "user_id": str(p.user_id), "user_email": email, "provider": p.provider}
+             for p, email in rows]
+    return page_response(items, total, params)
+
+
 def list_subscriptions(db: Session, params: PageParams, *, status: str | None = None, plan: str | None = None) -> dict:
     stmt = (select(Subscription, User.email).join(User, User.id == Subscription.user_id).join(Subscription.plan)
             .order_by(Subscription.created_at.desc(), Subscription.id))
@@ -624,7 +703,36 @@ def list_applications(db: Session, params: PageParams, *, status: str | None = N
     return page_response(items, total, params)
 
 
-def list_companies(db: Session, params: PageParams, *, q: str | None = None) -> dict:
+_COMPANY_SORT_FIELDS = frozenset({"last_seen", "company", "jobs", "applied", "users", "search_filters"})
+
+
+def _sort_company_items(items: list[dict], sort: str | None) -> None:
+    raw = (sort or "-last_seen").strip()
+    reverse = raw.startswith("-")
+    field = raw.lstrip("-")
+    if field not in _COMPANY_SORT_FIELDS:
+        field = "last_seen"
+        reverse = True
+
+    def _key(item: dict):
+        val = item.get(field)
+        if field == "company":
+            return (val or "").lower()
+        if field == "last_seen":
+            return val or ""
+        return int(val or 0)
+
+    items.sort(key=_key, reverse=reverse)
+
+
+def list_companies(
+    db: Session,
+    params: PageParams,
+    *,
+    q: str | None = None,
+    sort: str | None = None,
+    filter: str | None = None,
+) -> dict:
     """Every company a user targeted in search, or that a search turned up on a job."""
     company_key = func.lower(func.trim(Job.company))
     rows = db.execute(
@@ -707,41 +815,93 @@ def list_companies(db: Session, params: PageParams, *, q: str | None = None) -> 
             "search_filters": len(entry["filter_users"]),
             "last_seen": _iso(entry["last_seen"]),
         })
-    items.sort(key=lambda item: (-item["users"], -item["jobs"], -item["applied"], item["company"].lower()))
+
+    scope = (filter or "").strip().lower()
+    if scope == "applied":
+        items = [row for row in items if row["applied"] > 0]
+    elif scope == "search":
+        items = [row for row in items if row["search_filters"] > 0]
+    elif scope == "jobs":
+        items = [row for row in items if row["jobs"] > 0]
+
+    _sort_company_items(items, sort)
     start = (params.page - 1) * params.page_size
     return page_response(items[start:start + params.page_size], len(items), params)
 
 
 def company_detail(db: Session, name: str) -> dict:
-    """Overview, jobs with applied counts, and contacts the postings themselves published."""
+    """Overview, jobs with applied counts, posting contacts, and web-sourced directory data."""
     from automation.company_contacts import contact_key, extract_published_contacts, merge_contacts
+    from backend.app.services import company_directory_service
 
     key = name.strip().lower()
     if not key:
         raise AppError("NOT_FOUND", "Company not found", 404)
 
+    profile = company_directory_service.get_profile(db, name)
+
     jobs: dict[str, dict] = {}
     published: dict[str, dict] = {}
-    display = name.strip()
+    display = (profile.company_name if profile and profile.company_name else name.strip())
     locations: set[str] = set()
     last_seen = None
     filter_users: set[str] = set()
     applicants: set[str] = set()
+    status_breakdown: dict[str, int] = {s.value: 0 for s in ApplicationStatus}
 
     def touch(when) -> None:
         nonlocal last_seen
         if when and (last_seen is None or when > last_seen):
             last_seen = when
 
+    application_items: list[dict] = []
+    candidate_map: dict[str, dict] = {}
+
     rows = db.execute(
-        select(Job, Application)
+        select(Job, Application, User.email)
         .join(Application, Application.job_id == Job.id)
+        .join(User, User.id == Application.user_id)
         .where(func.lower(func.trim(Job.company)) == key)
+        .order_by(Application.updated_at.desc(), Application.id)
     ).all()
-    for job, application in rows:
+    for job, application, user_email in rows:
         display = (job.company or display).strip() or display
         touch(application.updated_at)
-        applicants.add(str(application.user_id))
+        uid = str(application.user_id)
+        applicants.add(uid)
+        status_breakdown[application.status.value] = status_breakdown.get(application.status.value, 0) + 1
+        application_items.append({
+            "id": str(application.id),
+            "status": application.status.value,
+            "applied_at": _iso(application.applied_at),
+            "updated_at": _iso(application.updated_at),
+            "failure_reason": (application.failure_reason or "")[:500],
+            "user_id": uid,
+            "user_email": user_email,
+            "job": {
+                "id": str(job.id),
+                "title": job.title,
+                "location": job.location,
+                "job_url": job.job_url,
+                "platform": job.platform or "linkedin",
+            },
+        })
+        cand = candidate_map.get(uid)
+        if cand is None:
+            cand = {
+                "user_id": uid,
+                "user_email": user_email,
+                "applications": 0,
+                "applied": 0,
+                "in_search_filter": False,
+                "last_seen": None,
+            }
+            candidate_map[uid] = cand
+        cand["applications"] += 1
+        if application.status == ApplicationStatus.APPLIED:
+            cand["applied"] += 1
+        if application.updated_at and (cand["last_seen"] is None or application.updated_at > cand["last_seen"]):
+            cand["last_seen"] = application.updated_at
         if job.location.strip():
             locations.add(job.location.strip())
         bucket = jobs.get(str(job.id))
@@ -751,6 +911,8 @@ def company_detail(db: Session, name: str) -> dict:
                 "title": job.title,
                 "location": job.location,
                 "job_url": job.job_url,
+                "platform": job.platform or "linkedin",
+                "discovered_at": job.discovered_at,
                 "applied": 0,
                 "discovered": 0,
                 "users": set(),
@@ -789,7 +951,40 @@ def company_detail(db: Session, name: str) -> dict:
         filter_users.add(str(user_id))
         touch(updated_at)
 
-    if not jobs and not filter_users:
+    for uid in filter_users:
+        cand = candidate_map.get(uid)
+        if cand is None:
+            try:
+                user_uuid = uuid.UUID(uid)
+            except (ValueError, TypeError):
+                continue
+            email = db.scalar(select(User.email).where(User.id == user_uuid))
+            cand = {
+                "user_id": uid,
+                "user_email": email or "",
+                "applications": 0,
+                "applied": 0,
+                "in_search_filter": True,
+                "last_seen": None,
+            }
+            candidate_map[uid] = cand
+        else:
+            cand["in_search_filter"] = True
+
+    applications_total = len(application_items)
+    application_items = application_items[:200]
+
+    candidate_items = []
+    for cand in candidate_map.values():
+        candidate_items.append({
+            **cand,
+            "last_seen": _iso(cand["last_seen"]),
+        })
+    candidate_items.sort(
+        key=lambda row: (-row["applications"], -row["applied"], (row["user_email"] or "").lower()),
+    )
+
+    if not jobs and not filter_users and profile is None:
         raise AppError("NOT_FOUND", "Company not found", 404)
 
     applied = sum(job["applied"] for job in jobs.values())
@@ -798,6 +993,8 @@ def company_detail(db: Session, name: str) -> dict:
         "title": job["title"],
         "location": job["location"],
         "job_url": job["job_url"],
+        "platform": job["platform"],
+        "discovered_at": _iso(job["discovered_at"]),
         "applied": job["applied"],
         "other": job["discovered"],
         "users": len(job["users"]),
@@ -805,15 +1002,74 @@ def company_detail(db: Session, name: str) -> dict:
     } for job in jobs.values()]
     job_items.sort(key=lambda item: (-item["applied"], -item["users"], item["title"].lower()))
 
-    contact_items = [{
+    def _emails_for(user_ids: set[str]) -> list[str]:
+        if not user_ids:
+            return []
+        ids = []
+        for raw in user_ids:
+            try:
+                ids.append(uuid.UUID(raw))
+            except (ValueError, TypeError):
+                continue
+        if not ids:
+            return []
+        rows = db.execute(select(User.email).where(User.id.in_(ids)).order_by(User.email)).all()
+        return [email for (email,) in rows if email]
+
+    applicant_emails = _emails_for(applicants)
+    search_filter_emails = _emails_for(filter_users)
+
+    posting_contacts = [{
         "name": row["name"],
         "email": row["email"],
         "phone": row["phone"],
         "role": row["role"],
         "link": row["link"],
         "jobs": row["jobs"],
+        "origin": "posting",
+        "sources": [],
     } for row in published.values()]
+
+    if profile is None:
+        profile = company_directory_service.get_profile(db, display)
+    directory_rows = company_directory_service.directory_contacts_for_api(profile)
+    for row in directory_rows:
+        row["origin"] = "web"
+
+    merged_contacts: dict[str, dict] = {}
+    contact_order: list[str] = []
+    for row in posting_contacts + directory_rows:
+        key = contact_key(row)
+        if not key:
+            continue
+        existing = merged_contacts.get(key)
+        if existing is None:
+            merged_contacts[key] = dict(row)
+            contact_order.append(key)
+            continue
+        for field in ("name", "email", "phone", "role", "link"):
+            if not existing.get(field) and row.get(field):
+                existing[field] = row[field]
+        if row.get("origin") == "web" and existing.get("origin") != "web":
+            existing["origin"] = "both"
+        for job in row.get("jobs") or []:
+            if job not in existing["jobs"]:
+                existing["jobs"].append(job)
+        for src in row.get("sources") or []:
+            if src not in existing["sources"]:
+                existing["sources"].append(src)
+
+    contact_items = [merged_contacts[k] for k in contact_order]
     contact_items.sort(key=lambda item: (-int(bool(item["email"] or item["phone"])), item["name"].lower() or item["email"]))
+
+    external_links = list(profile.job_links or []) if profile else []
+    known_urls = {j["job_url"] for j in job_items if j.get("job_url")}
+    for link in external_links:
+        link["known_in_app"] = link.get("url") in known_urls
+
+    posting_only = sum(1 for c in contact_items if c.get("origin") == "posting")
+    web_only = sum(1 for c in contact_items if c.get("origin") == "web")
+    both_origins = sum(1 for c in contact_items if c.get("origin") == "both")
 
     return {
         "company": display,
@@ -823,9 +1079,32 @@ def company_detail(db: Session, name: str) -> dict:
         "search_filters": len(filter_users),
         "locations": sorted(locations),
         "last_seen": _iso(last_seen),
+        "applicant_emails": applicant_emails,
+        "search_filter_emails": search_filter_emails,
+        "status_breakdown": status_breakdown,
+        "applications": application_items,
+        "applications_total": applications_total,
+        "candidates": candidate_items,
         "job_list": job_items,
         "contacts": contact_items,
+        "contact_stats": {
+            "total": len(contact_items),
+            "from_postings": posting_only + both_origins,
+            "from_web": web_only + both_origins,
+        },
+        "profiling": company_directory_service.profiling_snapshot(profile),
+        "source_pages": list(profile.source_pages or []) if profile else [],
+        "external_job_links": external_links,
     }
+
+
+def enrich_company_directory(db: Session, name: str) -> dict:
+    from backend.app.services import company_directory_service
+
+    company_directory_service.get_or_create_profile(db, name)
+    db.commit()
+    company_directory_service.schedule_enrichment(name, force=True)
+    return company_detail(db, name)
 
 
 def list_logs(db: Session, params: PageParams, *, levels: list[str] | None = None, q: str | None = None) -> dict:

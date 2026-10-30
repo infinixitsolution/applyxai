@@ -9,31 +9,37 @@ import { formatNotificationType } from "../../lib/notificationLabel";
 import { ConfirmDialog } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { useToast } from "../../components/Toast";
-import { Alert, Button, ButtonLink, Card, cx, EmptyState, PageHeader, Spinner, Tabs } from "../../components/ui";
+import { Alert, Button, ButtonLink, Card, cx, EmptyState, PageHeader, Spinner } from "../../components/ui";
 import { ApplicationPreferencesForm } from "../../features/ApplicationPreferencesForm";
-import { ProfileForm } from "../../features/ProfileForm";
-import { TwoFactorSettings } from "../../features/TwoFactorSettings";
-import { ResumesDashboard } from "../../features/ResumesDashboard";
+import { AutomationSettingsForm } from "../../features/AutomationSettingsForm";
+import { CustomApplicationQuestions } from "../../features/CustomApplicationQuestions";
+import { MasterProfileDashboard } from "../../features/MasterProfileDashboard";
 import { SearchPreferencesForm } from "../../features/SearchPreferencesForm";
+import { TwoFactorSettings } from "../../features/TwoFactorSettings";
+import { AgentCredentialsPanel } from "../../components/AgentCredentialsPanel";
+import { ResumesDashboard } from "../../features/ResumesDashboard";
+import { isDesktop } from "../../lib/desktop";
 import { formatDate, formatDateTime, formatRelative } from "../../lib/format";
 import { errorMessage } from "../../services/api";
-import { auth, notifications } from "../../services/endpoints";
+import { auth, notifications, referrals } from "../../services/endpoints";
 
 export function ResumesPage() {
   return <ResumesDashboard />;
 }
 
-export function PreferencesPage() {
-  const [tab, setTab] = useState<"search" | "application">("search");
-  const tabs = [
-    { id: "search" as const, label: "Job search" },
-    { id: "application" as const, label: "Application answers" },
-  ];
+/** Legacy route — redirects in App.tsx; keep export for tests if imported. */
+export function PreferencesRedirectPage() {
+  return null;
+}
+
+export function CustomQuestionsPage() {
   return (
     <>
-      <PageHeader title="Preferences" description="What to search for, and how to answer application questions." />
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
-      {tab === "search" ? <Card><SearchPreferencesForm /></Card> : <ApplicationPreferencesForm />}
+      <PageHeader
+        title="Custom Application Questions"
+        description="Employer-specific screening answers. Years of experience, salary, and notice stay on Master Profile."
+      />
+      <CustomApplicationQuestions />
     </>
   );
 }
@@ -41,9 +47,98 @@ export function PreferencesPage() {
 export function ProfilePage() {
   return (
     <>
-      <PageHeader title="Profile" description="Details used to fill in application forms." />
-      <Card><ProfileForm /></Card>
+      <PageHeader
+        title="Master Profile"
+        description="Manage your personal information, professional experience, career preferences, and reusable application answers in one place."
+      />
+      <MasterProfileDashboard />
     </>
+  );
+}
+
+export function AutomationSettingsPage() {
+  return (
+    <>
+      <PageHeader
+        title="Automation Settings"
+        description="Control how the job application automation interacts with websites, fills answers, and submits applications."
+      />
+      <AutomationSettingsForm />
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-slate-900">Application AI</h2>
+        <p className="mb-4 mt-1 text-sm text-slate-500">
+          Turn this on after onboarding so auto-apply can fill questions that are not already in Master Profile or Custom Questions.
+        </p>
+        <ApplicationPreferencesForm variant="ai" submitLabel="Save application AI" />
+      </div>
+    </>
+  );
+}
+
+export function JobLoginsPage() {
+  if (!isDesktop) {
+    return (
+      <>
+        <PageHeader
+          title="Job site logins"
+          description="LinkedIn and Naukri passwords are saved only in ApplyXAI Desktop on your PC."
+        />
+        <Card>
+          <p className="text-sm text-slate-600">
+            Install and open <strong>ApplyXAI Desktop</strong>, then use <strong>Job logins</strong> in the sidebar to
+            store credentials for automation. Passwords never leave your computer.
+          </p>
+        </Card>
+      </>
+    );
+  }
+  return (
+    <>
+      <PageHeader
+        title="Job site logins"
+        description="Saved only on this computer. ApplyXAI uses them to sign in during automation — they are never uploaded to our servers."
+      />
+      <AgentCredentialsPanel />
+    </>
+  );
+}
+
+export function JobSearchPreferencesPage() {
+  return (
+    <>
+      <PageHeader title="Job search" description="Keywords, locations, and LinkedIn filters used when a run starts." />
+      <Card>
+        <SearchPreferencesForm />
+      </Card>
+    </>
+  );
+}
+
+function CandidateReferralCard() {
+  const toast = useToast();
+  const { data, isLoading, error } = useQuery({ queryKey: ["candidate-referral"], queryFn: referrals.me });
+  if (isLoading) return <Spinner />;
+  if (error || !data) return null;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const url = `${origin}${data.referral_path}`;
+  return (
+    <Card title="Invite a candidate">
+      <p className="mb-3 text-sm text-slate-600">
+        Share your personal link. When someone registers with it, they are attributed to you (this is separate from partner campus commissions).
+      </p>
+      <p className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-sm text-slate-800">{url}</p>
+      <p className="mt-2 text-xs text-slate-500">{data.attributed} attributed · {data.converted} converted after first payment</p>
+      <Button
+        className="mt-3"
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          void navigator.clipboard.writeText(url).then(() => toast.success("Referral link copied"));
+        }}
+      >
+        Copy link
+      </Button>
+    </Card>
   );
 }
 
@@ -115,6 +210,7 @@ export function SettingsPage() {
           </dl>
           <p className="mt-4 text-sm text-slate-500">To change your name or phone number, edit your <Link to="/app/profile" className="font-medium text-brand-600 hover:underline">profile</Link>.</p>
         </Card>
+        <CandidateReferralCard />
         <Card title="Password">
           <p className="mb-4 text-sm text-slate-600">We'll email you a secure link to choose a new password.</p>
           <Button variant="secondary" onClick={() => reset.mutate()} loading={reset.isPending}>Email me a reset link</Button>

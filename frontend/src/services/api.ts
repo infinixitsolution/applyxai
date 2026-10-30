@@ -7,12 +7,20 @@
  * - A 401 triggers one shared POST /auth/refresh, then the request is retried once.
  */
 
+import { isDesktop } from "../lib/desktop";
+
 export const API_BASE = "/api";
+
+const DESKTOP_API_HINT =
+  "Start the API: venv\\Scripts\\python -m uvicorn backend.app.main:app --reload --port 8010 " +
+  "(and for dev mode, also run npm run dev in frontend on port 5173).";
 const CSRF_COOKIE = "applyxai_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // Endpoints where a 401 means "wrong credentials / no session", not "access token expired".
 const NO_REFRESH = ["/auth/login", "/auth/login/2fa", "/auth/refresh", "/auth/register", "/auth/logout"];
+/** HTTP 401 with these error codes means the ApplyXAI session died — not third-party API key checks. */
+const SESSION_EXPIRED_CODES = new Set(["UNAUTHORIZED", "SESSION_EXPIRED"]);
 
 export interface FieldError {
   field: string;
@@ -40,6 +48,8 @@ export interface RequestOptions {
   body?: unknown;
   form?: FormData;
   query?: Record<string, QueryValue>;
+  /** Default 25s; use a longer value for Firecrawl / outreach bulk jobs. */
+  timeoutMs?: number;
 }
 
 let sessionExpiredHandler: (() => void) | null = null;
@@ -81,7 +91,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     body = JSON.stringify(options.body);
   }
   if (!SAFE_METHODS.has(method)) headers[CSRF_HEADER] = readCookie(CSRF_COOKIE);
-  const timeoutMs = 25_000;
+  const timeoutMs = options.timeoutMs ?? 25_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -107,9 +117,14 @@ async function parse<T>(response: Response): Promise<T> {
   try {
     payload = await response.json();
   } catch {
+    const offline = response.status >= 500 || response.status === 0 || response.status === 502;
     throw new ApiError(
-      response.status >= 500 || response.status === 0 ? "SERVER_UNAVAILABLE" : "BAD_RESPONSE",
-      "The server isn't responding. Please try again in a moment.",
+      offline ? "SERVER_UNAVAILABLE" : "BAD_RESPONSE",
+      offline && isDesktop
+        ? DESKTOP_API_HINT
+        : offline
+          ? "The server isn't responding. Please try again in a moment."
+          : "The server returned an unexpected response. Please try again.",
       response.status,
     );
   }
@@ -133,9 +148,12 @@ async function requestResponse(path: string, options: RequestOptions = {}): Prom
   try {
     response = await send(path, options);
   } catch {
-    const message = import.meta.env.DEV
-      ? "Can't reach ApplyXAI. Start the API on port 8000 and open the app at http://localhost:5173 (npm run dev)."
-      : "Can't reach ApplyXAI. Check your connection.";
+    const message = isDesktop
+      ? DESKTOP_API_HINT
+      : import.meta.env.DEV
+        ? "Can't reach ApplyXAI. In two terminals run .\\scripts\\dev_api.ps1 and .\\scripts\\dev_frontend.ps1 " +
+            "(or .\\scripts\\dev_stack.ps1), then open http://127.0.0.1:5173 — not the built dist/ folder."
+        : "Can't reach ApplyXAI. Check your connection.";
     throw new ApiError("NETWORK_ERROR", message, 0);
   }
   if (response.status === 401 && !NO_REFRESH.some((p) => path.startsWith(p))) {
@@ -143,7 +161,17 @@ async function requestResponse(path: string, options: RequestOptions = {}): Prom
       response = await send(path, options);
     }
     if (response.status === 401) {
-      sessionExpiredHandler?.();
+      let expire = true;
+      try {
+        const payload = (await response.clone().json()) as {
+          error?: { code?: string };
+        };
+        const code = payload.error?.code;
+        if (code && !SESSION_EXPIRED_CODES.has(code)) expire = false;
+      } catch {
+        /* keep expire=true for opaque 401 */
+      }
+      if (expire) sessionExpiredHandler?.();
     }
   }
   return response;
@@ -173,5 +201,9 @@ export function fieldErrors(error: unknown): Record<string, string> {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
+  if (error instanceof Error && error.message.trim()) {
+    const ipc = error.message.match(/Error invoking remote method '[^']+': (?:Error: )?(.+)$/s);
+    return (ipc?.[1] || error.message).trim();
+  }
   return "Something went wrong. Please try again.";
 }

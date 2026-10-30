@@ -37,9 +37,10 @@ def _connect(args) -> int:
     try:
         from agent.connect_flow import connect_with_browser
 
+        web_base = (getattr(args, "web_base", None) or "").strip() or p["web"]
         cfg = connect_with_browser(
             api_base=p["api"],
-            web_base=p["web"],
+            web_base=web_base,
             home=home,
             log=print,
         )
@@ -140,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     connect = sub.add_parser("connect", help="one-click connect (opens browser; no pairing code)")
     connect.add_argument("--preset", choices=tuple(config.SERVER_PRESETS), default="live",
                          help="local = http://localhost:5173, live = https://applyxai.com")
+    connect.add_argument("--web-base", help="where to open the approve page (e.g. ApplyXAI Desktop UI origin)")
     connect.set_defaults(func=_connect)
 
     pair = sub.add_parser("pair", help="legacy connect with a pairing code from the web app")

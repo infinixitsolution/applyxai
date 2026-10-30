@@ -11,6 +11,7 @@ from backend.app.core.config import settings
 from backend.app.services import site_seo_service
 
 router = APIRouter(prefix="/site", tags=["site"])
+public_files = APIRouter(tags=["site"])
 
 
 @router.get("/public", summary="Public branding, banner, landing copy, legal text, and SEO")
@@ -28,9 +29,19 @@ def sitemap_xml(db: Session = Depends(get_db)):
     return Response(content=site_seo_service.sitemap_xml(db), media_type="application/xml; charset=utf-8")
 
 
+@public_files.get("/robots.txt", include_in_schema=False)
+def robots_public(db: Session = Depends(get_db)):
+    return robots_txt(db)
+
+
+@public_files.get("/sitemap.xml", include_in_schema=False)
+def sitemap_public(db: Session = Depends(get_db)):
+    return sitemap_xml(db)
+
+
 @router.get("/agent-release", summary="Latest desktop agent version and download URL for auto-update checks")
 def agent_release():
     url = (settings.AGENT_DOWNLOAD_URL or "").strip()
-    if not url and settings.DESKTOP_AGENT_SETUP_PATH.is_file():
-        url = "/api/agent/download/setup"
+    if not url and settings.DESKTOP_APP_SETUP_PATH.is_file():
+        url = "/api/automation/desktop-agent/download"
     return ok({"version": settings.AGENT_LATEST_VERSION, "download_url": url})

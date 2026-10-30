@@ -15,17 +15,20 @@ def build_engine(url: str, echo: bool = False, **engine_kwargs) -> Engine:
     connect_args = {}
     if parsed.get_backend_name() == "sqlite":
         connect_args["check_same_thread"] = False
+        # Wait on locks instead of failing login/API with "database is locked" (common on Windows dev).
+        connect_args["timeout"] = 30
         if parsed.database and parsed.database != ":memory:":
             Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
 
     engine = create_engine(url, echo=echo, pool_pre_ping=True, connect_args=connect_args, **engine_kwargs)
 
     if parsed.get_backend_name() == "sqlite":
-        # SQLite ignores foreign keys (and so ON DELETE CASCADE) unless asked per connection.
         @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(dbapi_connection, _record):
+        def _configure_sqlite_connection(dbapi_connection, _record):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
 
     return engine

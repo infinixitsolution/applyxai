@@ -84,9 +84,10 @@ def _versions_for(app, grouped: dict, by_job: dict) -> list:
     return list(by_job.get(str(external_id), []))
 
 
-def _out(db: Session, user_id: uuid.UUID, app) -> dict:
+def _out(db: Session, user_id: uuid.UUID, app, *, detail: bool = False) -> dict:
     application_service.fill_missing_outcome_reasons(db, user_id, [app])
-    data = ApplicationOut.model_validate(app).model_dump(mode="json")
+    schema = ApplicationDetail if detail else ApplicationOut
+    data = schema.model_validate(app).model_dump(mode="json")
     external_id = app.job.external_id if app.job is not None else ""
     by_job = application_service.resumes_by_external_job(db, user_id, [external_id])
     versions = _versions_for(
@@ -165,4 +166,4 @@ def export_applications(filters: _Filters = Depends(), user: User = Depends(get_
 @router.get("/{application_id}", summary="One of your applications, with the full job")
 def get_application(application_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     app = application_service.get_application(db, user.id, application_id)
-    return ok(_out(db, user.id, app))
+    return ok(_out(db, user.id, app, detail=True))

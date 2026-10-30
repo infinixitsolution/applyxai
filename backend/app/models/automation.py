@@ -32,6 +32,12 @@ class AutomationJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     device_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_devices.id", ondelete="SET NULL"))
     dry_run: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    run_kind: Mapped[str] = mapped_column(String(32), default="job_apply", server_default="job_apply")
+    run_options: Mapped[dict] = mapped_column(JSONType, default=dict, server_default=text("'{}'"))
+    # Sites for this run, in the order the user selected them. Default keeps older clients on LinkedIn.
+    sources: Mapped[list] = mapped_column(JSONType, default=lambda: ["linkedin"])
+    # Successful applications on the current site before the run opens the other one. Empty for one site.
+    switch_after: Mapped[int | None] = mapped_column(Integer)
     # What the user (or the plan limit) asked for: run, pause, or stop. The agent relays it to
     # the engine's control file; `status` changes only when the engine reports back.
     control: Mapped[str] = mapped_column(String(10), default="run", server_default="run")

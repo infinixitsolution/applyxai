@@ -15,6 +15,10 @@ export interface User {
   institute_status?: string | null;
   partner_status?: string | null;
   totp_enabled?: boolean;
+  /** True when an active campus seat supplies the plan; personal billing is locked. */
+  institute_managed?: boolean;
+  institute_name?: string | null;
+  referral_code?: string | null;
 }
 
 export interface EducationEntry {
@@ -34,6 +38,38 @@ export interface WorkEntry {
   summary: string;
 }
 
+export interface ProfileCompletion {
+  percent: number;
+  missing: { section: string; label: string; hint?: string; ai?: boolean }[];
+  weights: Record<string, number>;
+}
+
+export interface MasterProfileSections {
+  personal: Record<string, unknown>;
+  professional: Record<string, unknown>;
+  education_extended: Record<string, unknown>;
+  employment_extended: Record<string, unknown>;
+  skills: Record<string, unknown>[];
+  projects: Record<string, unknown>[];
+  accomplishments: Record<string, unknown>;
+  career: Record<string, unknown>;
+  diversity: Record<string, unknown>;
+  common_answers: CommonApplicationAnswer[];
+}
+
+export interface CommonApplicationAnswer {
+  id: string;
+  key: string;
+  question: string;
+  answer: string;
+  answer_type: string;
+  category?: string;
+  verified?: boolean;
+  profile_field?: string;
+  created_at?: string;
+  updated_at?: string | null;
+}
+
 export interface Profile {
   email: string;
   first_name: string;
@@ -50,6 +86,10 @@ export interface Profile {
   preferred_resume_template: string;
   education: EducationEntry[];
   work_history: WorkEntry[];
+  master?: MasterProfileSections;
+  photo_url?: string | null;
+  updated_at?: string | null;
+  completion?: ProfileCompletion;
 }
 
 export interface ResumeTemplate {
@@ -107,6 +147,8 @@ export interface PreferenceOptions {
     extra_fields: FieldMeta[];
   };
   application_fields: FieldMeta[];
+  profile_answer_fields?: FieldMeta[];
+  run_settings_fields?: FieldMeta[];
 }
 
 export type Answers = Record<string, string | number | boolean | string[]>;
@@ -246,11 +288,14 @@ export interface Usage {
 
 export type RunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
+export type AutomationRunKind = "job_apply" | "linkedin_profile_sync";
+
 export interface AutomationRun {
   id: string;
   status: RunStatus;
   control: "run" | "pause" | "stop";
   dry_run: boolean;
+  run_kind?: AutomationRunKind;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -262,6 +307,10 @@ export interface AutomationRun {
   error_message: string;
   stop_reason: "" | "user" | "plan_limit" | "admin";
   claimed: boolean;
+  sources: Array<"linkedin" | "naukri">;
+  switch_after: number | null;
+  active_source: "linkedin" | "naukri";
+  source_submitted: number;
 }
 
 export interface AgentDevice {
@@ -298,6 +347,7 @@ export interface AutomationOverview {
   readiness: { ready: boolean; problems: string[] };
   usage: Usage;
   resume_tailor?: ResumeTailorOverview;
+  enabled_sources?: Array<"linkedin" | "naukri">;
 }
 
 export interface RunLogLine {
@@ -381,6 +431,8 @@ export interface BillingOverview {
   pending: Subscription | null;
   usage: Usage;
   payments: PaymentRecord[];
+  managed_by_institute?: boolean;
+  institute_name?: string | null;
 }
 
 export interface CheckoutOptions {
@@ -394,6 +446,10 @@ export interface CheckoutOptions {
   modal?: { confirm_close?: boolean; escape?: boolean };
   razorpay_mode?: "test" | "live";
   test_hint?: string;
+  provider?: string;
+  url?: string;
+  session_id?: string;
+  publishable_key?: string;
 }
 
 export interface CheckoutResult {
@@ -408,12 +464,22 @@ export interface AdminAnalytics {
   subscriptions: { by_plan: { code: string; name: string; count: number }[]; mrr_cents: Record<string, number>; past_due: number };
   revenue_30d_cents: Record<string, number>;
   applications: { this_month_by_status: Record<ApplicationStatus, number>; daily: { date: string; applied: number; failed: number }[] };
+  signups_daily?: { date: string; applied: number; failed: number }[];
+  revenue_daily?: { date: string; applied: number; failed: number }[];
   automation: { active_runs: number; last_24h_by_status: Record<RunStatus, number>; devices: number; devices_online: number };
   mock_interviews: {
     total_sessions: number;
     this_month: number;
     by_status: Record<MockInterviewSessionStatus, number>;
     failed_feedback_jobs_24h: number;
+    average_score?: number | null;
+    scored_sessions?: number;
+    daily?: { date: string; applied: number; failed: number }[];
+  };
+  live_interviews?: {
+    total_sessions: number;
+    this_month: number;
+    by_status: Record<string, number>;
   };
 }
 
@@ -519,6 +585,7 @@ export interface WithOwner {
   user_email: string;
 }
 
+export type AdminPayment = PaymentRecord & WithOwner & { provider: string };
 export type AdminSubscription = Subscription & WithOwner;
 export type AdminRun = AutomationRun & WithOwner & { device: string };
 
@@ -537,6 +604,8 @@ export interface AdminCompanyJob {
   title: string;
   location: string;
   job_url: string;
+  platform?: string;
+  discovered_at?: string | null;
   applied: number;
   other: number;
   users: number;
@@ -550,6 +619,53 @@ export interface AdminCompanyContact {
   role: string;
   link: string;
   jobs: { title: string; job_url: string }[];
+  origin?: "posting" | "web" | "both";
+  sources?: { url: string; title?: string }[];
+}
+
+export interface AdminCompanyProfiling {
+  status: "idle" | "running" | "ready" | "failed";
+  last_enriched_at: string | null;
+  error: string;
+  sources_scraped: number;
+}
+
+export interface AdminCompanyExternalJobLink {
+  url: string;
+  title?: string;
+  source_url?: string;
+  known_in_app?: boolean;
+}
+
+export interface AdminCompanySourcePage {
+  url: string;
+  title?: string;
+}
+
+export interface AdminCompanyApplication {
+  id: string;
+  status: ApplicationStatus;
+  applied_at: string | null;
+  updated_at: string | null;
+  failure_reason: string;
+  user_id: string;
+  user_email: string;
+  job: {
+    id: string;
+    title: string;
+    location: string;
+    job_url: string;
+    platform?: string;
+  };
+}
+
+export interface AdminCompanyCandidate {
+  user_id: string;
+  user_email: string;
+  applications: number;
+  applied: number;
+  in_search_filter: boolean;
+  last_seen: string | null;
 }
 
 export interface AdminCompanyDetail {
@@ -560,8 +676,18 @@ export interface AdminCompanyDetail {
   search_filters: number;
   locations: string[];
   last_seen: string | null;
+  applicant_emails?: string[];
+  search_filter_emails?: string[];
+  status_breakdown?: Record<string, number>;
+  applications?: AdminCompanyApplication[];
+  applications_total?: number;
+  candidates?: AdminCompanyCandidate[];
+  contact_stats?: { total: number; from_postings: number; from_web: number };
   job_list: AdminCompanyJob[];
   contacts: AdminCompanyContact[];
+  profiling?: AdminCompanyProfiling;
+  source_pages?: AdminCompanySourcePage[];
+  external_job_links?: AdminCompanyExternalJobLink[];
 }
 
 export interface AdminApplication extends WithOwner {
@@ -673,6 +799,8 @@ export interface AuthEmailTemplate {
   subject: string;
   body: string;
   html: string;
+  /** Institute outreach WhatsApp copy (institute_proposal only). */
+  whatsapp?: string;
 }
 
 export interface EventNotificationTemplate {
@@ -690,6 +818,28 @@ export interface EmailTemplates {
 
 export interface NotificationPreferences {
   types: Record<string, { email: boolean; label: string; description: string }>;
+}
+
+export interface OutreachCampaignSettings {
+  keywords: string[];
+  cities: string[];
+  sources: string[];
+  max_results: number;
+  rotation_index: number;
+  public_listing_attestation: boolean;
+  last_outreach_send_at: string | null;
+  next_outreach_send_at: string | null;
+  send_interval_min_sec: number;
+  send_interval_max_sec: number;
+}
+
+export interface OutreachPlatformSettings {
+  firecrawl_api_key_configured: boolean;
+  source: "database" | "environment" | "none" | string;
+  campaign?: OutreachCampaignSettings;
+  automation_enabled?: boolean;
+  whatsapp_provider?: "bridge" | "cloud";
+  whatsapp_cloud_configured?: boolean;
 }
 
 export interface AdminPlatformSettings {
@@ -728,11 +878,25 @@ export interface AdminPlatformSettings {
     base_url: string;
     api_key_configured: boolean;
     models: { fast: string; strong: string; embedding: string };
-    features: { applications: boolean; resume: boolean; mock_interview?: boolean };
+    features: {
+      applications: boolean;
+      resume: boolean;
+      mock_interview?: boolean;
+      profile_sync?: boolean;
+      outreach?: boolean;
+    };
     ready: boolean;
     resume_ready?: boolean;
     mock_interview_ready?: boolean;
+    outreach_ready?: boolean;
     mock_interview_presenter?: MockInterviewPresenterSettings;
+    elevenlabs_api_key_configured?: boolean;
+    elevenlabs_api_key_source?: "database" | "environment" | "none";
+    mock_interview_voice?: {
+      provider: "elevenlabs" | "openai";
+      elevenlabs_agent_id: string;
+      elevenlabs_model_id: string;
+    };
   };
   payments: {
     provider: "null" | "razorpay" | "stripe";
@@ -745,13 +909,69 @@ export interface AdminPlatformSettings {
     live_checkout: boolean;
     test_checkout: boolean;
   };
+  gst: GstPlatformSettings;
   live_interview?: {
     enabled: boolean;
     display_name: string;
     price_cents: number;
     currency: string;
   };
+  job_sources?: {
+    linkedin: boolean;
+    naukri: boolean;
+  };
+  outreach?: OutreachPlatformSettings;
   unverified_users: number;
+}
+
+export interface GstPlatformSettings {
+  enabled: boolean;
+  legal_name: string;
+  trade_name: string;
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state: string;
+  state_code: string;
+  pin: string;
+  country: string;
+  gstin: string;
+  pan: string;
+  sac_code: string;
+  rate_percent: number;
+  pricing_tax_exclusive: boolean;
+  invoice_prefix: string;
+  invoice_next_number: number;
+  invoice_footer_note: string;
+  configured?: boolean;
+}
+
+export interface GstPreviewTotals {
+  base_cents: number;
+  rate_percent: number;
+  supplier_state_code: string;
+  buyer_state_code: string;
+  taxable_cents: number;
+  cgst_cents: number;
+  sgst_cents: number;
+  igst_cents: number;
+  total_cents: number;
+}
+
+export interface TaxInvoiceRecord {
+  id: string;
+  payment_id: string | null;
+  user_id: string;
+  invoice_number: string;
+  status: string;
+  issued_at: string | null;
+  taxable_cents: number;
+  cgst_cents: number;
+  sgst_cents: number;
+  igst_cents: number;
+  total_cents: number;
+  currency: string;
+  created_at: string | null;
 }
 
 export interface SupportMessage {
@@ -816,6 +1036,27 @@ export interface HumanQuestion {
   answer: string;
   field_types: string[];
   locked?: boolean;
+  normalized_pattern?: string;
+  input_type?: string;
+  verified?: boolean;
+  company?: string;
+  job_title?: string;
+  usage_count?: number;
+  created_at?: string;
+  updated_at?: string | null;
+  last_used_at?: string | null;
+}
+
+export interface CustomQuestionsList {
+  items: HumanQuestion[];
+  total: number;
+}
+
+export interface AutomationSettingsOut {
+  values: Record<string, unknown>;
+  fields: FieldMeta[];
+  defaults: Record<string, unknown>;
+  warnings: string[];
 }
 
 export interface PendingFormQuestion {
@@ -907,6 +1148,7 @@ export interface InstituteSeat {
   subscription_id: string;
   status: string;
   created_at: string;
+  assignment?: InstituteAssignment | null;
 }
 
 export interface InstituteLogin {
@@ -956,6 +1198,8 @@ export interface AdminInstituteDetail {
 export interface InstituteAssignment {
   id: string;
   candidate_email: string;
+  candidate_name?: string | null;
+  candidate_phone?: string | null;
   student_user_id: string | null;
   seat_id: string | null;
   status: string;
@@ -963,6 +1207,33 @@ export interface InstituteAssignment {
   accepted_at: string | null;
   released_at: string | null;
   created_at: string;
+  expires_at?: string | null;
+  activity?: Pick<InstituteStudentActivity, "searched" | "applied" | "skipped" | "failed">;
+}
+
+export interface InstituteStudentUser {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_verified: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+}
+
+export interface InstituteStudentDetail {
+  assignment: InstituteAssignment;
+  user: InstituteStudentUser | null;
+  activity: {
+    searched: number;
+    applied: number;
+    skipped: number;
+    failed: number;
+    success_rate: number | null;
+  };
+  applications_by_status: Record<string, number>;
+  candidate: AdminCandidate | null;
 }
 
 export interface Partner {
@@ -981,7 +1252,7 @@ export interface Partner {
   pan_number: string;
   payout_account: string;
   payout_ifsc: string;
-  kyc_documents: { filename: string; note: string; uploaded_at: string }[];
+  kyc_documents: { id?: string; filename: string; note: string; uploaded_at: string }[];
   click_count: number;
   wallet: { accrued_cents: number; approved_cents: number; available_cents: number };
   created_at: string;
@@ -1021,12 +1292,22 @@ export interface PartnerCampaign {
   created_at: string;
 }
 
+export interface InstituteStudentActivity {
+  searched: number;
+  applied: number;
+  skipped: number;
+  failed: number;
+  success_rate: number | null;
+  daily: { date: string; applied: number; failed: number }[];
+}
+
 export interface InstituteDashboard {
   institute: Institute;
   subscription: Subscription | null;
   students: number;
   pending_invites: number;
   seats: SeatCounts;
+  activity: InstituteStudentActivity;
   recent_assignments: InstituteAssignment[];
 }
 
@@ -1225,4 +1506,165 @@ export interface MockInterviewFeedback {
   improvements?: string[];
   sample_answers?: { question: string; suggestion: string }[];
   error?: string;
+}
+
+export interface OutreachScrapeJobStats {
+  search_queries_run?: number;
+  search_results?: number;
+  unique_candidate_urls?: number;
+  pages_attempted?: number;
+  pages_scraped?: number;
+  pages_failed?: number;
+  candidates_seen?: number;
+  leads_created?: number;
+  leads_updated?: number;
+  duplicates_skipped?: number;
+  contacts_extracted?: number;
+  contacts_syntax_valid?: number;
+  profiles_enriched?: number;
+  profiles_needs_review?: number;
+  firecrawl_errors?: string[];
+  partial?: boolean;
+}
+
+export interface OutreachScrapeJob {
+  id: string;
+  query: string;
+  location: string;
+  sources: string[];
+  max_results: number;
+  status: string;
+  leads_found: number;
+  leads_updated?: number;
+  leads_enriched: number;
+  stats?: OutreachScrapeJobStats;
+  error_message: string;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+}
+
+export interface OutreachLeadMessage {
+  id: string;
+  channel: string;
+  subject: string;
+  body: string;
+  status: string;
+  sent_at: string | null;
+}
+
+export interface OutreachWhatsappStatus {
+  status: string;
+  qr?: string | null;
+  error?: string;
+  ready?: boolean;
+  session_id?: string;
+  connected_at?: string | null;
+  bridge_url?: string;
+  inbound_enabled?: boolean;
+  api_inbound_configured?: boolean;
+  bridge_inbound_configured?: boolean;
+}
+
+export interface OutreachWhatsappRecentSend {
+  lead_id: string;
+  name: string;
+  sent_at: string | null;
+  preview: string;
+}
+
+export interface OutreachWhatsappChatThread {
+  lead_id: string;
+  display_name: string;
+  status: string;
+  whatsapp_phone: string;
+  message_count: number;
+  last_message: OutreachLeadChatMessage;
+}
+
+export interface OutreachProfileCompletion {
+  score_before: number;
+  score_after: number;
+  searches_run: number;
+  search_hits: number;
+  urls_scraped: number;
+  urls_skipped: number;
+  snippets_used: number;
+  hints: string[];
+}
+
+export interface OutreachBulkImportRow {
+  line: string;
+  status: "created" | "existing" | "invalid";
+  lead_id?: string;
+  display_name?: string;
+  completeness_score?: number;
+  enrich_queued?: boolean;
+  enriched?: boolean;
+  enrich_error?: string;
+  completion?: OutreachProfileCompletion;
+  error?: string;
+}
+
+export interface OutreachLeadDashboardStats {
+  total: number;
+  profile_completing: number;
+  profile_completion_pending: number;
+  completeness_full: number;
+  enriched: number;
+  discovered: number;
+  sent: number;
+  skipped_incomplete: number;
+  by_status: Record<string, number>;
+}
+
+export interface OutreachBulkImportResult {
+  created: number;
+  existing: number;
+  invalid: number;
+  enrich_queued: number;
+  items: OutreachBulkImportRow[];
+}
+
+export interface OutreachBulkActionRow {
+  lead_id: string;
+  ok: boolean;
+  display_name?: string;
+  completeness_score?: number;
+  error?: string;
+  score_before?: number;
+  score_after?: number;
+  completion?: OutreachProfileCompletion;
+}
+
+export interface OutreachBulkActionResult {
+  action: "complete" | "enhance";
+  succeeded: number;
+  failed: number;
+  items: OutreachBulkActionRow[];
+}
+
+export interface OutreachLeadChatMessage {
+  id: string;
+  channel: string;
+  direction: "inbound" | "outbound" | string;
+  body: string;
+  created_at: string | null;
+}
+
+export interface OutreachLead {
+  profile_completing?: boolean;
+  id: string;
+  job_id: string | null;
+  source_platform: string;
+  source_url: string;
+  display_name: string;
+  status: string;
+  completeness_score: number;
+  institute_id: string | null;
+  profile: Record<string, unknown>;
+  confidence: number;
+  messages: OutreachLeadMessage[];
+  whatsapp_phone?: string;
+  created_at: string | null;
 }

@@ -2,6 +2,8 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class InviteIn(BaseModel):
+    name: str = Field(min_length=1, max_length=190)
+    phone: str = Field(min_length=5, max_length=32)
     email: EmailStr
     note: str = Field(default="", max_length=500)
 

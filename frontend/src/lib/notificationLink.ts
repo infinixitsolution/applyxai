@@ -29,6 +29,9 @@ export function notificationLink(link: string): string {
   if (link.startsWith("/invite/") || link === "/onboarding") {
     return link;
   }
+  if (link.split("?")[0] === "/preferences") {
+    return "/app/questions";
+  }
   if (isLegacyAppPath(link)) {
     return `/app${link}`;
   }

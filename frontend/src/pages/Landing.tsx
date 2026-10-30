@@ -28,7 +28,7 @@ const FALLBACK_LANDING: PlatformCms["landing"] = {
   hero_subtitle: "Set preferences once. Tailor when you want. Track every application.",
   hero_cta_primary: "Start applying free",
   hero_cta_secondary: "See how it works",
-  hero_footnote: "LinkedIn only today. You sign in locally — we never see your password.",
+  hero_footnote: "You sign in locally — we never store your job-site password.",
   features_heading: "Everything for a focused LinkedIn search",
   features: FALLBACK_FEATURES.map((f, i) => ({
     icon: ["filter", "file-text", "bot", "filter", "bar-chart", "sliders"][i] ?? "bot",
@@ -47,8 +47,8 @@ const FALLBACK_LANDING: PlatformCms["landing"] = {
   faq_heading: "Frequently asked questions",
   faq: [
     { question: "Does ApplyXAI guarantee interviews or a job?", answer: "No. ApplyXAI saves time on repetitive LinkedIn applications. Outcomes depend on employers, your profile, and the roles you target." },
-    { question: "Which job sites are supported?", answer: "LinkedIn Easy Apply only. Jobs that redirect to an external site are saved in your history so you can finish them manually." },
-    { question: "Do you store my LinkedIn password?", answer: "No. Automation runs in Chrome on your computer. You sign in to LinkedIn there; ApplyXAI never receives your password or OTP codes." },
+    { question: "Which job sites are supported?", answer: "LinkedIn Easy Apply, and Naukri on-site Apply when an administrator turns Naukri on. Jobs that redirect to a company site are saved in your history so you can finish them manually." },
+    { question: "Do you store my LinkedIn password?", answer: "No. Automation runs in Chrome on your computer. You sign in to LinkedIn or Naukri there; ApplyXAI never receives your password or OTP codes." },
     { question: "Is automated applying allowed on LinkedIn?", answer: "LinkedIn’s terms restrict some automated activity. You are responsible for compliant use — review submissions and keep volume reasonable." },
     { question: "Can I cancel at any time?", answer: "Yes. Paid plans can be cancelled and stay active until the end of the billing period. See our refund policy for details." },
   ],

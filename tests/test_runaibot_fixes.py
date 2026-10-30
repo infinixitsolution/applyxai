@@ -86,9 +86,10 @@ def test_text_question_is_typed_through_human_type(bot, monkeypatch):
     monkeypatch.setattr(bot, "human_type", lambda target, text: typed.append((target, text)), raising=False)
     monkeypatch.setattr(bot, "print_lg", lambda *a, **k: None)
 
+    text_xpath = ".//input[@type='text' or @type='number' or @type='tel' or @type='email']"
     text_input = FakeElement()
     question = FakeElement(children={
-        ".//input[@type='text']": text_input,
+        text_xpath: text_input,
         ".//label[@for]": FakeElement(text="First name"),
     })
     modal = FakeElement(children={".//div[@data-test-form-element]": [question]})
@@ -158,6 +159,33 @@ def test_non_easy_apply_job_is_counted_as_skipped(bot, monkeypatch):
 
     assert skip is True
     assert bot.skip_count == 1
+
+
+def test_company_site_apply_without_tab_is_skipped_not_failed(bot, monkeypatch):
+    monkeypatch.setattr(bot, "easy_apply_only", False)
+    monkeypatch.setattr(bot, "print_lg", lambda *a, **k: None)
+    monkeypatch.setattr(bot, "skip_count", 0)
+    monkeypatch.setattr(bot, "failed_count", 0)
+    monkeypatch.setattr(bot, "easy_apply_modal_visible", lambda *_a, **_k: False)
+    monkeypatch.setattr(bot, "pick_first_displayed", lambda *_a, **_k: None)
+
+    class BoomWait:
+        def until(self, *_a, **_k):
+            raise NoSuchElementException("no apply button")
+
+    monkeypatch.setattr(bot, "wait", BoomWait())
+    recorded = []
+    monkeypatch.setattr(bot, "failed_job", lambda *a, **k: recorded.append((a, k)))
+    monkeypatch.setattr(bot, "_safe_linkedin_tab", lambda: "tab")
+
+    skip, _link, _tabs = bot.external_apply(object(), "1", "https://linkedin.com/jobs/view/1", "resume", None, "Easy Applied", "shot")
+
+    assert skip is True
+    assert bot.skip_count == 1
+    assert bot.failed_count == 0
+    assert recorded
+    assert recorded[0][0][4].startswith("Not LinkedIn Easy Apply")
+    assert recorded[0][0][6] == "Skipped"
 
 
 # --------------------------- C: resilient Easy Apply detection ---------------------

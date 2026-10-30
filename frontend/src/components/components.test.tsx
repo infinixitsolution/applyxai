@@ -70,8 +70,8 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     renderLogin();
     await user.type(screen.getByLabelText("Email"), "a@example.com");
-    await user.type(screen.getByLabelText("Password"), "wrong password!");
-    await user.click(screen.getByRole("button", { name: "Log in" }));
+    await user.type(screen.getByPlaceholderText("Your password"), "wrong password!");
+    await user.click(screen.getByRole("button", { name: /log in to workspace/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect email or password.");
     vi.unstubAllGlobals();
   });

@@ -1,0 +1,26 @@
+{
+  "name": "applyxai-desktop",
+  "version": "1.2.22",
+  "private": true,
+  "description": "ApplyXAI Desktop - full web app with embedded automation worker",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --win --config electron-builder.yml",
+    "pack": "npm run build && electron-builder --win dir --config electron-builder.yml"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "express": "^4.21.2",
+    "http-proxy-middleware": "^3.0.3",
+    "keytar": "^7.9.0"
+  }
+}

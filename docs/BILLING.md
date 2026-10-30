@@ -11,11 +11,13 @@ ApplyXAI production on EC2 is intended to bill through **Razorpay**:
 
 The API **refuses to start** in `APP_ENV=production` without Razorpay configured (`backend/app/core/config.py`).
 
-## Stripe (#31) — not production-ready
+## Stripe (#31)
 
-Admin may select **Stripe** in settings for future use. The [Stripe provider](../backend/app/services/payments/stripe_provider.py) returns **`STRIPE_NOT_READY` (501)** for checkout and webhooks until Checkout sessions and webhook verification are implemented.
+Admin may select **Stripe** in **Settings → Payments**. The [Stripe provider](../backend/app/services/payments/stripe_provider.py) creates Checkout Sessions (`mode=subscription`), stores customer/subscription ids, and handles `checkout.session.completed` / subscription webhooks.
 
-**Do not** rely on Stripe for production revenue until BACKLOG #31 is marked Done.
+Webhook: `https://applyxai.com/api/billing/webhook/stripe`. GST invoices issue on captured payments the same way as Razorpay.
+
+Production default remains **Razorpay** until you paste Stripe keys and switch the provider.
 
 ## Development
 

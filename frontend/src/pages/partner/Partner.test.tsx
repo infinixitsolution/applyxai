@@ -21,11 +21,24 @@ const partner: Partner = {
 
 const ok = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200 });
 
+function requestBody(init?: RequestInit): unknown {
+  const raw = init?.body;
+  if (!raw) return undefined;
+  if (raw instanceof FormData) {
+    const out: Record<string, unknown> = {};
+    raw.forEach((value, key) => {
+      out[key] = value instanceof File ? value.name : value;
+    });
+    return out;
+  }
+  return JSON.parse(String(raw));
+}
+
 function mockApi(routes: Record<string, unknown | ((init?: RequestInit) => unknown)>) {
   const calls: { key: string; body: unknown }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
-    calls.push({ key, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    calls.push({ key, body: requestBody(init) });
     if (!(key in routes)) throw new Error(`unexpected request: ${key}`);
     const value = routes[key];
     return ok(typeof value === "function" ? (value as (i?: RequestInit) => unknown)(init) : value);
@@ -75,19 +88,20 @@ describe("partner portal wiring", () => {
     });
   });
 
-  it("records a KYC document with a note", async () => {
+  it("uploads a KYC document with a note", async () => {
     const calls = mockApi({
       "GET /api/partner/me": partner,
       "POST /api/partner/kyc": partner,
     });
     renderPage(<PartnerKycPage />);
     expect(await screen.findByText("pan.pdf")).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("Document name"), "gst.pdf");
+    const file = new File(["%PDF-1.4"], "gst.pdf", { type: "application/pdf" });
+    await userEvent.upload(screen.getByLabelText("KYC document"), file);
     await userEvent.type(screen.getByLabelText("Note"), "GST certificate");
-    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload" }));
     await vi.waitFor(() => expect(calls.some((c) => c.key === "POST /api/partner/kyc")).toBe(true));
     expect(calls.find((c) => c.key === "POST /api/partner/kyc")?.body).toMatchObject({
-      filename: "gst.pdf", note: "GST certificate",
+      file: "gst.pdf", note: "GST certificate",
     });
   });
 

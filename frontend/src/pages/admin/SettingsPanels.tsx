@@ -7,12 +7,15 @@ import { RichHtmlEditor } from "../../components/RichHtmlEditor";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
 import { AdminSettingsSideNav, Alert, Badge, Button, Card, PageHeader, Spinner } from "../../components/ui";
-import { formatDateTime, formatRelative } from "../../lib/format";
+import { formatDateTime, formatMoney, formatRelative } from "../../lib/format";
 import { useDebounced } from "../../lib/useDebounced";
 import { agentServerUrl } from "../../lib/config";
 import { ApiError, errorMessage } from "../../services/api";
 import { admin } from "../../services/endpoints";
-import type { AdminPlatformSettings, AuthEmailTemplate, EmailTemplates, EventNotificationTemplate, LogLevel, PlatformCms } from "../../types";
+import type {
+  AdminPlatformSettings, AuthEmailTemplate, EmailTemplates, EventNotificationTemplate, GstPlatformSettings,
+  LogLevel, PlatformCms,
+} from "../../types";
 import { authSampleLink, EmailTemplatePreview, sampleTemplateVars } from "./EmailTemplatePreview";
 import { FilterBar, PAGE_SIZE, Table, Td, UserLink } from "./shared";
 
@@ -25,6 +28,8 @@ const TABS = [
   { id: "templates", label: "Templates" },
   { id: "ai", label: "AI" },
   { id: "payments", label: "Payments" },
+  { id: "gst", label: "GST & invoices" },
+  { id: "sources", label: "Job sources" },
   { id: "live", label: "Live interview" },
   { id: "integrations", label: "Integrations" },
   { id: "operations", label: "Operations" },
@@ -69,8 +74,19 @@ export function AdminSettingsPage() {
         )}
         {tab === "ai" && <AiTab ai={data.ai} />}
         {tab === "payments" && <PaymentsTab payments={data.payments} />}
+        {tab === "gst" && <GstTab gst={data.gst} />}
+        {tab === "sources" && <JobSourcesTab sources={data.job_sources} />}
         {tab === "live" && <LiveInterviewTab offer={data.live_interview} />}
-        {tab === "integrations" && <IntegrationsTab infra={data.infrastructure} smtp={data.smtp} ai={data.ai} payments={data.payments} />}
+        {tab === "integrations" && (
+          <IntegrationsTab
+            infra={data.infrastructure}
+            smtp={data.smtp}
+            ai={data.ai}
+            payments={data.payments}
+            gst={data.gst}
+            outreach={data.outreach}
+          />
+        )}
         {tab === "operations" && <OperationsTab />}
       </>
     );
@@ -394,13 +410,15 @@ function NotificationsTab({ notifications }: { notifications: AdminPlatformSetti
 }
 
 const TEMPLATE_PLACEHOLDER_HINT =
-  "Auth placeholders: {app_name}, {link}, {verification_hours}, {password_reset_minutes}, {institute_name}.";
+  "Auth placeholders: {app_name}, {link}, {verification_hours}, {password_reset_minutes}, {institute_name}, "
+  + "{contact_name}, {proposal_image_url} (institute_proposal).";
 
 const AUTH_TEMPLATE_LABELS: Record<string, string> = {
   verify_email: "Verify email",
   password_reset: "Password reset",
   account_exists: "Account already exists",
   institute_invite: "Institute invitation",
+  institute_proposal: "Institute outreach proposal",
 };
 
 /** Per-event placeholders shown in the Templates editor (merged with global {app_name}, {link_url}). */
@@ -702,6 +720,15 @@ function TemplatesTab({
                     onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, body: v } }))} />
           <TextArea label="HTML (optional)" value={authModal.draft.html} readOnly={authReadOnly} rows={4}
                     onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, html: v } }))} />
+          {authModal.key === "institute_proposal" ? (
+            <TextArea
+              label="WhatsApp message (optional — sent with partnership image)"
+              value={authModal.draft.whatsapp ?? ""}
+              readOnly={authReadOnly}
+              rows={10}
+              onChange={(v) => setAuthModal((m) => ({ ...m, draft: { ...m.draft, whatsapp: v } }))}
+            />
+          ) : null}
           {!authReadOnly && (
             <Button variant="secondary" loading={testAuth.isPending} onClick={() => testAuth.mutate(authModal.key)}>
               Send test email
@@ -875,6 +902,8 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
   const [featApp, setFeatApp] = useState(ai.features.applications);
   const [featResume, setFeatResume] = useState(ai.features.resume);
   const [featMock, setFeatMock] = useState(ai.features.mock_interview ?? true);
+  const [featProfileSync, setFeatProfileSync] = useState(ai.features.profile_sync ?? true);
+  const [featOutreach, setFeatOutreach] = useState(ai.features.outreach ?? true);
   const defaultPresenter = ai.mock_interview_presenter ?? {
     mode: "digital_human_3d" as const,
     image_url: "/mock-interviewer-host.jpg",
@@ -889,6 +918,16 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
   const [presenterStream, setPresenterStream] = useState(defaultPresenter.live_stream_url ?? "");
   const [presenterBargeIn, setPresenterBargeIn] = useState(defaultPresenter.supports_barge_in !== false);
   const [presenterReplay, setPresenterReplay] = useState(defaultPresenter.supports_replay !== false);
+  const defaultVoice = ai.mock_interview_voice ?? {
+    provider: "elevenlabs" as const,
+    elevenlabs_agent_id: "fA4eSDsx5xNZ1RV7zEu5",
+    elevenlabs_model_id: "eleven_multilingual_v2",
+  };
+  const [voiceProvider, setVoiceProvider] = useState<"elevenlabs" | "openai">(defaultVoice.provider);
+  const [elevenAgentId, setElevenAgentId] = useState(defaultVoice.elevenlabs_agent_id);
+  const [elevenModelId, setElevenModelId] = useState(defaultVoice.elevenlabs_model_id);
+  const [elevenApiKey, setElevenApiKey] = useState("");
+  const [elevenConfigured, setElevenConfigured] = useState(ai.elevenlabs_api_key_configured ?? false);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     setEnabled(ai.enabled);
@@ -900,6 +939,8 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
     setFeatApp(ai.features.applications);
     setFeatResume(ai.features.resume);
     setFeatMock(ai.features.mock_interview ?? true);
+    setFeatProfileSync(ai.features.profile_sync ?? true);
+    setFeatOutreach(ai.features.outreach ?? true);
     setApiKeyConfigured(ai.api_key_configured);
     const p = ai.mock_interview_presenter;
     if (p) {
@@ -910,12 +951,26 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
       setPresenterBargeIn(p.supports_barge_in !== false);
       setPresenterReplay(p.supports_replay !== false);
     }
+    const v = ai.mock_interview_voice;
+    if (v) {
+      setVoiceProvider(v.provider);
+      setElevenAgentId(v.elevenlabs_agent_id);
+      setElevenModelId(v.elevenlabs_model_id);
+    }
+    setElevenConfigured(ai.elevenlabs_api_key_configured ?? false);
   }, [ai]);
   const save = useMutation({
     mutationFn: () => admin.updateAi({
       enabled, provider, base_url: baseUrl, api_key: apiKey,
+      elevenlabs_api_key: elevenApiKey,
       models: { fast, strong, embedding },
-      features: { applications: featApp, resume: featResume, mock_interview: featMock },
+      features: {
+        applications: featApp,
+        resume: featResume,
+        mock_interview: featMock,
+        profile_sync: featProfileSync,
+        outreach: featOutreach,
+      },
       mock_interview_presenter: {
         mode: presenterMode,
         image_url: presenterImage.trim() || "/mock-interviewer-host.jpg",
@@ -924,15 +979,28 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
         supports_barge_in: presenterBargeIn,
         supports_replay: presenterReplay,
       },
+      mock_interview_voice: {
+        provider: voiceProvider,
+        elevenlabs_agent_id: elevenAgentId.trim() || "fA4eSDsx5xNZ1RV7zEu5",
+        elevenlabs_model_id: elevenModelId.trim() || "eleven_multilingual_v2",
+      },
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: SETTINGS_KEY });
       if (apiKey.trim()) setApiKeyConfigured(true);
+      if (elevenApiKey.trim()) setElevenConfigured(true);
       setApiKey("");
+      setElevenApiKey("");
       setSaved(true);
     },
   });
   const test = useMutation({ mutationFn: () => admin.testAi() });
+  const testEleven = useMutation({
+    mutationFn: () =>
+      admin.testElevenLabs(elevenApiKey.trim() ? { elevenlabs_api_key: elevenApiKey.trim() } : undefined),
+  });
+  const elevenSource = ai.elevenlabs_api_key_source ?? "none";
+  const canTestEleven = elevenConfigured || Boolean(elevenApiKey.trim());
 
   return (
     <div className="space-y-6">
@@ -975,6 +1043,8 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
           <Toggle label="Application Q&A" checked={featApp} onChange={setFeatApp} />
           <Toggle label="Resume AI" checked={featResume} onChange={setFeatResume} />
           <Toggle label="Mock interview" checked={featMock} onChange={setFeatMock} />
+          <Toggle label="Profile sync (LinkedIn)" checked={featProfileSync} onChange={setFeatProfileSync} />
+          <Toggle label="Institute outreach (enrichment)" checked={featOutreach} onChange={setFeatOutreach} />
         </div>
         <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
         {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
@@ -1024,6 +1094,59 @@ function AiTab({ ai }: { ai: AdminPlatformSettings["ai"] }) {
           <Toggle label="Allow replay last question" checked={presenterReplay} onChange={setPresenterReplay} />
         </div>
         <p className="mt-3 text-xs text-slate-500">Saved with Platform AI above — click Save on the AI card after changing presenter settings.</p>
+      </Card>
+      <Card
+        title="Mock interview voice (ElevenLabs)"
+        actions={
+          <Badge tone={elevenConfigured ? "green" : "amber"}>{elevenConfigured ? "Key configured" : "Key missing"}</Badge>
+        }
+      >
+        <p className="mb-4 text-sm text-slate-600">
+          Powers interviewer speech in mock interviews (LLM questions stay on Platform AI). Keys are encrypted in the database.
+          You can also set <code className="text-xs">ELEVENLABS_API_KEY</code> in <code className="text-xs">.env</code> as a fallback.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">TTS provider</span>
+            <select
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              value={voiceProvider}
+              onChange={(e) => setVoiceProvider(e.target.value as "elevenlabs" | "openai")}
+            >
+              <option value="elevenlabs">ElevenLabs (recommended)</option>
+              <option value="openai">OpenAI TTS only</option>
+            </select>
+          </label>
+          <TextInput
+            label="ElevenLabs API key"
+            type="password"
+            value={elevenApiKey}
+            onChange={setElevenApiKey}
+            configured={elevenConfigured}
+            configuredMessage="Key saved"
+            autoComplete="off"
+          />
+          <TextInput
+            label="ConvAI agent ID"
+            value={elevenAgentId}
+            onChange={setElevenAgentId}
+            maxLength={64}
+            hint="Default host agent for mock interview TTS voice."
+          />
+          <TextInput label="ElevenLabs model ID" value={elevenModelId} onChange={setElevenModelId} maxLength={64} />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Active key source:{" "}
+          {elevenSource === "database" ? "Admin settings" : elevenSource === "environment" ? ".env" : "None"}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button variant="secondary" loading={testEleven.isPending} disabled={!canTestEleven} onClick={() => testEleven.mutate()}>
+            Test ElevenLabs key
+          </Button>
+        </div>
+        {testEleven.data?.ok && <Alert kind="success">{testEleven.data.message}</Alert>}
+        {testEleven.error && <Alert kind="error">{errorMessage(testEleven.error)}</Alert>}
+        <p className="mt-3 text-xs text-slate-500">Save voice settings with the Platform AI card above.</p>
       </Card>
       <Card title="Test AI connection">
         <Button variant="secondary" loading={test.isPending} disabled={!apiKeyConfigured && !apiKey} onClick={() => test.mutate()}>Run test</Button>
@@ -1085,6 +1208,47 @@ function LiveInterviewTab({ offer }: { offer: AdminPlatformSettings["live_interv
         )}
       </Card>
     </div>
+  );
+}
+
+function JobSourcesTab({ sources }: { sources?: AdminPlatformSettings["job_sources"] }) {
+  const queryClient = useQueryClient();
+  const [linkedin, setLinkedin] = useState(sources?.linkedin ?? true);
+  const [naukri, setNaukri] = useState(sources?.naukri ?? false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setLinkedin(sources?.linkedin ?? true);
+    setNaukri(sources?.naukri ?? false);
+  }, [sources]);
+  const save = useMutation({
+    mutationFn: () => admin.updateJobSources({ linkedin, naukri }),
+    onSuccess: async () => {
+      setSaved(true);
+      await queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+    },
+  });
+  return (
+    <Card title="Job sources">
+      <p className="mb-4 text-sm text-slate-600">
+        Turn a site on to let people choose it when they start a run. A site that is off does not appear on Start run.
+        At least one site stays on.
+      </p>
+      <div className="grid max-w-lg gap-4">
+        <Toggle label="LinkedIn" checked={linkedin} onChange={setLinkedin} hint="Easy Apply in the agent browser." />
+        <Toggle label="Naukri" checked={naukri} onChange={setNaukri} hint="On-site Apply when this is on. Company-site links are saved for the user. Off by default until you enable it here." />
+      </div>
+      {!linkedin && !naukri && <Alert kind="error">Turn on at least one job source.</Alert>}
+      {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      <SaveBar
+        saving={save.isPending}
+        saved={saved}
+        onSave={() => {
+          if (!linkedin && !naukri) return;
+          setSaved(false);
+          save.mutate();
+        }}
+      />
+    </Card>
   );
 }
 
@@ -1221,14 +1385,256 @@ function PaymentsTab({ payments }: { payments: AdminPlatformSettings["payments"]
   );
 }
 
-function IntegrationsTab({ infra, smtp, ai, payments }: {
+const DEFAULT_GST_FORM: GstPlatformSettings = {
+  enabled: false,
+  legal_name: "",
+  trade_name: "",
+  address_line1: "",
+  address_line2: "",
+  city: "",
+  state: "",
+  state_code: "",
+  pin: "",
+  country: "India",
+  gstin: "",
+  pan: "",
+  sac_code: "998313",
+  rate_percent: 18,
+  pricing_tax_exclusive: true,
+  invoice_prefix: "AXAI",
+  invoice_next_number: 1,
+  invoice_footer_note: "",
+};
+
+function GstTab({ gst }: { gst: AdminPlatformSettings["gst"] }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState<GstPlatformSettings>({ ...DEFAULT_GST_FORM, ...gst });
+  const [saved, setSaved] = useState(false);
+  const [previewBase, setPreviewBase] = useState("999");
+  const [previewBuyerState, setPreviewBuyerState] = useState("");
+  useEffect(() => {
+    setForm({ ...DEFAULT_GST_FORM, ...gst });
+  }, [gst]);
+  const save = useMutation({
+    mutationFn: () => admin.updateGst(form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      setSaved(true);
+    },
+  });
+  const preview = useMutation({
+    mutationFn: () => {
+      const rupees = parseFloat(previewBase.replace(/,/g, "")) || 0;
+      const base_cents = Math.round(rupees * 100);
+      return admin.gstPreview({
+        base_cents,
+        buyer_state_code: previewBuyerState.trim() || undefined,
+      });
+    },
+  });
+  const invoices = useQuery({
+    queryKey: ["admin", "tax-invoices"],
+    queryFn: () => admin.taxInvoices({ page: 1, page_size: 10 }),
+  });
+  const set = (key: keyof GstPlatformSettings) => (value: string | boolean | number) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  return (
+    <div className="space-y-6">
+      <Card
+        title="GST profile (supplier)"
+        actions={
+          <Badge tone={form.enabled && form.configured !== false && form.gstin ? "green" : "amber"}>
+            {form.enabled ? (form.gstin ? "Enabled" : "Incomplete") : "Disabled"}
+          </Badge>
+        }
+      >
+        <p className="mb-4 text-sm text-slate-600">
+          Plan prices are <strong>pre-tax</strong> (exclusive). Checkout will add GST in a later release. SAC{" "}
+          <code className="text-xs">998313</code> is typical for online IT/SaaS services in India.
+        </p>
+        <Toggle label="Enable GST on invoices" checked={form.enabled} onChange={set("enabled")} />
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <TextInput label="Legal name" value={form.legal_name} onChange={set("legal_name")} maxLength={190} />
+          <TextInput label="Trade name (optional)" value={form.trade_name} onChange={set("trade_name")} maxLength={190} />
+          <TextInput label="GSTIN" value={form.gstin} onChange={set("gstin")} maxLength={15} />
+          <TextInput label="PAN" value={form.pan} onChange={set("pan")} maxLength={10} />
+          <TextInput label="Address line 1" value={form.address_line1} onChange={set("address_line1")} maxLength={500} />
+          <TextInput label="Address line 2" value={form.address_line2} onChange={set("address_line2")} maxLength={500} />
+          <TextInput label="City" value={form.city} onChange={set("city")} maxLength={120} />
+          <TextInput label="State" value={form.state} onChange={set("state")} maxLength={120} />
+          <TextInput label="State code (GST)" value={form.state_code} onChange={set("state_code")} maxLength={2} placeholder="29" />
+          <TextInput label="PIN" value={form.pin} onChange={set("pin")} maxLength={12} />
+          <TextInput label="Country" value={form.country} onChange={set("country")} maxLength={80} />
+          <TextInput label="SAC code" value={form.sac_code} onChange={set("sac_code")} maxLength={16} />
+          <TextInput
+            label="GST rate (%)"
+            type="number"
+            value={String(form.rate_percent)}
+            onChange={(v) => set("rate_percent")(Number(v) || 0)}
+          />
+          <TextInput label="Invoice prefix" value={form.invoice_prefix} onChange={set("invoice_prefix")} maxLength={20} />
+          <TextInput
+            label="Next invoice number"
+            type="number"
+            value={String(form.invoice_next_number)}
+            onChange={(v) => set("invoice_next_number")(Math.max(1, Number(v) || 1))}
+          />
+        </div>
+        <div className="mt-4">
+          <TextArea
+            label="Invoice footer note"
+            rows={3}
+            value={form.invoice_footer_note}
+            onChange={set("invoice_footer_note")}
+            maxLength={2000}
+          />
+        </div>
+        <SaveBar saving={save.isPending} saved={saved} onSave={() => { setSaved(false); save.mutate(); }} />
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+      </Card>
+
+      <Card title="Tax preview (exclusive pricing)">
+        <p className="mb-3 text-sm text-slate-600">
+          Supplier state code: <strong>{form.state_code || "—"}</strong>. Same buyer state → CGST + SGST; different → IGST.
+        </p>
+        <div className="flex flex-wrap gap-3 items-end">
+          <TextInput label="Pre-tax amount (₹)" value={previewBase} onChange={setPreviewBase} />
+          <TextInput label="Buyer state code (optional)" value={previewBuyerState} onChange={setPreviewBuyerState} maxLength={2} />
+          <Button variant="secondary" loading={preview.isPending} onClick={() => preview.mutate()}>
+            Calculate
+          </Button>
+        </div>
+        {preview.data && (
+          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+            <Row label="Taxable">{formatMoney(preview.data.taxable_cents, "INR")}</Row>
+            <Row label="CGST">{formatMoney(preview.data.cgst_cents, "INR")}</Row>
+            <Row label="SGST">{formatMoney(preview.data.sgst_cents, "INR")}</Row>
+            <Row label="IGST">{formatMoney(preview.data.igst_cents, "INR")}</Row>
+            <Row label="Total payable">{formatMoney(preview.data.total_cents, "INR")}</Row>
+          </dl>
+        )}
+        {preview.error && <Alert kind="error">{errorMessage(preview.error)}</Alert>}
+      </Card>
+
+      <Card title="Tax invoices">
+        {invoices.isLoading ? (
+          <Spinner label="Loading invoices…" />
+        ) : invoices.data?.items.length ? (
+          <div className="table-scroll">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="py-2 pr-2">Number</th>
+                  <th className="py-2 pr-2">Status</th>
+                  <th className="py-2 pr-2">Total</th>
+                  <th className="py-2">Created</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoices.data.items.map((inv) => (
+                  <tr key={inv.id}>
+                    <td className="py-2 pr-2 font-mono text-xs">{inv.invoice_number}</td>
+                    <td className="py-2 pr-2 capitalize">{inv.status}</td>
+                    <td className="py-2 pr-2">{formatMoney(inv.total_cents, inv.currency)}</td>
+                    <td className="py-2 text-slate-500">{inv.created_at ? formatRelative(inv.created_at) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">No tax invoices yet. They will appear here when checkout issuing is enabled.</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function OutreachFirecrawlCard({ outreach }: { outreach?: AdminPlatformSettings["outreach"] }) {
+  const qc = useQueryClient();
+  const [apiKey, setApiKey] = useState("");
+  const [configured, setConfigured] = useState(outreach?.firecrawl_api_key_configured ?? false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setConfigured(outreach?.firecrawl_api_key_configured ?? false);
+  }, [outreach]);
+  const save = useMutation({
+    mutationFn: () => admin.updateOutreach({ firecrawl_api_key: apiKey }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      if (apiKey.trim()) setConfigured(true);
+      setApiKey("");
+      setSaved(true);
+    },
+  });
+  const test = useMutation({
+    mutationFn: () =>
+      admin.testOutreach(apiKey.trim() ? { firecrawl_api_key: apiKey.trim() } : undefined),
+  });
+  const source = outreach?.source ?? "none";
+  const canTest = configured || Boolean(apiKey.trim());
+  return (
+    <Card
+      title="Institute outreach (Firecrawl)"
+      actions={
+        <Badge tone={configured ? "green" : "amber"}>{configured ? "Configured" : "Not configured"}</Badge>
+      }
+      className="lg:col-span-2"
+    >
+      <p className="mb-4 text-sm text-slate-600">
+        Used by <strong>Admin → Outreach</strong> to discover institute listings. Keys are encrypted in the database.
+        You can still set <code className="text-xs">FIRECRAWL_API_KEY</code> in <code className="text-xs">.env</code> as a fallback.
+        Always-on scrape and send automation requires Celery worker + beat; configure keyword/city rotation on the Outreach
+        scrape page.
+      </p>
+      <div className="grid gap-4 sm:max-w-xl">
+        <TextInput
+          label="Firecrawl API key"
+          type="password"
+          value={apiKey}
+          onChange={setApiKey}
+          configured={configured}
+          configuredMessage="Key saved"
+          placeholder="fc-…"
+          autoComplete="off"
+        />
+        <p className="text-xs text-slate-500">
+          Active source: {source === "database" ? "Admin settings" : source === "environment" ? ".env" : "None"}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button loading={save.isPending} onClick={() => { setSaved(false); save.mutate(); }}>
+            Save changes
+          </Button>
+          <Button
+            variant="secondary"
+            loading={test.isPending}
+            disabled={!canTest}
+            onClick={() => test.mutate()}
+          >
+            Test API key
+          </Button>
+          {saved && <span className="text-sm text-green-700">Saved.</span>}
+        </div>
+        {save.error && <Alert kind="error">{errorMessage(save.error)}</Alert>}
+        {test.data?.ok && <Alert kind="success">{test.data.message}</Alert>}
+        {test.error && <Alert kind="error">{errorMessage(test.error)}</Alert>}
+      </div>
+    </Card>
+  );
+}
+
+function IntegrationsTab({ infra, smtp, ai, payments, gst, outreach }: {
   infra: AdminPlatformSettings["infrastructure"];
   smtp: AdminPlatformSettings["smtp"];
   ai: AdminPlatformSettings["ai"];
   payments: AdminPlatformSettings["payments"];
+  gst?: AdminPlatformSettings["gst"];
+  outreach?: AdminPlatformSettings["outreach"];
 }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
+      <OutreachFirecrawlCard outreach={outreach} />
       <Card title="Infrastructure (read-only)">
         <dl className="divide-y divide-slate-100 text-sm">
           <Row label="Environment">{infra.app_env}</Row>
@@ -1239,6 +1645,8 @@ function IntegrationsTab({ infra, smtp, ai, payments }: {
           <Row label="Payment provider">{infra.payment_provider}</Row>
           <Row label="Razorpay ready">{payments.ready ? "Yes" : "No"}</Row>
           <Row label="Payment config source">{payments.source === "database" ? "Admin settings" : ".env"}</Row>
+          <Row label="GST enabled">{gst?.enabled ? "Yes" : "No"}</Row>
+          <Row label="GSTIN configured">{gst?.gstin ? "Yes" : "No"}</Row>
         </dl>
       </Card>
       <Card title="Email status">

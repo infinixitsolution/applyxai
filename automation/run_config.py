@@ -84,6 +84,7 @@ def build_run_config(values: dict, *, history_dir: str | Path, run_dir: str | Pa
         "logs_folder_path": (run / "logs").as_posix() + "/",
         "generated_resume_path": (run / "resumes").as_posix() + "/",
         "run_in_background": False,      # the user may need to sign in to LinkedIn in the window
+        "safe_mode": True,               # never open the user's multi-profile Chrome "Who's using Chrome?" screen
         "run_non_stop": False,
         "alternate_sortby": False,
         "cycle_date_posted": False,
@@ -107,6 +108,10 @@ def build_run_config(values: dict, *, history_dir: str | Path, run_dir: str | Pa
         "run_id": str(qa.get("run_id") or ""),
         "human_questions": list(qa.get("human_questions") or []),
         "ai_policy": qa.get("ai_policy") or {"deny_label_contains": []},
-        "resume_mode": qa.get("resume_mode") or "default",
+            "resume_mode": qa.get("resume_mode") or "default",
+            "default_resume_id": str(qa.get("default_resume_id") or ""),
+        "sources": [s for s in (qa.get("sources") or ["linkedin"]) if s in ("linkedin", "naukri")] or ["linkedin"],
+        "switch_after": qa.get("switch_after"),
+        "education": list(qa.get("education") or []),
     }
     return config

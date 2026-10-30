@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cx } from "../../components/ui";
+import { publicWebsiteUrl } from "../../lib/config";
+import { isDesktopApp } from "../../lib/desktop";
 
 export type AuthHighlight = { title: string; description: string };
 
@@ -46,6 +48,8 @@ export type AuthPageLayoutProps = {
   cardSubtitle?: ReactNode;
   registerTabs?: AuthRegisterTab;
   wideCard?: boolean;
+  /** Desktop app: single centered card, no marketing story column */
+  compact?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 };
@@ -58,24 +62,29 @@ export function AuthPageLayout({
   storyLead,
   highlights,
   showLinkedInTrust = true,
-  trustLabel = "LinkedIn only",
-  trustSub = "Easy Apply automation today",
+  trustLabel = "Local sign-in",
+  trustSub = "LinkedIn Easy Apply, Naukri when enabled",
   cardHeadingId,
   cardTitle,
   cardSubtitle,
   registerTabs,
   wideCard,
+  compact = false,
   children,
   footer,
 }: AuthPageLayoutProps) {
   return (
-    <div className={cx("ax-login", tone !== "default" && `ax-login--${tone}`)} data-tone={tone}>
+    <div
+      className={cx("ax-login", tone !== "default" && `ax-login--${tone}`, compact && "ax-login--compact")}
+      data-tone={tone}
+    >
       <div className="ax-login__backdrop" aria-hidden="true">
         <span className="ax-login__orb ax-login__orb-a" />
         <span className="ax-login__orb ax-login__orb-b" />
       </div>
 
       <div className="ax-login__main">
+        {!compact && (
         <section className="ax-login__story" aria-label={storyAriaLabel}>
           <p className="ax-login__story-kicker">{kicker}</p>
           <h1 className="ax-login__story-title">{storyTitle}</h1>
@@ -102,6 +111,7 @@ export function AuthPageLayout({
             </div>
           )}
         </section>
+        )}
 
         <section className="ax-login__panel" aria-labelledby={cardHeadingId}>
           <div className={cx("ax-login__card", wideCard && "ax-login__card--wide")}>
@@ -120,6 +130,22 @@ export function AuthPageLayout({
 }
 
 export function AuthLegalLinks() {
+  if (isDesktopApp) {
+    const base = publicWebsiteUrl().replace(/\/$/, "");
+    return (
+      <p className="ax-login__legal">
+        By continuing you agree to our{" "}
+        <a href={`${base}/terms`} target="_blank" rel="noopener noreferrer" className="ax-login__link">
+          Terms
+        </a>{" "}
+        and{" "}
+        <a href={`${base}/privacy`} target="_blank" rel="noopener noreferrer" className="ax-login__link">
+          Privacy Policy
+        </a>
+        .
+      </p>
+    );
+  }
   return (
     <p className="ax-login__legal">
       By continuing you agree to our{" "}

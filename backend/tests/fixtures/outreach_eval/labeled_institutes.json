@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "description": "Small labeled set for offline precision/recall checks (no live network).",
+  "samples": [
+    {
+      "id": "distinct-directory-a",
+      "discovery_url": "https://justdial.com/pune/alpha-it-training",
+      "expected_dedupe_distinct_from": "distinct-directory-b",
+      "expected_name": "Alpha IT Training",
+      "source_text": "Alpha IT Training Pune. Visit www.alpha-it.example for courses. admissions@alpha-it.example +919811111111"
+    },
+    {
+      "id": "distinct-directory-b",
+      "discovery_url": "https://justdial.com/pune/beta-coaching-centre",
+      "expected_name": "Beta Coaching Centre",
+      "source_text": "Beta Coaching Centre. contact@beta-coaching.example +919822222222"
+    },
+    {
+      "id": "official-site",
+      "discovery_url": "https://gamma-institute.example/about",
+      "expected_website": "https://gamma-institute.example",
+      "source_text": "Gamma Institute official site gamma-institute.example info@gamma-institute.example"
+    },
+    {
+      "id": "no-contacts",
+      "discovery_url": "https://delta.example/programs",
+      "source_text": "We offer programming courses. No contact details published.",
+      "expected_emails": [],
+      "expected_phones": []
+    },
+    {
+      "id": "placeholder-reject",
+      "source_text": "Email us at user@example.com or call 12345",
+      "expected_emails": [],
+      "expected_phones": []
+    }
+  ]
+}

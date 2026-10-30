@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -35,6 +36,14 @@ from backend.app.models import (
 KYC_ELIGIBLE = (KycStatus.VERIFIED, KycStatus.NOT_REQUIRED)
 COMMERCIAL = (PartnerStatus.APPROVED, PartnerStatus.ACTIVE)
 HELD_PAYOUTS = (PayoutStatus.REQUESTED, PayoutStatus.APPROVED, PayoutStatus.PAID)
+MAX_KYC_BYTES = 5 * 1024 * 1024
+KYC_MIME = {
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
 
 
 def _now() -> datetime:
@@ -153,7 +162,7 @@ def partner_out(db: Session, partner: Partner) -> dict:
         "pan_number": partner.pan_number,
         "payout_account": partner.payout_account,
         "payout_ifsc": partner.payout_ifsc,
-        "kyc_documents": partner.kyc_documents or [],
+        "kyc_documents": kyc_documents_out(partner),
         "click_count": partner.click_count,
         "wallet": wallet,
         "created_at": _iso(partner.created_at),
@@ -356,12 +365,94 @@ def set_kyc(db: Session, partner: Partner, status: KycStatus) -> Partner:
     return partner
 
 
-def add_kyc_document(db: Session, partner: Partner, filename: str, note: str = "") -> Partner:
+def kyc_documents_out(partner: Partner) -> list[dict]:
+    items: list[dict] = []
+    for raw in partner.kyc_documents or []:
+        if not isinstance(raw, dict):
+            continue
+        item = {
+            "filename": str(raw.get("filename") or "")[:255],
+            "note": str(raw.get("note") or "")[:255],
+            "uploaded_at": str(raw.get("uploaded_at") or ""),
+        }
+        doc_id = str(raw.get("id") or "").strip()
+        if doc_id:
+            item["id"] = doc_id
+        items.append(item)
+    return items
+
+
+def _kyc_storage_root() -> Path:
+    from backend.app.core.config import get_settings
+
+    return Path(get_settings().STORAGE_DIR).resolve()
+
+
+def _looks_like_kyc(ext: str, data: bytes) -> bool:
+    if ext == "pdf":
+        return data.startswith(b"%PDF-")
+    if ext in ("jpg", "jpeg"):
+        return data.startswith(b"\xff\xd8\xff")
+    if ext == "png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == "webp":
+        return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
+    return False
+
+
+async def add_kyc_upload(db: Session, partner: Partner, upload, note: str = "") -> Partner:
+    from backend.app.services.resume_malware_scan import scan_resume_bytes
+    from backend.app.services.resume_service import safe_display_name
+
+    display = safe_display_name(upload.filename)
+    ext = Path(display).suffix.lower().lstrip(".")
+    if ext not in KYC_MIME:
+        raise AppError("INVALID_FILE", "Upload a PDF, JPG, PNG, or WEBP document.", 422)
+    declared = (getattr(upload, "content_type", None) or "").split(";")[0].strip().lower()
+    if declared and declared not in ("application/octet-stream", "binary/octet-stream") and declared != KYC_MIME[ext]:
+        raise AppError("INVALID_FILE", "The file type does not match its extension.", 422)
+    data = await upload.read(MAX_KYC_BYTES + 1)
+    if not data:
+        raise AppError("INVALID_FILE", "The file is empty.", 422)
+    if len(data) > MAX_KYC_BYTES:
+        raise AppError("FILE_TOO_LARGE", "KYC files must be 5 MB or smaller.", 413)
+    if not _looks_like_kyc(ext, data):
+        raise AppError("INVALID_FILE", f"The file is not a valid {ext.upper()} document.", 422)
+    scan_resume_bytes(data)
+    doc_id = uuid.uuid4()
+    rel = f"kyc/{partner.id}/{doc_id.hex}.{ext}"
+    path = _kyc_storage_root() / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
     docs = list(partner.kyc_documents or [])
-    docs.append({"filename": filename.strip()[:255], "note": note.strip()[:255], "uploaded_at": _now().isoformat()})
+    docs.append({
+        "id": str(doc_id),
+        "filename": display,
+        "note": (note or "").strip()[:255],
+        "uploaded_at": _now().isoformat(),
+        "storage_path": rel,
+    })
     partner.kyc_documents = docs
     db.flush()
     return partner
+
+
+def kyc_stored_file(partner: Partner, doc_id: uuid.UUID) -> tuple[Path, str, str]:
+    wanted = str(doc_id)
+    root = _kyc_storage_root()
+    for raw in partner.kyc_documents or []:
+        if not isinstance(raw, dict) or str(raw.get("id") or "") != wanted:
+            continue
+        rel = str(raw.get("storage_path") or "").replace("\\", "/").lstrip("/")
+        if not rel:
+            raise AppError("NOT_FOUND", "This document was recorded without an uploaded file.", 404)
+        path = (root / rel).resolve()
+        if root not in path.parents or not path.is_file():
+            raise AppError("NOT_FOUND", "KYC file is missing.", 404)
+        filename = str(raw.get("filename") or path.name)[:255]
+        ext = path.suffix.lower().lstrip(".")
+        return path, filename, KYC_MIME.get(ext, "application/octet-stream")
+    raise AppError("NOT_FOUND", "KYC document not found.", 404)
 
 
 def update_by_admin(
@@ -621,6 +712,7 @@ def payout_out(row: PartnerPayout) -> dict:
         "note": row.note,
         "processed_at": _iso(row.processed_at),
         "created_at": _iso(row.created_at),
+        "provider_transfer_id": getattr(row, "provider_transfer_id", "") or "",
     }
 
 

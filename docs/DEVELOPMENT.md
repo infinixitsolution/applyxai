@@ -6,7 +6,7 @@ The repository contains the classic app and the new SaaS, which run side by side
 |---|---|---|---|
 | Code | `app.py`, `runAiBot.py`, `config/`, `modules/`, `templates/` | `backend/` | `frontend/` (React, Vite, Tailwind) |
 | Start | `python app.py` | `uvicorn backend.app.main:app --reload` | `npm run dev` in `frontend/` |
-| URL | http://127.0.0.1:5000 | http://127.0.0.1:8000/api/docs | http://localhost:5173 |
+| URL | http://127.0.0.1:5000 | http://127.0.0.1:8010/api/docs | http://localhost:5173 |
 | Config | `user_config.json` | `.env` (see `.env.example`) | `frontend/.env.local` (optional) |
 | Storage | CSV files in `all excels/` | SQLite `storage/applyxai.db` or PostgreSQL | none (talks to the API) |
 
@@ -31,10 +31,10 @@ The one-click `start.bat` / `run_tests.bat` launchers use a separate `.venv\` an
 venv\Scripts\python app.py
 
 # SaaS API, run from the project root
-venv\Scripts\python -m uvicorn backend.app.main:app --reload --port 8000
+venv\Scripts\python -m uvicorn backend.app.main:app --reload --port 8010
 ```
 
-Then open http://127.0.0.1:8000/api/docs for the interactive API docs. `GET /api/health` should return `{"success": true, ...}`.
+Then open http://127.0.0.1:8010/api/docs for the interactive API docs. `GET /api/health` should return `{"success": true, ...}`.
 
 The backend package is always imported as `backend.app.*` from the project root, because the classic panel already owns the module name `app` (`app.py`).
 
@@ -98,7 +98,7 @@ The System page pings the Celery workers through Redis; without Redis it shows "
 
 ### Web app
 
-Needs Node.js 20 or newer. With the API running on port 8000:
+Needs Node.js 20 or newer. With the API running on port 8010:
 
 ```powershell
 cd frontend
@@ -125,10 +125,11 @@ Web app (from `frontend/`):
 ```powershell
 npm run typecheck
 npm test           # Vitest + Testing Library, no browser or API needed
+npm run test:e2e   # Playwright smokes (login, Home, Applications, Jobs, Automation). Set E2E_EMAIL + E2E_PASSWORD against local Vite+API.
 npm run build
 ```
 
-No test needs a real browser, network access, or a running database server. Optional extras:
+Vitest does not need a real browser. Playwright smokes need Chromium (`npx playwright install chromium`) plus a running app and `E2E_EMAIL` / `E2E_PASSWORD`; they skip when those env vars are empty. Optional extras:
 
 - `OPENAI_API_KEY` enables the live AI smoke test.
 - `TEST_POSTGRES_URL` also runs the migration test against PostgreSQL (see `docs/DATABASE.md`).

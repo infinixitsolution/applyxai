@@ -9,6 +9,7 @@ from backend.app.models import (
     Application, ApplicationPreferences, ApplicationStatus, AutomationJob, AutomationLog, AutomationStatus, Job,
     Notification, SearchConfig, UsageCounter, User, UserProfile,
 )
+from backend.app.services.linkedin_profile_sync_service import RUN_KIND_PROFILE_SYNC
 from backend.app.services import run_config_service
 from backend.app.services.ingest_service import ingest_events
 
@@ -47,6 +48,55 @@ def usage(db, user):
     db.expire_all()
     row = db.query(UsageCounter).filter_by(user_id=user.id).one_or_none()
     return (row.applications, row.jobs_discovered) if row else (0, 0)
+
+
+def test_naukri_source_switch_and_block_update_run_context(db, users, run):
+    alice, _ = users
+    events = [
+        e("source_started", source="naukri"),
+        e("applied", job_id="88002", title="DevOps", company="Acme", platform="naukri",
+          job_link="https://www.naukri.com/job-listings-88002"),
+        e("source_switched", source="linkedin", submitted_on_previous=1),
+        e("source_blocked", source="linkedin", reason="Sign in to LinkedIn to continue."),
+    ]
+    result = ingest_events(db, alice.id, events, run=run)
+    db.commit()
+    assert result.context["active_source"] == "linkedin"
+    assert result.context["source_submitted"] == 0
+    assert result.context["blocked_source"] == "linkedin"
+
+
+def test_job_started_alone_registers_company_for_admin(db, users, run):
+    alice, _ = users
+    from backend.app.services.admin_service import list_companies
+    from backend.app.core.pagination import PageParams
+
+    ingest_events(db, alice.id, [
+        started("9001", "Python Developer", "Jobgether"),
+        started("9002", "Cloud Engineer", "Rackspace Technology"),
+    ], run=run)
+    db.commit()
+    assert status_of(db, alice, "9001") == ApplicationStatus.DISCOVERED
+    page = list_companies(db, PageParams(page=1, page_size=50))
+    names = {item["company"] for item in page["items"]}
+    assert "Jobgether" in names and "Rackspace Technology" in names
+
+
+def test_a_naukri_application_keeps_its_platform_and_job_link(db, users, run):
+    alice, _ = users
+    ingest_events(db, alice.id, [
+        e("source_started", source="naukri"),
+        e("job_started", job_id="88001", title="Backend Engineer", company="Acme", platform="naukri",
+          job_link="https://www.naukri.com/job-listings-88001"),
+        e("applied", job_id="88001", title="Backend Engineer", company="Acme", platform="naukri"),
+    ], run=run)
+    db.commit()
+    job = db.query(Job).filter_by(external_id="88001").one()
+    assert job.platform == "naukri"
+    assert job.job_url == "https://www.naukri.com/job-listings-88001"
+    assert job.title == "Backend Engineer"
+    assert run.ingest_context["active_source"] == "naukri"
+    assert run.ingest_context["source_submitted"] == 1
 
 
 def test_a_live_run_updates_applications_counters_logs_and_notifies(db, users, run):
@@ -94,8 +144,8 @@ def test_a_live_run_updates_applications_counters_logs_and_notifies(db, users, r
     assert [log.seq for log in logs] == list(range(1, len(first) + len(second) + 1))
     assert logs[1].level == "warning" and "Sign in to LinkedIn" in logs[1].message
     assert "Build APIs" not in " ".join(log.message for log in logs)            # descriptions aren't logged
-    note = db.query(Notification).filter_by(user_id=alice.id).one()
-    assert note.title == "Automation run finished" and note.link == "/automation"
+    note = db.query(Notification).filter_by(user_id=alice.id, type="run_finished").one()
+    assert note.title == "Automation run finished" and note.link == "/app/automation?pending=1"
 
 
 @pytest.mark.parametrize("final, status", [
@@ -177,3 +227,20 @@ def test_cli_imports_engine_csvs_into_an_account(db, engine, users, tmp_path, mo
     assert cli.main(["import-history", "--email", "nobody@example.com", "--applied", str(applied)]) == 1
     assert cli.main(["import-history", "--email", "alice@example.com", "--applied", str(tmp_path / "x.csv"),
                      "--failed", str(tmp_path / "y.csv")]) == 1
+
+
+def test_profile_sync_events_update_run(db, users):
+    run = AutomationJob(user_id=users[0].id, status=AutomationStatus.RUNNING, run_kind=RUN_KIND_PROFILE_SYNC)
+    db.add(run)
+    db.commit()
+    events = [
+        e("profile_sync_started", sections=["headline"]),
+        e("profile_section_updated", section="headline", field="headline", detail="set"),
+        e("profile_sync_finished", updated=1, skipped=0, failed=0, stopped=False, error=""),
+    ]
+    result = ingest_events(db, users[0].id, events, run=run)
+    db.commit()
+    db.refresh(run)
+    assert result.finished is True
+    assert run.status == AutomationStatus.COMPLETED
+    assert run.successful_count == 1

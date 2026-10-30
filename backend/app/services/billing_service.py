@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.errors import AppError
+from backend.app.core.pagination import PageParams, page_response
 from backend.app.core.plans import FREE_PLAN, PLAN_LIMITS
 from backend.app.models import BillingEvent, Payment, Plan, Subscription, SubscriptionStatus, User
 from backend.app.services import notification_service, usage_service
@@ -126,6 +127,15 @@ def payment_out(p: Payment) -> dict:
             "method": p.method, "description": p.description, "paid_at": _iso(p.paid_at or p.created_at)}
 
 
+def list_user_payments(db: Session, user_id: uuid.UUID, params: PageParams, *, status: str | None = None) -> dict:
+    stmt = select(Payment).where(Payment.user_id == user_id).order_by(Payment.created_at.desc(), Payment.id)
+    if status:
+        stmt = stmt.where(Payment.status == status)
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = db.scalars(stmt.limit(params.page_size).offset((params.page - 1) * params.page_size)).all()
+    return page_response([payment_out(p) for p in rows], total, params)
+
+
 def _entitled(sub: Subscription, now: datetime) -> bool:
     end = _aware(sub.current_period_end)
     return sub.status in ENTITLED and (end is None or end > now)
@@ -149,20 +159,39 @@ def _pending(db: Session, user_id: uuid.UUID) -> Subscription | None:
                      .order_by(Subscription.created_at.desc()).limit(1))
 
 
+def _managed_campus(db: Session, user: User):
+    from backend.app.services import institute_service
+
+    return institute_service.managed_institute_for_user(db, user.id)
+
+
+def require_personal_billing(db: Session, user: User) -> None:
+    campus = _managed_campus(db, user)
+    if campus is not None:
+        raise AppError(
+            "BILLING_MANAGED_BY_INSTITUTE",
+            f"Your plan is managed by {campus.name}. Personal billing starts if they release you from campus.",
+            409,
+        )
+
+
 def overview(db: Session, user: User, provider: PaymentProvider) -> dict:
     from backend.app.services.platform_settings_service import get_effective_payments
 
     payments = db.scalars(select(Payment).where(Payment.user_id == user.id)
                           .order_by(Payment.created_at.desc()).limit(RECENT_PAYMENTS)).all()
     eff = get_effective_payments(db)
+    campus = _managed_campus(db, user)
     out = {
         "provider": provider.name,
         "subscription": sub_out(current_subscription(db, user.id)),
         "pending": sub_out(_pending(db, user.id)),
         "usage": usage_service.usage_summary(db, user.id),
         "payments": [payment_out(p) for p in payments],
+        "managed_by_institute": campus is not None,
+        "institute_name": campus.name if campus is not None else None,
     }
-    out["checkout_available"] = eff.configured
+    out["checkout_available"] = eff.configured and campus is None
     if provider.name == "razorpay":
         out["razorpay_mode"] = eff.razorpay_mode
         out["checkout_live"] = eff.razorpay_mode == "live"
@@ -201,6 +230,8 @@ def apply_remote(db: Session, provider: PaymentProvider, sub: Subscription, remo
         sub.current_period_end = remote.current_end
     if remote.customer_id:
         sub.provider_customer_id = remote.customer_id[:255]
+    if remote.id and (remote.id.startswith("sub_") or remote.id.startswith("cs_")):
+        sub.provider_subscription_id = remote.id[:255]
     db.flush()
     if sub.status == before:
         return
@@ -261,6 +292,16 @@ def record_payment(db: Session, provider: PaymentProvider, user_id: uuid.UUID, s
     if sub is not None and sub.institute_id:
         from backend.app.services import partner_service
         partner_service.maybe_accrue_commission(db, payment, sub)
+    try:
+        from backend.app.services import gst_service
+        gst_service.issue_for_payment(db, payment)
+    except Exception:
+        logger.exception("GST invoice issue failed for payment %s", payment.id)
+    try:
+        from backend.app.services import candidate_referral_service
+        candidate_referral_service.mark_converted(db, user_id)
+    except Exception:
+        logger.exception("Candidate referral conversion failed for user %s", user_id)
     return payment
 
 
@@ -282,6 +323,7 @@ def checkout(db: Session, user: User, provider: PaymentProvider, plan_code: str,
         from backend.app.services import institute_service
         current = institute_service.current_subscription(db, institute_id)
     else:
+        require_personal_billing(db, user)
         current = current_subscription(db, user.id)
     if current is not None and current.plan_id == plan.id:
         raise AppError("ALREADY_SUBSCRIBED", f"You're already on the {plan.name} plan.", 409)
@@ -315,6 +357,16 @@ def checkout(db: Session, user: User, provider: PaymentProvider, plan_code: str,
 def _own_subscription(db: Session, user_id: uuid.UUID, provider_subscription_id: str) -> Subscription:
     sub = db.scalar(select(Subscription).where(Subscription.user_id == user_id,
                                                Subscription.provider_subscription_id == provider_subscription_id))
+    if sub is None and provider_subscription_id:
+        # Stripe confirm may return sub_... while the pending row still has cs_...
+        pending = db.scalars(
+            select(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.provider == "stripe",
+                Subscription.status == SubscriptionStatus.PENDING,
+            ).order_by(Subscription.created_at.desc())
+        ).all()
+        sub = pending[0] if len(pending) == 1 else None
     if sub is None:
         raise AppError("NOT_FOUND", "Subscription not found", 404)
     return sub
@@ -322,6 +374,7 @@ def _own_subscription(db: Session, user_id: uuid.UUID, provider_subscription_id:
 
 def confirm_checkout(db: Session, user: User, provider: PaymentProvider, *,
                      payment_id: str, subscription_id: str, signature: str) -> dict:
+    require_personal_billing(db, user)
     confirmed = provider.verify_checkout(payment_id, subscription_id, signature)
     sub = _own_subscription(db, user.id, confirmed.subscription_id)
     apply_remote(db, provider, sub, provider.fetch_subscription(confirmed.subscription_id))
@@ -330,6 +383,7 @@ def confirm_checkout(db: Session, user: User, provider: PaymentProvider, *,
 
 
 def cancel(db: Session, user: User, provider: PaymentProvider) -> dict:
+    require_personal_billing(db, user)
     sub = current_subscription(db, user.id)
     if sub is None:
         raise AppError("NO_SUBSCRIPTION", "You're on the Free plan; there's nothing to cancel.", 404)

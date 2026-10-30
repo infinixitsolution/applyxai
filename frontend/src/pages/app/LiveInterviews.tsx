@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Clock, Headphones, MessageSquare, Target } from "lucide-react";
 import { useParams } from "react-router-dom";
-import { Alert, Badge, ButtonLink, Card, EmptyState, PageHeader, Spinner, StatCard } from "../../components/ui";
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner, StatCard } from "../../components/ui";
+import { LiveInterviewFlow } from "../../features/LiveInterviewFlow";
 import { LiveInterviewReportDashboard } from "../../features/LiveInterviewReportDashboard";
 import { formatDateTime } from "../../lib/format";
 import { errorMessage } from "../../services/api";
-import { liveInterviews } from "../../services/endpoints";
+import { liveInterviews, support } from "../../services/endpoints";
 import type { LiveInterviewSession } from "../../types";
 
 function scoreTone(score: number | null | undefined): "green" | "blue" | "amber" | "red" | "slate" {
@@ -24,13 +26,20 @@ function durationLabel(start?: string | null, end?: string | null) {
   return minutes < 1 ? "<1 min" : `${minutes} min`;
 }
 
-function InterviewCard({ session }: { session: LiveInterviewSession }) {
+function InterviewCard({
+  session,
+  onContinue,
+}: {
+  session: LiveInterviewSession;
+  onContinue?: () => void;
+}) {
   const score = session.feedback?.overall_score;
   const rubric = session.feedback?.rubric_overall;
   const answers = (session.transcript ?? []).filter((turn) => turn.role === "candidate").length;
   const questions = (session.transcript ?? []).filter((turn) => turn.role === "interviewer").length;
   const duration = durationLabel(session.started_at, session.ended_at);
   const ready = session.status === "completed";
+  const active = session.status === "active";
   return (
     <article className="flex flex-col rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/80">
       <div className="flex items-start justify-between gap-4">
@@ -44,7 +53,7 @@ function InterviewCard({ session }: { session: LiveInterviewSession }) {
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Badge tone={ready ? "green" : "amber"}>{ready ? "Report ready" : "In progress"}</Badge>
+        <Badge tone={ready ? "green" : "amber"}>{ready ? "Report ready" : active ? "In progress" : "Open"}</Badge>
         {ready && score != null && <Badge tone={scoreTone(score)}>{score}/100</Badge>}
         {ready && rubric != null && <Badge tone="slate">Rubric {rubric}</Badge>}
       </div>
@@ -63,41 +72,73 @@ function InterviewCard({ session }: { session: LiveInterviewSession }) {
         </div>
       </dl>
       <p className="mt-3 text-xs text-slate-500">{questions} interviewer {questions === 1 ? "question" : "questions"} captured</p>
-      <ButtonLink to={`/app/live-interviews/${session.id}/report`} className="mt-4" variant={ready ? "primary" : "secondary"}>
-        {ready ? "Open report" : "Open session"}
-      </ButtonLink>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {active && onContinue && (
+          <Button type="button" variant="primary" onClick={onContinue}>
+            Continue in coach
+          </Button>
+        )}
+        <ButtonLink to={`/app/live-interviews/${session.id}/report`} variant={ready ? "primary" : "secondary"}>
+          {ready ? "Open report" : "Open session"}
+        </ButtonLink>
+      </div>
     </article>
   );
 }
 
 export function LiveInterviewsPage() {
+  const [resumeNonce, setResumeNonce] = useState(0);
   const query = useQuery({ queryKey: ["live-interviews"], queryFn: liveInterviews.list });
+  const supportQuery = useQuery({ queryKey: ["support", "thread"], queryFn: support.thread });
   const sessions = query.data ?? [];
   const completed = sessions.filter((session) => session.status === "completed");
+  const inProgress = sessions.filter((session) => session.status === "active");
+  const activeSession = inProgress[0] ?? null;
   const scores = completed.map((session) => session.feedback?.overall_score).filter((score): score is number => score != null);
   const average = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
+
   return (
     <>
       <PageHeader
         title="Live interviews"
-        description="Reports from interviews coached in the desktop agent. Each token from Support is one interview."
-        actions={<ButtonLink to="/app/support">Get a token</ButtonLink>}
+        description="Purchase a token, start coaching in ApplyXAI Desktop, and review reports here."
       />
+      <div className="mb-6">
+        <LiveInterviewFlow
+          messages={supportQuery.data?.messages}
+          activeSession={activeSession}
+          initialToken={activeSession?.token}
+          resumeNonce={resumeNonce}
+        />
+      </div>
       {query.isPending ? <Spinner /> : query.error ? <Alert kind="error">{errorMessage(query.error)}</Alert> : sessions.length ? (
         <div className="space-y-6">
           <div className="grid gap-3 sm:grid-cols-3">
             <StatCard icon={<Headphones className="h-4 w-4" aria-hidden />} label="Interviews" value={sessions.length} sub={`${completed.length} with a report`} />
             <StatCard icon={<Target className="h-4 w-4" aria-hidden />} label="Average score" value={average ?? "—"} sub={scores.length ? "Completed interviews" : "End an interview to score it"} />
-            <StatCard icon={<MessageSquare className="h-4 w-4" aria-hidden />} label="In progress" value={sessions.length - completed.length} sub="Still open in the desktop agent" />
+            <StatCard icon={<MessageSquare className="h-4 w-4" aria-hidden />} label="In progress" value={inProgress.length} sub="Only one session stays active; older ones auto-end after 1 hour or when you start a new interview" />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            {sessions.map((session) => <InterviewCard key={session.id} session={session} />)}
+            {sessions.map((session) => (
+              <InterviewCard
+                key={session.id}
+                session={session}
+                onContinue={
+                  session.status === "active"
+                    ? () => {
+                        document.getElementById("live-interview-flow")?.scrollIntoView({ behavior: "smooth" });
+                        setResumeNonce((n) => n + 1);
+                      }
+                    : undefined
+                }
+              />
+            ))}
           </div>
         </div>
       ) : (
         <Card>
           <EmptyState icon={<Clock className="h-8 w-8" aria-hidden />} title="No live interviews yet">
-            Request a token in Support, paste it in the desktop agent, and end the interview to see the report here.
+            Use the panel above to request a token and start your first coached interview in ApplyXAI Desktop.
           </EmptyState>
         </Card>
       )}

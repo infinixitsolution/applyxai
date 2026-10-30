@@ -12,7 +12,12 @@ from backend.app.core.plans import PLAN_LIMITS
 from backend.app.models import AssignmentStatus, Plan, PlanKind, User
 from backend.app.schemas.institute import InstituteProfileIn, InstituteSettingsIn, InviteIn
 from backend.app.services import billing_service, institute_service
-from backend.app.services.email_service import EmailSender, institute_invite_email
+from backend.app.services.email_service import (
+    EmailSender,
+    institute_student_credentials_email,
+    institute_student_enrolled_email,
+    institute_student_released_email,
+)
 from backend.app.services.payments import get_payment_provider
 
 router = APIRouter(prefix="/institute", tags=["institute"])
@@ -37,31 +42,59 @@ def students(status: AssignmentStatus | None = None, params: PageParams = Depend
     return ok(institute_service.list_assignments(db, institute, params, status=status))
 
 
+@router.get("/students/{assignment_id}")
+def student(assignment_id: uuid.UUID, ctx=Depends(require_institute_member), db: Session = Depends(get_db)):
+    _user, institute, _member = ctx
+    return ok(institute_service.student_detail(db, institute, assignment_id))
+
+
 @router.post("/students/invite")
 def invite(body: InviteIn, background: BackgroundTasks, ctx=Depends(require_institute_member),
            db: Session = Depends(get_db), mailer: EmailSender = Depends(get_mailer)):
     user, institute, _member = ctx
-    assignment, token = institute_service.invite_candidate(db, institute, body.email, user, body.note)
-    institute_service.notify_candidate_invited(db, institute, body.email, token)
+    assignment, temp_password = institute_service.invite_candidate(
+        db, institute, body.email, user, body.note, name=body.name, phone=body.phone,
+    )
     db.commit()
-    background.add_task(mailer.send, institute_invite_email(body.email, institute.name, token, db))
-    return ok({"assignment": institute_service.assignment_out(assignment)})
+    if temp_password:
+        background.add_task(
+            mailer.send,
+            institute_student_credentials_email(body.email, institute.name, temp_password, db),
+        )
+    else:
+        background.add_task(
+            mailer.send,
+            institute_student_enrolled_email(body.email, institute.name, db),
+        )
+    return ok({"assignment": institute_service.assignment_out(assignment, db)})
 
 
 @router.post("/students/{assignment_id}/release")
-def release(assignment_id: uuid.UUID, ctx=Depends(require_institute_member), db: Session = Depends(get_db)):
+def release(assignment_id: uuid.UUID, background: BackgroundTasks, ctx=Depends(require_institute_member),
+            db: Session = Depends(get_db), mailer: EmailSender = Depends(get_mailer)):
     _user, institute, _member = ctx
-    row = institute_service.release_assignment(db, institute, assignment_id)
+    row, notify_email = institute_service.release_assignment(db, institute, assignment_id)
     db.commit()
-    return ok({"assignment": institute_service.assignment_out(row)})
+    if notify_email:
+        background.add_task(
+            mailer.send,
+            institute_student_released_email(notify_email, institute.name, db),
+        )
+    return ok({"assignment": institute_service.assignment_out(row, db)})
 
 
 @router.post("/students/{assignment_id}/suspend")
-def suspend(assignment_id: uuid.UUID, ctx=Depends(require_institute_member), db: Session = Depends(get_db)):
+def suspend(assignment_id: uuid.UUID, background: BackgroundTasks, ctx=Depends(require_institute_member),
+            db: Session = Depends(get_db), mailer: EmailSender = Depends(get_mailer)):
     _user, institute, _member = ctx
-    row = institute_service.suspend_assignment(db, institute, assignment_id)
+    row, notify_email = institute_service.suspend_assignment(db, institute, assignment_id)
     db.commit()
-    return ok({"assignment": institute_service.assignment_out(row)})
+    if notify_email:
+        background.add_task(
+            mailer.send,
+            institute_student_released_email(notify_email, institute.name, db),
+        )
+    return ok({"assignment": institute_service.assignment_out(row, db)})
 
 
 @router.get("/invitations")
@@ -154,4 +187,4 @@ def preview_invite(token: str, db: Session = Depends(get_db)):
 def accept_invite(token: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     row = institute_service.accept_invite(db, user, token)
     db.commit()
-    return ok({"assignment": institute_service.assignment_out(row)})
+    return ok({"assignment": institute_service.assignment_out(row, db)})

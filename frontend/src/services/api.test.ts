@@ -111,6 +111,19 @@ describe("session refresh", () => {
     await expect(request("/auth/login", { method: "POST", body: {} })).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("does not log out when a third-party key check returns 401", async () => {
+    const expired = vi.fn();
+    onSessionExpired(expired);
+    fetchMock
+      .mockResolvedValueOnce(fail(401, "ELEVENLABS_ERROR", "ElevenLabs API key check failed (401)."))
+      .mockResolvedValueOnce(ok({ user: {} }))
+      .mockResolvedValueOnce(fail(401, "ELEVENLABS_ERROR", "ElevenLabs API key check failed (401)."));
+    await expect(
+      request("/admin/settings/ai/test-elevenlabs", { method: "POST", body: {} }),
+    ).rejects.toMatchObject({ code: "ELEVENLABS_ERROR", status: 401 });
+    expect(expired).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildUrl", () => {

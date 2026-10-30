@@ -10,6 +10,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STORAGE_DIR = PROJECT_ROOT / "storage"
 _DEFAULT_DATABASE_URL = f"sqlite:///{(DEFAULT_STORAGE_DIR / 'applyxai.db').as_posix()}"
+# Shared with whatsapp-bridge/start script in development when .env omits WHATSAPP_BRIDGE_SECRET.
+DEV_WHATSAPP_BRIDGE_SECRET = "dev-whatsapp-bridge-local"
+
+
+def _agent_latest_version() -> str:
+    try:
+        text = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        if text:
+            return text.splitlines()[0].strip()
+    except OSError:
+        pass
+    return "1.2.21"
 
 
 class Settings(BaseSettings):
@@ -21,6 +33,8 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "ApplyXAI"
     APP_ENV: Literal["development", "test", "production"] = "development"
+    # When true, Naukri is treated as enabled in job_sources (staging/local smoke without admin toggle).
+    ENABLE_NAUKRI: bool = False
     APP_VERSION: str = "0.1.0"
 
     SECRET_KEY: str = ""
@@ -40,12 +54,35 @@ class Settings(BaseSettings):
     CLAMAV_HOST: str = ""
     CLAMAV_PORT: int = 3310
     CLAMAV_SCAN_TIMEOUT_SEC: float = 30.0
-    # Desktop agent download: prefer single Setup.exe, else GUI-only fallback.
+    # ApplyXAI Desktop — single Windows installer (Electron + embedded automation worker).
+    DESKTOP_APP_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Desktop-Setup.exe"
+    DESKTOP_APP_ZIP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Desktop-Windows.zip"
+    # Legacy standalone agent (deprecated; kept for old deployments only).
     DESKTOP_AGENT_SETUP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Setup.exe"
     DESKTOP_AGENT_GUI_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-GUI.exe"
     DESKTOP_AGENT_ZIP_PATH: Path = PROJECT_ROOT / "dist" / "ApplyXAI-Agent-Windows.zip"
-    AGENT_LATEST_VERSION: str = "1.1.8"
+    AGENT_LATEST_VERSION: str = _agent_latest_version()
     AGENT_DOWNLOAD_URL: str = ""
+
+    FIRECRAWL_API_KEY: str = ""
+    ELEVENLABS_API_KEY: str = ""
+    # Comma-separated account emails with unlimited mock interviews (plan cap ignored for mock only).
+    MOCK_INTERVIEWS_UNLIMITED_EMAILS: str = ""
+    WHATSAPP_BRIDGE_URL: str = "http://127.0.0.1:39219"
+    WHATSAPP_BRIDGE_SECRET: str = ""
+    # Meta WhatsApp Cloud API (optional; unofficial bridge remains the local/dev path).
+    WHATSAPP_CLOUD_TOKEN: str = ""
+    WHATSAPP_CLOUD_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_CLOUD_WABA_ID: str = ""
+    WHATSAPP_CLOUD_VERIFY_TOKEN: str = ""
+    WHATSAPP_CLOUD_APP_SECRET: str = ""
+    # RazorpayX current-account number for partner payouts (Pay now). Empty = manual transfer only.
+    RAZORPAYX_ACCOUNT_NUMBER: str = ""
+    RAZORPAYX_KEY_ID: str = ""
+    RAZORPAYX_KEY_SECRET: str = ""
+    APPLYXAI_API_URL: str = "http://127.0.0.1:8010"
+    OUTREACH_MAX_LEADS_PER_JOB: int = 50
+    OUTREACH_AUTOMATION_ENABLED: bool = True
 
     # Where the SPA lives; used to build links in verification / reset emails.
     FRONTEND_URL: str = "http://localhost:5173"
@@ -115,10 +152,20 @@ class Settings(BaseSettings):
         return self.DATABASE_URL.startswith("sqlite")
 
     @model_validator(mode="after")
+    def _development_whatsapp_bridge_secret(self) -> "Settings":
+        if self.APP_ENV != "production" and not (self.WHATSAPP_BRIDGE_SECRET or "").strip():
+            object.__setattr__(self, "WHATSAPP_BRIDGE_SECRET", DEV_WHATSAPP_BRIDGE_SECRET)
+        return self
+
+    @model_validator(mode="after")
     def _production_requirements(self) -> "Settings":
         if self.APP_ENV != "production":
             return self
         problems = []
+        if self.OUTREACH_AUTOMATION_ENABLED and not (self.WHATSAPP_BRIDGE_SECRET or "").strip():
+            problems.append(
+                "WHATSAPP_BRIDGE_SECRET must be set when OUTREACH_AUTOMATION_ENABLED is true (inbound WhatsApp)"
+            )
         if len(self.SECRET_KEY) < 32:
             problems.append("SECRET_KEY must be set to at least 32 characters")
         if len(self.JWT_SECRET) < 32:

@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
 import type { Institute, InstituteAssignment, Plan, Subscription } from "../../types";
-import { InstituteProfilePage, InstituteSettingsPage, InstituteStudentsPage, InstituteSubscriptionPage } from "./Pages";
+import { InstituteInvitationsPage, InstituteProfilePage, InstituteSettingsPage, InstituteStudentsPage, InstituteSubscriptionPage } from "./Pages";
 
 const seats = { total: 10, available: 8, assigned: 2, by_status: {} };
 const campus: Institute = {
@@ -25,6 +25,16 @@ const sub: Subscription = {
   id: "s1", plan: { code: "campus", name: "Campus", price_cents: 49900, currency: "INR", interval: "month" },
   status: "active", provider: "razorpay", current_period_start: "2026-10-01T00:00:00+00:00",
   current_period_end: "2026-11-01T00:00:00+00:00", cancel_at_period_end: false, created_at: "2026-10-01T00:00:00+00:00",
+};
+
+const dash = {
+  institute: campus,
+  subscription: null,
+  students: 1,
+  pending_invites: 0,
+  seats,
+  activity: { searched: 0, applied: 0, skipped: 0, failed: 0, success_rate: null, daily: [] },
+  recent_assignments: [],
 };
 
 const ok = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200 });
@@ -116,12 +126,82 @@ describe("institute portal wiring", () => {
       created_at: "2026-10-08T00:00:00+00:00",
     };
     const calls = mockApi({
+      "GET /api/institute/dashboard": dash,
       "GET /api/institute/students": { items: [student], total: 1, page: 1, page_size: 20 },
       "POST /api/institute/students/a1/suspend": { ...student, status: "suspended" },
     });
     renderPage(<InstituteStudentsPage />);
+    expect(await screen.findByRole("link", { name: "View" })).toHaveAttribute("href", "/institute/students/a1");
     await userEvent.click(await screen.findByRole("button", { name: "Suspend" }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Suspend" }));
     await vi.waitFor(() => expect(calls.some((c) => c.key === "POST /api/institute/students/a1/suspend")).toBe(true));
+  });
+
+  it("releases a candidate without cancelling institute seats", async () => {
+    const student: InstituteAssignment = {
+      id: "a1", candidate_email: "student@example.com", student_user_id: "u9", seat_id: "seat1",
+      status: "active", note: "", accepted_at: "2026-10-09T00:00:00+00:00", released_at: null,
+      created_at: "2026-10-08T00:00:00+00:00",
+    };
+    const calls = mockApi({
+      "GET /api/institute/dashboard": dash,
+      "GET /api/institute/students": { items: [student], total: 1, page: 1, page_size: 20 },
+      "POST /api/institute/students/a1/release": { ...student, status: "released", seat_id: null },
+    });
+    renderPage(<InstituteStudentsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Release" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Release this candidate?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/will no longer be bound to this campus/i);
+    expect(dialog).toHaveTextContent(/must buy a candidate plan to apply/i);
+    expect(dialog).toHaveTextContent(/seats stay with the institute/i);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Release" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.key === "POST /api/institute/students/a1/release")).toBe(true));
+    expect(await screen.findByText(/Candidate released\. They must buy a personal plan to apply/)).toBeInTheDocument();
+  });
+
+  it("invites a student from Add student", async () => {
+    const invited: InstituteAssignment = {
+      id: "a2", candidate_email: "new@example.com", candidate_name: "New Student",
+      candidate_phone: "9876543210", student_user_id: "u2", seat_id: "seat2",
+      status: "active", note: "", accepted_at: "2026-10-16T00:00:00+00:00", released_at: null,
+      created_at: "2026-10-16T00:00:00+00:00",
+    };
+    const calls = mockApi({
+      "GET /api/institute/dashboard": { ...dash, students: 0 },
+      "GET /api/institute/students": { items: [], total: 0, page: 1, page_size: 20 },
+      "POST /api/institute/students/invite": { assignment: invited },
+    });
+    renderPage(<InstituteStudentsPage />);
+    const addButtons = await screen.findAllByRole("button", { name: "Add student" });
+    await userEvent.click(addButtons[0]);
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Name"), "New Student");
+    await userEvent.type(within(dialog).getByLabelText("Number"), "9876543210");
+    await userEvent.type(within(dialog).getByLabelText("Email ID"), "new@example.com");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add student" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.key === "POST /api/institute/students/invite")).toBe(true));
+    expect(calls.find((c) => c.key === "POST /api/institute/students/invite")?.body).toEqual({
+      name: "New Student", phone: "9876543210", email: "new@example.com", note: "",
+    });
+  });
+
+  it("cancels an invitation after confirm", async () => {
+    const invited: InstituteAssignment = {
+      id: "a3", candidate_email: "wait@example.com", candidate_name: "Wait Student",
+      candidate_phone: "9876543212", student_user_id: "u3", seat_id: "seat3",
+      status: "invited", note: "", accepted_at: null, released_at: null,
+      created_at: "2026-10-16T00:00:00+00:00", expires_at: "2026-10-23T00:00:00+00:00",
+    };
+    const calls = mockApi({
+      "GET /api/institute/dashboard": { ...dash, pending_invites: 1 },
+      "GET /api/institute/invitations": { items: [invited] },
+      "POST /api/institute/students/a3/release": { ...invited, status: "cancelled" },
+    });
+    renderPage(<InstituteInvitationsPage />);
+    expect(await screen.findByRole("heading", { name: "1 open invitation" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel invite" }));
+    await vi.waitFor(() => expect(calls.some((c) => c.key === "POST /api/institute/students/a3/release")).toBe(true));
   });
 });

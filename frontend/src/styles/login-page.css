@@ -592,3 +592,60 @@
     padding: 10px 12px;
   }
 }
+
+/* ApplyXAI Desktop — single-column auth inside app shell */
+.desktop-auth-shell .ax-login {
+  min-height: 0;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.desktop-auth-shell .ax-login__backdrop {
+  background: transparent;
+}
+
+.desktop-auth-shell .ax-login__orb {
+  display: none;
+}
+
+/* Never use the wide two-column marketing grid inside the narrow desktop shell. */
+.desktop-auth-shell .ax-login__story {
+  display: none !important;
+}
+
+.desktop-auth-shell .ax-login__main {
+  grid-template-columns: 1fr !important;
+  max-width: 100%;
+  width: 100%;
+  padding: 0;
+  gap: 0;
+}
+
+.desktop-auth-shell .ax-login__panel {
+  width: 100%;
+  justify-content: center !important;
+}
+
+.desktop-auth-shell .ax-login__card {
+  max-width: 100%;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+}
+
+.ax-login--compact .ax-login__main {
+  grid-template-columns: 1fr;
+  max-width: 100%;
+  padding: 0;
+  gap: 0;
+}
+
+.ax-login--compact .ax-login__panel {
+  width: 100%;
+}
+
+.ax-login--compact .ax-login__card {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+}

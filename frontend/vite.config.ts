@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 
 // In development the API is proxied, so the browser sees one origin and the
 // HttpOnly session cookies work without any CORS configuration.
-const API_TARGET = process.env.APPLYXAI_API_URL ?? "http://127.0.0.1:8000";
+const API_TARGET = process.env.APPLYXAI_API_URL ?? "http://127.0.0.1:8010";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -18,9 +18,12 @@ export default defineConfig({
       "/api": {
         target: API_TARGET,
         changeOrigin: true,
-        timeout: 120_000,
-        proxyTimeout: 120_000,
+        // Institute outreach (Firecrawl + AI) can run longer than default proxy limits.
+        timeout: 300_000,
+        proxyTimeout: 300_000,
       },
+      "/robots.txt": { target: API_TARGET, changeOrigin: true },
+      "/sitemap.xml": { target: API_TARGET, changeOrigin: true },
     },
   },
   test: {
@@ -28,5 +31,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
   },
 });

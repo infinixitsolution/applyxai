@@ -7,6 +7,7 @@ import { MockInterviewDashboard } from "../../features/MockInterviewDashboard";
 import { captureVideoFrame, pushPresentationFrame } from "../../features/captureVideoFrame";
 import { MockInterviewReportDashboard } from "../../features/MockInterviewReportDashboard";
 import { MockInterviewLiveStage } from "../../features/MockInterviewLiveStage";
+import { isDesktop } from "../../lib/desktop";
 import { useInterviewCamera } from "../../features/useInterviewCamera";
 import { useInterviewCountdown } from "../../features/useInterviewCountdown";
 import { useMockInterviewVoice } from "../../features/useMockInterviewVoice";
@@ -155,7 +156,7 @@ export function MockInterviewLivePage() {
   const voice = useMockInterviewVoice({
     onTranscript: (text) => turnHandlerRef.current(text),
     transcribe: (blob) => mockInterviews.transcribe(blob).then((r) => r.text),
-    bargeInEnabled: supportsBargeIn,
+    bargeInEnabled: supportsBargeIn && !isDesktop,
     disabled: session?.status !== "active" || shouldEndHint,
     continuous: true,
   });
@@ -373,7 +374,7 @@ export function MockInterviewLivePage() {
           <p className="text-sm text-slate-600">Loading interview session…</p>
           {loadSlow && (
             <Alert kind="info">
-              This is taking longer than usual. Confirm the API is running on port 8000, then restart the frontend (
+              This is taking longer than usual. Confirm the API is running on port 8010, then restart the frontend (
               <code className="rounded bg-slate-100 px-1">npm run dev</code>
               ). If the page still hangs, hard-refresh (Ctrl+F5).
             </Alert>
@@ -434,7 +435,9 @@ export function MockInterviewLivePage() {
           : voice.phase === "listening"
             ? voice.awaitingSilence
               ? "Still listening — finish your thought or tap Done speaking"
-              : "Your turn — answer at your own pace (thinking pauses are fine)"
+              : isDesktop
+                ? "Your turn — use headphones if the mic picks up the interviewer; pause when done"
+                : "Your turn — answer at your own pace (thinking pauses are fine)"
             : voice.phase === "processing"
               ? "Interviewer is preparing the next question…"
               : opening.isPending

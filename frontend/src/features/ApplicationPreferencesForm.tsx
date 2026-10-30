@@ -18,7 +18,15 @@ function emptyQuestion(): HumanQuestion {
   return { id: crypto.randomUUID(), match: "contains", pattern: "", answer: "", field_types: ["text", "textarea", "select", "radio"] };
 }
 
-export function ApplicationPreferencesForm({ onSaved, submitLabel = "Save answers" }: { onSaved?: () => void; submitLabel?: string }) {
+export function ApplicationPreferencesForm({
+  onSaved,
+  submitLabel = "Save answers",
+  variant = "all",
+}: {
+  onSaved?: () => void;
+  submitLabel?: string;
+  variant?: "all" | "ai";
+}) {
   const options = useQuery({ queryKey: ["preferences", "options"], queryFn: preferences.options, staleTime: Infinity });
   const answers = useQuery({ queryKey: ["preferences", "application"], queryFn: preferences.application });
   if (options.isLoading || answers.isLoading) return <Spinner />;
@@ -29,6 +37,7 @@ export function ApplicationPreferencesForm({ onSaved, submitLabel = "Save answer
       initial={answers.data}
       onSaved={onSaved}
       submitLabel={submitLabel}
+      variant={variant}
     />
   );
 }
@@ -38,11 +47,13 @@ function Inner({
   initial,
   onSaved,
   submitLabel,
+  variant,
 }: {
   fields: FieldMeta[];
   initial: ApplicationPreferencesOut;
   onSaved?: () => void;
   submitLabel: string;
+  variant: "all" | "ai";
 }) {
   const client = useQueryClient();
   const toast = useToast();
@@ -59,6 +70,7 @@ function Inner({
     for (const f of fields) grouped.set(f.section, [...(grouped.get(f.section) ?? []), f]);
     return [...grouped.entries()];
   }, [fields]);
+  const aiOnly = variant === "ai";
 
   const save = useMutation({
     mutationFn: (changes: Record<string, unknown>) => preferences.patchApplication(changes),
@@ -74,24 +86,26 @@ function Inner({
     e.preventDefault();
     const problems: Record<string, string> = {};
     const changes: Record<string, unknown> = {};
-    for (const field of fields) {
-      try {
-        const value = fromDraft(field, draft[field.key]);
-        if (!sameValue(value, engineInitial[field.key])) changes[field.key] = value;
-      } catch (err) {
-        problems[field.key] = (err as Error).message;
+    if (!aiOnly) {
+      for (const field of fields) {
+        try {
+          const value = fromDraft(field, draft[field.key]);
+          if (!sameValue(value, engineInitial[field.key])) changes[field.key] = value;
+        } catch (err) {
+          problems[field.key] = (err as Error).message;
+        }
       }
-    }
-    for (const q of humanQuestions) {
-      if (!q.pattern.trim() || !q.answer.trim()) {
-        problems.human_questions = "Each custom question needs a pattern and an answer.";
-        break;
+      for (const q of humanQuestions) {
+        if (!q.pattern.trim() || !q.answer.trim()) {
+          problems.human_questions = "Each custom question needs a pattern and an answer.";
+          break;
+        }
       }
     }
     setErrors(problems);
     if (Object.keys(problems).length) return;
 
-    if (JSON.stringify(humanQuestions) !== JSON.stringify(initial.human_questions ?? [])) {
+    if (!aiOnly && JSON.stringify(humanQuestions) !== JSON.stringify(initial.human_questions ?? [])) {
       changes.human_questions = humanQuestions;
     }
     if (aiEnabled !== initial.ai_applications_enabled) changes.ai_applications_enabled = aiEnabled;
@@ -109,15 +123,17 @@ function Inner({
 
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
-      <Alert kind="info">
-        Fixed screening answers are used first, then saved LinkedIn questions, then AI for anything still empty.
-        Your job-site password is never stored here.
-      </Alert>
+      {!aiOnly && (
+        <Alert kind="info">
+          Fixed screening answers are used first, then saved LinkedIn questions, then AI for anything still empty.
+          Your job-site password is never stored here.
+        </Alert>
+      )}
 
-      <LinkedInCapturedQuestions aiAvailable={initial.ai_available} />
+      {!aiOnly && <LinkedInCapturedQuestions aiAvailable={initial.ai_available} />}
       {save.error && !Object.keys(errors).length && <Alert kind="error">{errorMessage(save.error)}</Alert>}
 
-      {sections.map(([section, sectionFields]) => (
+      {!aiOnly && sections.map(([section, sectionFields]) => (
         <Card key={section} title={`${SECTION_TITLES[section] ?? section} · Always used`}>
           <div className="grid gap-4 sm:grid-cols-2">
             {sectionFields.map((field) => (
@@ -134,6 +150,7 @@ function Inner({
         </Card>
       ))}
 
+      {!aiOnly && (
       <Card title="Custom questions (your answers)">
         <p className="mb-4 text-sm text-muted">
           When a form label matches your pattern, this exact answer is used (before AI).
@@ -194,6 +211,7 @@ function Inner({
           Add custom question
         </Button>
       </Card>
+      )}
 
       <Card title="AI assistance">
         {aiOff ? (

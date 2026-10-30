@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -145,6 +146,69 @@ def test_start_explains_what_is_missing(app, make_user):
     assert overview["readiness"]["ready"] is False and overview["active"] is None
 
 
+def test_start_rejects_a_source_the_admin_has_turned_off(db, alice, alice_agent):
+    from backend.app.services import platform_settings_service as ps
+    from backend.app.schemas.platform_settings import JobSourcesIn
+
+    ps.update_job_sources(db, JobSourcesIn(linkedin=True, naukri=False))
+    db.commit()
+    overview = alice.get("/api/automation").json()["data"]
+    assert overview["enabled_sources"] == ["linkedin"]
+    refused = start(alice, sources=["naukri"])
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "SOURCE_DISABLED"
+
+
+def test_start_accepts_one_source_or_both_with_a_switch_count(db, alice, alice_agent):
+    from backend.app.schemas.platform_settings import JobSourcesIn
+    from backend.app.services import platform_settings_service as ps
+
+    linkedin = start(alice, sources=["linkedin"])
+    assert linkedin.status_code == 201
+    body = linkedin.json()["data"]
+    assert body["sources"] == ["linkedin"] and body["switch_after"] is None
+    assert body["active_source"] == "linkedin" and body["source_submitted"] == 0
+    stop = alice.post(f"/api/automation/{body['id']}/stop", headers=csrf_headers(alice))
+    assert stop.status_code == 200
+
+    ps.update_job_sources(db, JobSourcesIn(linkedin=True, naukri=True))
+    db.commit()
+    both = start(alice, sources=["naukri", "linkedin"], switch_after=10)
+    assert both.status_code == 201
+    chosen = both.json()["data"]
+    assert chosen["sources"] == ["naukri", "linkedin"] and chosen["switch_after"] == 10
+
+    missing = start(alice, sources=["linkedin", "naukri"])
+    assert missing.status_code == 422
+    assert "switching" in missing.json()["error"]["message"].lower()
+
+    empty = start(alice, sources=[])
+    assert empty.status_code == 422
+    assert "at least one" in empty.json()["error"]["message"].lower()
+
+
+def test_naukri_only_and_dual_source_smoke(db, alice, alice_agent, monkeypatch):
+    from backend.app.core.config import get_settings
+    from backend.app.schemas.platform_settings import JobSourcesIn
+    from backend.app.services import platform_settings_service as ps
+
+    monkeypatch.setattr(get_settings(), "ENABLE_NAUKRI", True)
+    ps.update_job_sources(db, JobSourcesIn(linkedin=True, naukri=True))
+    db.commit()
+
+    naukri_only = start(alice, dry_run=True, sources=["naukri"])
+    assert naukri_only.status_code == 201, naukri_only.text
+    only_body = naukri_only.json()["data"]
+    assert only_body["sources"] == ["naukri"] and only_body["active_source"] == "naukri"
+    assert alice.post(f"/api/automation/{only_body['id']}/stop", headers=csrf_headers(alice)).status_code == 200
+
+    dual = start(alice, dry_run=True, sources=["naukri", "linkedin"], switch_after=5)
+    assert dual.status_code == 201
+    dual_body = dual.json()["data"]
+    assert dual_body["sources"] == ["naukri", "linkedin"] and dual_body["switch_after"] == 5
+    alice.post(f"/api/automation/{dual_body['id']}/stop", headers=csrf_headers(alice))
+
+
 def test_start_needs_a_connected_agent_and_allows_one_run_at_a_time(app, alice):
     resp = start(alice)
     assert resp.status_code == 409 and resp.json()["error"]["code"] == "NO_AGENT"
@@ -258,16 +322,17 @@ def test_a_run_fails_at_claim_if_setup_changed_since_start(db, alice, alice_agen
     assert run["status"] == "failed" and "resume" in run["error_message"].lower()
 
 
-def test_an_agent_that_restarts_mid_run_fails_the_run_it_lost(alice, alice_agent):
+def test_an_idle_poll_while_a_run_is_held_re_delivers_it(db, alice, alice_agent):
     run_id = start(alice).json()["data"]["id"]
     claim(alice_agent)
     post(alice_agent, run_id, 1, [e("run_started")])
     busy = alice_agent.post("/api/agent/poll", json={"active_run_id": run_id})
     assert busy.json()["data"]["run"] is None
     assert alice.get(f"/api/automation/{run_id}").json()["data"]["status"] == "running"
-    assert claim(alice_agent) is None                                # restarted: no longer reports the run
+    resumed = claim(alice_agent)
+    assert resumed is not None and resumed["id"] == run_id
     run = alice.get(f"/api/automation/{run_id}").json()["data"]
-    assert run["status"] == "failed" and "restarted" in run["error_message"]
+    assert run["status"] == "running"
 
 
 def test_late_events_for_a_finished_run_are_still_saved_but_the_agent_is_told_to_stop(db, alice, alice_agent):
@@ -334,5 +399,8 @@ def test_celery_schedules_the_housekeeping_tasks():
         "applyxai.reap_stale_runs",
         "applyxai.delete_expired_pairings",
         "applyxai.send_candidate_daily_reports",
+        "applyxai.abandon_stale_mock_interviews",
+        "applyxai.close_stale_live_interviews",
+        "applyxai.outreach_automation_tick",
     }
     assert scheduled <= set(celery_app.tasks)

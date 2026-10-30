@@ -21,6 +21,10 @@ version:    24.12.3.10.30
 username = "username@example.com"       # Enter your username in the quotes
 password = "example_password"           # Enter your password in the quotes
 
+# Login credentials for Naukri. Saved only on this computer by the desktop agent.
+naukri_username = ""
+naukri_password = ""
+
 
 ## Artificial Intelligence (optional)
 # Master switch. Turn AI on to let the tool draft answers to application questions

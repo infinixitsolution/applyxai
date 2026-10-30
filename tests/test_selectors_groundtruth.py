@@ -362,12 +362,17 @@ def test_next_and_review_lookups_are_scoped_to_the_dialog(bot, modal):
     src = inspect.getsource(bot.apply_to_jobs)
     for xpath in (bot.next_button_xpath, bot.review_button_xpath, bot.submit_button_xpath):
         assert xpath.startswith(".//")                        # relative, not document-wide
-    for const in ("next_button_xpath", "review_button_xpath", "submit_button_xpath"):
-        for call in ("wait_xp_click(modal, %s" % const, "modal.find_element(By.XPATH, %s" % const):
-            if call in src:
-                break
-        else:
-            pytest.fail("%s is not scoped to the modal" % const)
+    scoped_calls = (
+        "find_easy_apply_footer_button(modal",
+        "click_easy_apply_footer_button(modal",
+        "wait_xp_click(modal, ",
+        "modal.find_element(By.XPATH, ",
+    )
+    for kind in ("next", "review", "submit"):
+        if f'find_easy_apply_footer_button(modal, "{kind}"' in src or f"click_easy_apply_footer_button(modal, '{kind}'" in src:
+            continue
+        pytest.fail("Easy Apply %s control is not scoped to the modal" % kind)
+    assert any(token in src for token in scoped_calls)
     assert 'wait_span_click(driver, "Submit application"' not in src
     assert 'wait_span_click(driver, "Review"' not in src
 

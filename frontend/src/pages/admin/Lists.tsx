@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Building, ExternalLink, Laptop, ListChecks, Receipt, Search } from "lucide-react";
+import { Bot, Building, ExternalLink, IndianRupee, Laptop, ListChecks, Receipt, Search } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Select, TextInput } from "../../components/form";
 import { ConfirmDialog, Modal } from "../../components/Modal";
 import { Pagination } from "../../components/Pagination";
@@ -10,7 +11,7 @@ import { formatDate, formatDateTime, formatMoney, safeExternalUrl, STATUS_LABELS
 import { useDebounced } from "../../lib/useDebounced";
 import { errorMessage } from "../../services/api";
 import { admin, plans as plansApi } from "../../services/endpoints";
-import { APPLICATION_STATUSES, type AdminRun, type ApplicationStatus, type SubscriptionStatus } from "../../types";
+import { APPLICATION_STATUSES, type AdminPayment, type AdminRun, type ApplicationStatus, type SubscriptionStatus } from "../../types";
 import { FilterChip, FilterChipBrand, PAGE_SIZE, providerLabel, RUN_LABELS, RUN_TONES, SUB_LABELS, SubBadge, Table, Td, UserLink } from "./shared";
 
 // ------------------------------------------------------------------------------------------ subscriptions
@@ -113,6 +114,127 @@ export function AdminSubscriptionsPage() {
                     <p>{formatDate(s.current_period_start ?? s.created_at)}</p>
                     <p className="text-xs text-slate-500">through {formatDate(s.current_period_end) || "—"}</p>
                   </Td>
+                </tr>
+              ))}
+            </Table>
+            <Pagination page={data.page} pageSize={data.page_size} total={data.total} onPage={setPage} />
+          </Card>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------------------------------ payments
+const PAYMENT_STATUSES = ["captured", "failed", "authorized", "refunded"] as const;
+
+function AdminPaymentFilters({ status, q, onStatus, onQ }: {
+  status: string;
+  q: string;
+  onStatus: (v: string) => void;
+  onQ: (v: string) => void;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,14rem)] lg:items-end">
+      <div>
+        <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
+        <div className="flex flex-wrap gap-2">
+          <FilterChip active={status === ""} onClick={() => onStatus("")}>All</FilterChip>
+          {PAYMENT_STATUSES.map((s) => (
+            <FilterChipBrand key={s} active={status === s} onClick={() => onStatus(status === s ? "" : s)}>
+              {s === "captured" ? "Paid" : s.charAt(0).toUpperCase() + s.slice(1)}
+            </FilterChipBrand>
+          ))}
+        </div>
+      </div>
+      <TextInput label="User email" value={q} onChange={onQ} placeholder="Search by email" />
+    </div>
+  );
+}
+
+export function AdminPaymentsPage() {
+  const [status, setStatus] = useState("");
+  const [q, setQ] = useState("");
+  const search = useDebounced(q.trim());
+  const [page, setPage] = useState(1);
+  const query = { status: status || undefined, q: search || undefined, page, page_size: PAGE_SIZE };
+  const analytics = useQuery({ queryKey: ["admin", "analytics"], queryFn: admin.analytics, staleTime: 60_000 });
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ["admin", "payments", query], queryFn: () => admin.payments(query), placeholderData: keepPreviousData,
+  });
+  const hasFilters = Boolean(status || search);
+  const resetPage = () => setPage(1);
+
+  return (
+    <>
+      <PageHeader
+        title="Payment history"
+        description="Every charge reported by Razorpay or your configured provider — same totals as the billing overview."
+      />
+      {analytics.data && (
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Card className="!py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Collected (30 days)</p>
+            <p className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <IndianRupee className="h-4 w-4 text-brand-600" aria-hidden />
+              {Object.entries(analytics.data.revenue_30d_cents).filter(([, v]) => v > 0).map(([c, v]) => formatMoney(v, c)).join(" + ") || formatMoney(0, "INR")}
+            </p>
+          </Card>
+          <Card className="!py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Past-due subscriptions</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{analytics.data.subscriptions.past_due.toLocaleString()}</p>
+          </Card>
+          <Card className="!py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">On a paid plan</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">
+              {analytics.data.subscriptions.by_plan.reduce((n, p) => n + p.count, 0).toLocaleString()}
+            </p>
+          </Card>
+        </div>
+      )}
+      <Card>
+        <AdminPaymentFilters
+          status={status}
+          q={q}
+          onStatus={(v) => { setStatus(v); resetPage(); }}
+          onQ={(v) => { setQ(v); resetPage(); }}
+        />
+        {hasFilters && (
+          <p className="mt-3 text-xs text-slate-500">
+            Filtering{status ? ` · ${status}` : ""}{search ? ` · ${search}` : ""}.{" "}
+            <button type="button" className="font-medium text-brand-700 hover:underline"
+                    onClick={() => { setStatus(""); setQ(""); resetPage(); }}>Clear filters</button>
+          </p>
+        )}
+      </Card>
+
+      <div className="mt-6">
+        {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : data.total === 0 ? (
+          <Card>
+            <EmptyState icon={<Receipt className="h-10 w-10" />} title="No payments found">
+              {hasFilters ? "Try different filters." : "Payments appear when users complete checkout or renewals are charged."}
+            </EmptyState>
+          </Card>
+        ) : (
+          <Card className={cx(isFetching && "opacity-70 transition-opacity")}>
+            <p className="mb-4 text-sm text-slate-600">
+              Showing <span className="font-medium text-slate-900">{data.items.length}</span> of{" "}
+              <span className="font-medium text-slate-900">{data.total.toLocaleString()}</span> payments
+            </p>
+            <Table head={["User", "Date", "Description", "Amount", "Status", "Provider"]} dim={isFetching}>
+              {data.items.map((p: AdminPayment) => (
+                <tr key={p.id} className="hover:bg-slate-50/80">
+                  <Td className="whitespace-nowrap"><UserLink id={p.user_id} email={p.user_email} /></Td>
+                  <Td className="whitespace-nowrap text-slate-600">{formatDateTime(p.paid_at)}</Td>
+                  <Td>
+                    {p.description || "Subscription"}
+                    {p.method ? <span className="text-slate-500"> ({p.method.toUpperCase()})</span> : null}
+                  </Td>
+                  <Td className="whitespace-nowrap font-medium">{formatMoney(p.amount_cents, p.currency)}</Td>
+                  <Td>
+                    <Badge tone={p.status === "captured" ? "green" : p.status === "failed" ? "red" : "slate"}>{p.status || "—"}</Badge>
+                  </Td>
+                  <Td><ProviderBadge provider={p.provider} /></Td>
                 </tr>
               ))}
             </Table>
@@ -452,30 +574,92 @@ export function AdminApplicationsPage() {
   );
 }
 
+const COMPANY_SORTS = [
+  { value: "-last_seen", label: "Last activity (newest)" },
+  { value: "last_seen", label: "Last activity (oldest)" },
+  { value: "-jobs", label: "Most jobs found" },
+  { value: "-applied", label: "Most applications" },
+  { value: "-users", label: "Most candidates" },
+  { value: "-search_filters", label: "Most search filters" },
+  { value: "company", label: "Company name (A–Z)" },
+  { value: "-company", label: "Company name (Z–A)" },
+] as const;
+
+type CompanyListFilter = "" | "applied" | "search" | "jobs";
+
+const COMPANY_FILTER_LABELS: Record<CompanyListFilter, string> = {
+  "": "All companies",
+  applied: "Has applications",
+  search: "In search filters",
+  jobs: "Has jobs from automation",
+};
+
 export function AdminCompaniesPage() {
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<string>("-last_seen");
+  const [scope, setScope] = useState<CompanyListFilter>("");
   const [page, setPage] = useState(1);
   const search = useDebounced(q.trim());
-  const query = { q: search || undefined, page, page_size: PAGE_SIZE };
+  const query = {
+    q: search || undefined,
+    sort,
+    filter: scope || undefined,
+    page,
+    page_size: PAGE_SIZE,
+  };
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["admin", "companies", query], queryFn: () => admin.companies(query), placeholderData: keepPreviousData,
   });
-  const hasFilters = Boolean(search);
+  const hasFilters = Boolean(search || scope || sort !== "-last_seen");
+  const resetPage = () => setPage(1);
+  const sortLabel = COMPANY_SORTS.find((s) => s.value === sort)?.label ?? sort;
 
   return (
     <>
-      <PageHeader title="Companies" description="Every company users asked to search, and every company a search returned." />
+      <PageHeader title="Companies" description="Companies from user search filters and every job the automation engine opens on LinkedIn or Naukri." />
       <Card>
-        <div className="relative max-w-md">
-          <TextInput label="Search" value={q} onChange={(v) => { setQ(v); setPage(1); }}
-                     placeholder="Company or user email" maxLength={200} className="pl-9" />
-          <Search className="pointer-events-none absolute bottom-2.5 left-3 h-4 w-4 text-slate-400" aria-hidden />
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] lg:items-end">
+          <div className="space-y-4">
+            <div className="relative max-w-md">
+              <TextInput
+                label="Search"
+                value={q}
+                onChange={(v) => { setQ(v); resetPage(); }}
+                placeholder="Company name or user email"
+                maxLength={200}
+                className="pl-9"
+              />
+              <Search className="pointer-events-none absolute bottom-2.5 left-3 h-4 w-4 text-slate-400" aria-hidden />
+            </div>
+            <div>
+              <span className="mb-2 block text-sm font-medium text-slate-700">Show</span>
+              <div className="flex flex-wrap gap-2">
+                {(["", "jobs", "applied", "search"] as const).map((key) => (
+                  <FilterChip key={key || "all"} active={scope === key} onClick={() => { setScope(key); resetPage(); }}>
+                    {COMPANY_FILTER_LABELS[key]}
+                  </FilterChip>
+                ))}
+              </div>
+            </div>
+          </div>
+          <Select
+            label="Sort by"
+            value={sort}
+            onChange={(v) => { setSort(v); resetPage(); }}
+            options={COMPANY_SORTS.map((s) => ({ value: s.value, label: s.label }))}
+          />
         </div>
         {hasFilters && (
           <p className="mt-3 text-xs text-slate-500">
-            Filtering for “{search}”.{" "}
-            <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setQ(""); setPage(1); }}>
-              Clear
+            {search && <>Search “{search}”. </>}
+            {scope && <>Filter: {COMPANY_FILTER_LABELS[scope]}. </>}
+            {sort !== "-last_seen" && <>Sort: {sortLabel}. </>}
+            <button
+              type="button"
+              className="font-medium text-brand-700 hover:underline"
+              onClick={() => { setQ(""); setScope(""); setSort("-last_seen"); resetPage(); }}
+            >
+              Clear all
             </button>
           </p>
         )}
@@ -484,7 +668,7 @@ export function AdminCompaniesPage() {
         {isLoading ? <Spinner /> : error || !data ? <Alert kind="error">{errorMessage(error)}</Alert> : data.total === 0 ? (
           <Card>
             <EmptyState icon={<Building className="h-10 w-10" />} title="No companies yet">
-              {hasFilters ? "Try a different search." : "Companies appear when users set a company filter or a search finds a job."}
+              {hasFilters ? "Try a different search or filter." : "Run automation or set a company search filter — each job the engine opens adds the company here."}
             </EmptyState>
           </Card>
         ) : (
@@ -492,11 +676,19 @@ export function AdminCompaniesPage() {
             <p className="mb-4 text-sm text-slate-600">
               Showing <span className="font-medium text-slate-900">{data.items.length}</span> of{" "}
               <span className="font-medium text-slate-900">{data.total.toLocaleString()}</span> companies
+              <span className="text-slate-400"> · sorted by {sortLabel.toLowerCase()}</span>
             </p>
             <Table head={["Company", "Users", "Jobs found", "Applied", "In search filters", "Last seen", ""]} dim={isFetching}>
               {data.items.map((c) => (
                 <tr key={c.company} className="hover:bg-slate-50/80">
-                  <Td className="font-medium text-slate-900">{c.company}</Td>
+                  <Td>
+                    <Link
+                      to={`/admin/companies/${encodeURIComponent(c.company)}`}
+                      className="font-medium text-brand-800 hover:text-brand-700 hover:underline"
+                    >
+                      {c.company}
+                    </Link>
+                  </Td>
                   <Td>
                     <p>{c.users.toLocaleString()}</p>
                     {c.user_emails.length > 0 && (
@@ -505,9 +697,9 @@ export function AdminCompaniesPage() {
                       </p>
                     )}
                   </Td>
-                  <Td>{c.jobs.toLocaleString()}</Td>
-                  <Td>{c.applied.toLocaleString()}</Td>
-                  <Td>{c.search_filters.toLocaleString()}</Td>
+                  <Td className="tabular-nums">{c.jobs.toLocaleString()}</Td>
+                  <Td className="tabular-nums font-medium text-emerald-800">{c.applied.toLocaleString()}</Td>
+                  <Td className="tabular-nums">{c.search_filters.toLocaleString()}</Td>
                   <Td className="whitespace-nowrap text-slate-600">{c.last_seen ? formatDateTime(c.last_seen) : "—"}</Td>
                   <Td className="whitespace-nowrap">
                     <ButtonLink to={`/admin/companies/${encodeURIComponent(c.company)}`} size="sm" variant="secondary">View</ButtonLink>

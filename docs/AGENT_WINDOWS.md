@@ -1,12 +1,71 @@
 # ApplyXAI Agent - Windows Distribution
 
-This document describes the Windows executable distribution of the ApplyXAI Agent.
+This document describes the Windows executable distribution of the ApplyXAI Agent and **ApplyXAI Desktop**.
+
+## ApplyXAI Desktop (full app)
+
+**ApplyXAI Desktop** is an Electron app that bundles the complete web UI and a headless **`agent-worker.exe`**. It talks to **https://applyxai.com** only (API proxied locally for session cookies). Build with `scripts\build_desktop.ps1` → `dist\ApplyXAI-Desktop-Setup.exe`.
+
+```
+ApplyXAI Cloud (https://applyxai.com)
+         |
+         +-- Electron UI (bundled SPA, all roles/RBAC)
+         |
+         +-- agent-worker.exe (wake :39217 + supervisor)
+                 |
+                 v
+         Automation Engine (runAiBot.py) → Chrome → LinkedIn / Naukri
+```
+
+### Live interview coaching (Desktop)
+
+Live interviews run **inside ApplyXAI Desktop**, not in the legacy Tkinter GUI:
+
+1. Open **Support** or **Live interviews** in the desktop app.
+2. Use the **Live interview** panel: **Request** → pay if prompted → confirm the 8-digit token → pick an auto-applied job.
+3. Optional: **Test audio** before starting (checks microphone + system loopback permissions).
+4. Click **Start interview** (requires this computer linked under **Automation**). Device auth uses the same token as the automation worker (`agent.json` or Windows Credential Manager **ApplyXAI** / `agent_device_token`).
+5. Allow **screen/system audio** and **microphone** when Windows prompts — the coach listens to the call and suggests answers in the floating panel.
+6. The **coach icon and panel** open in a separate always-on-top window on your desktop (not inside the main ApplyXAI window), so you can keep the app in the background during the call.
+7. Click **End interview** in the coach when finished; the report appears under **Live interviews**. For an API session still **In progress**, use **Continue in coach** on **Live interviews** to reopen the floating coach.
+
+**Manual QA checklist (Windows):**
+
+| Step | Expected |
+|------|----------|
+| Automation → link this PC | Device shows online |
+| Support → Request live interview → token in chat | 8-digit token visible |
+| Live interviews → Test audio | Success or clear permission error |
+| Start interview | Floating coach; transcript updates |
+| End interview | Session completed; report on `/app/live-interviews` |
+| Continue in coach (after closing coach, session still active) | Coach restarts without new token |
+
+## Naukri (staging and production)
+
+Naukri on-site Apply runs in the same engine as LinkedIn. It is **off by default** (`ENABLE_NAUKRI=false` in `backend/app/core/config.py`). An **admin** must turn on **Naukri** under **Admin → Settings → Job sources** (or set the env var) before users can select it on the Automation page.
+
+### Staging / local smoke
+
+1. Set `ENABLE_NAUKRI=true` in the backend `.env` (or enable Naukri in admin job sources). Restart the API after changing `.env`.
+2. On Automation, choose **Naukri** only or **LinkedIn + Naukri** with a switch count.
+3. Save **LinkedIn** and **Naukri** logins on this PC:
+   - **ApplyXAI Desktop**: Automation page → **Job site logins (this computer)**.
+   - **Legacy GUI**: Credentials tab → Save credentials.
+   - File: `%LOCALAPPDATA%\ApplyXAI\agent\user_config.json` under `secrets` (`naukri_username`, `naukri_password`).
+4. Start a **dry run** first; sign in manually in Chrome if auto-login is blank.
+5. Automated API smoke: `pytest backend/tests/test_naukri_staging.py`.
+
+Per-site applied history is stored under `history\linkedin\` and `history\naukri\`.
+
+## Legacy agent-only distribution
+
+The standalone agent is still built with `scripts\build_agent.ps1` for developers and browser-only users.
 
 ## Overview
 
-The ApplyXAI Agent is a Windows desktop application that runs job automation on the user's computer. It connects to the ApplyXAI web service to receive automation jobs and executes them using the LinkedIn automation engine.
+The ApplyXAI Agent runs job automation on the user's computer. It connects to the ApplyXAI web service to receive automation jobs and executes them using the LinkedIn automation engine.
 
-## Architecture
+## Architecture (legacy agent)
 
 ```
 ApplyXAI Cloud (HTTPS/WSS)
@@ -26,8 +85,9 @@ LinkedIn
 
 ## Versions
 
+- **Desktop**: `ApplyXAI-Desktop-Setup.exe` — full web app + embedded worker (recommended)
 - **CLI Version**: `ApplyXAI-Agent.exe` - Command-line interface for advanced users
-- **GUI Version**: `ApplyXAI-Agent-GUI.exe` - Graphical interface for ease of use
+- **GUI Version**: `ApplyXAI-Agent-GUI.exe` - Graphical interface for ease of use (legacy)
 
 ## Installation
 
@@ -83,6 +143,7 @@ The agent stores its data in the Windows per-user application directory:
 ```
 %LOCALAPPDATA%\ApplyXAI\agent\
 ├── agent.json          # Device token and configuration
+├── user_config.json    # Optional local logins (LinkedIn + Naukri); never uploaded
 └── workspace\
     └── <user_id>\
         ├── profile\    # Chrome profile (LinkedIn login state)
@@ -174,8 +235,8 @@ Agent logs are displayed in the GUI log window and stored in the workspace:
 
 ### Encryption
 
-- Device tokens are stored in plain text in `agent.json`
-- Future versions may use Windows Credential Manager for enhanced security
+- Device token is stored in Windows Credential Manager (service `ApplyXAI`, account `agent_device_token`) via `keyring` / Desktop `keytar`.
+- `agent.json` keeps server/device metadata. The token is omitted from that file when Credential Manager succeeds, and falls back to `agent.json` only if the OS store is unavailable.
 
 ### Network Security
 

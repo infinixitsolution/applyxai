@@ -77,7 +77,7 @@ class AgentGUI:
         self._process_queue()
         self._refresh_status()
         self._start_local_wake_server()
-        self._load_linkedin_from_disk()
+        self._load_credentials_from_disk()
         self.root.after(1500, self._schedule_stats_refresh)
 
     def _get_home(self):
@@ -183,7 +183,7 @@ class AgentGUI:
             ("automation", "Automation", "⚡"),
             ("live", "Live interview", "🎤"),
             ("log", "Activity Log", "☰"),
-            ("linkedin", "LinkedIn", "in"),
+            ("credentials", "Credentials", "in"),
             ("settings", "Settings", "⚙"),
         ):
             self._nav_buttons[key] = self._nav_item(nav, icon, label, lambda k=key: self._set_nav(k))
@@ -237,11 +237,11 @@ class AgentGUI:
                     child.configure(bg=bg, fg=BRAND if active else TEXT_SOFT)
         for frame in self._views.values():
             frame.grid_remove()
-        target = {"automation": "automation", "live": "live", "log": "log", "linkedin": "linkedin", "settings": "settings"}.get(
+        target = {"automation": "automation", "live": "live", "log": "log", "credentials": "credentials", "settings": "settings"}.get(
             key, "home",
         )
         self._views[target].grid(row=0, column=0, sticky="nsew")
-        self._place_linkedin_card(key == "linkedin")
+        self._place_credentials_card(key == "credentials")
         if key in ("home", "automation"):
             self._refresh_stats()
         if key == "settings":
@@ -309,13 +309,13 @@ class AgentGUI:
         log_view_body.master.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         self._attach_log_panel(log_view_body, secondary=True)
 
-        linkedin_view = tk.Frame(stack, bg=PAGE)
-        linkedin_view.columnconfigure(0, weight=1)
-        linkedin_view.rowconfigure(0, weight=1)
-        self._views["linkedin"] = linkedin_view
-        self._linkedin_nav_host = tk.Frame(linkedin_view, bg=PAGE)
-        self._linkedin_nav_host.grid(row=0, column=0, sticky="n", padx=24, pady=24)
-        self._build_linkedin_card(self._linkedin_nav_host)
+        credentials_view = tk.Frame(stack, bg=PAGE)
+        credentials_view.columnconfigure(0, weight=1)
+        credentials_view.rowconfigure(0, weight=1)
+        self._views["credentials"] = credentials_view
+        self._credentials_nav_host = tk.Frame(credentials_view, bg=PAGE)
+        self._credentials_nav_host.grid(row=0, column=0, sticky="n", padx=24, pady=24)
+        self._build_credentials_card(self._credentials_nav_host)
 
         live_view = tk.Frame(stack, bg=PAGE)
         live_view.columnconfigure(0, weight=1)
@@ -530,59 +530,57 @@ class AgentGUI:
             w.bind("<Button-1>", activate)
         return tile
 
-    def _place_linkedin_card(self, on_linkedin_view: bool) -> None:
-        outer = getattr(self, "_linkedin_card_outer", None)
+    def _place_credentials_card(self, on_credentials_view: bool) -> None:
+        outer = getattr(self, "_credentials_card_outer", None)
         if outer is None:
             return
         outer.grid_forget()
-        if not on_linkedin_view:
-            outer.grid_forget()
+        if not on_credentials_view:
             return
-        outer.grid(row=0, column=0, sticky="ew", in_=self._linkedin_nav_host)
+        outer.grid(row=0, column=0, sticky="ew", in_=self._credentials_nav_host)
 
-    def _build_linkedin_card(self, parent):
+    def _credential_row(self, parent, row: int, label: str, show: str = "") -> ttk.Entry:
+        line = tk.Frame(parent, bg=SURFACE)
+        line.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+        line.columnconfigure(1, weight=1)
+        tk.Label(line, text=label, bg=SURFACE, fg=TEXT_SOFT, width=12, anchor=tk.W).grid(row=0, column=0, padx=(0, 8))
+        entry = ttk.Entry(line, show=show)
+        entry.grid(row=0, column=1, sticky="ew")
+        return entry
+
+    def _build_credentials_card(self, parent):
         card = self._card(
             parent,
-            "LinkedIn (Optional)",
+            "Credentials",
             "in",
-            "Add your LinkedIn credentials for better results.",
+            "Saved on this PC and used to sign in to LinkedIn and Naukri. Leave a site blank to sign in by hand.",
         )
-        self._linkedin_card_outer = card.master
+        self._credentials_card_outer = card.master
         card.master.grid(row=0, column=0, sticky="ew")
 
-        email_row = tk.Frame(card, bg=SURFACE)
-        email_row.grid(row=2, column=0, sticky="ew", pady=(12, 8))
-        email_row.columnconfigure(1, weight=1)
-        tk.Label(email_row, text="✉", bg=SURFACE, fg=MUTED).grid(row=0, column=0, padx=(0, 8))
-        self.linkedin_email = ttk.Entry(email_row)
-        self.linkedin_email.grid(row=0, column=1, sticky="ew")
+        tk.Label(card, text="LinkedIn", bg=SURFACE, fg=TEXT, font=("Segoe UI", 10, "bold")).grid(
+            row=2, column=0, sticky="w", pady=(12, 6),
+        )
+        self.linkedin_email = self._credential_row(card, 3, "Email")
+        self.linkedin_password = self._credential_row(card, 4, "Password", show="•")
 
-        pw_row = tk.Frame(card, bg=SURFACE)
-        pw_row.grid(row=3, column=0, sticky="ew", pady=(0, 12))
-        pw_row.columnconfigure(1, weight=1)
-        tk.Label(pw_row, text="🔒", bg=SURFACE, fg=MUTED).grid(row=0, column=0, padx=(0, 8))
-        self.linkedin_password = ttk.Entry(pw_row, show="•")
-        self.linkedin_password.grid(row=0, column=1, sticky="ew")
-        self._pw_visible = tk.BooleanVar(value=False)
-        tk.Button(
-            pw_row, text="👁", relief=tk.FLAT, bg=SURFACE, fg=MUTED, command=self._toggle_password,
-        ).grid(row=0, column=2, padx=(6, 0))
+        tk.Label(card, text="Naukri", bg=SURFACE, fg=TEXT, font=("Segoe UI", 10, "bold")).grid(
+            row=5, column=0, sticky="w", pady=(8, 6),
+        )
+        self.naukri_email = self._credential_row(card, 6, "Email")
+        self.naukri_password = self._credential_row(card, 7, "Password", show="•")
 
         ttk.Button(
-            card, text="🔒  Save Credentials", style="Primary.TButton", command=self._save_linkedin_credentials,
-        ).grid(row=4, column=0, sticky="ew")
+            card, text="Save credentials", style="Primary.TButton", command=self._save_credentials,
+        ).grid(row=8, column=0, sticky="ew", pady=(8, 0))
 
         notice = tk.Frame(card, bg=BRAND_SOFT, highlightbackground=BRAND_LIGHT, highlightthickness=1)
-        notice.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+        notice.grid(row=9, column=0, sticky="ew", pady=(12, 0))
         tk.Label(
             notice,
-            text="🛡  Your credentials are secure. We never store your password on ApplyXAI servers.",
-            bg=BRAND_SOFT, fg=TEXT_SOFT, font=("Segoe UI", 8), wraplength=320, justify=tk.LEFT, padx=10, pady=10,
+            text="Your credentials stay on this computer. ApplyXAI servers never receive these passwords.",
+            bg=BRAND_SOFT, fg=TEXT_SOFT, font=("Segoe UI", 8), wraplength=360, justify=tk.LEFT, padx=10, pady=10,
         ).pack(anchor=tk.W)
-
-    def _toggle_password(self):
-        self._pw_visible.set(not self._pw_visible.get())
-        self.linkedin_password.configure(show="" if self._pw_visible.get() else "•")
 
     def _attach_log_panel(self, card: tk.Frame, *, secondary: bool = False):
         wrap = tk.Frame(card, bg=LOG_BG, highlightbackground=BORDER, highlightthickness=1)
@@ -860,28 +858,34 @@ class AgentGUI:
         except Exception as e:
             self._log(f"Status check failed: {str(e)}")
 
-    def _save_linkedin_credentials(self):
-        email = self.linkedin_email.get().strip()
-        password = self.linkedin_password.get().strip()
-        if not email or not password:
-            messagebox.showerror("Error", "Please enter both LinkedIn email and password")
+    def _save_credentials(self):
+        pairs = (
+            ("LinkedIn", self.linkedin_email.get().strip(), self.linkedin_password.get().strip(), "username", "password"),
+            ("Naukri", self.naukri_email.get().strip(), self.naukri_password.get().strip(), "naukri_username", "naukri_password"),
+        )
+        if not any(email and password for _label, email, password, _u, _p in pairs):
+            messagebox.showerror("Error", "Enter the email and password for LinkedIn, Naukri, or both.")
             return
+        for label, email, password, _user_key, _pass_key in pairs:
+            if bool(email) != bool(password):
+                messagebox.showerror("Error", f"Enter both the {label} email and password, or leave both blank.")
+                return
         try:
             agent_home = Path(self.home)
             user_config_path = agent_home / "user_config.json"
             user_config = {}
             if user_config_path.exists():
-                with open(user_config_path, "r") as f:
-                    user_config = json.load(f)
-            if "secrets" not in user_config:
-                user_config["secrets"] = {}
-            user_config["secrets"]["username"] = email
-            user_config["secrets"]["password"] = password
+                user_config = json.loads(user_config_path.read_text(encoding="utf-8"))
+            secrets = dict(user_config.get("secrets") or {})
+            for _label, email, password, user_key, pass_key in pairs:
+                if email and password:
+                    secrets[user_key] = email
+                    secrets[pass_key] = password
+            user_config["secrets"] = secrets
             agent_home.mkdir(parents=True, exist_ok=True)
-            with open(user_config_path, "w") as f:
-                json.dump(user_config, f, indent=2)
-            messagebox.showinfo("Success", "LinkedIn credentials saved on this PC.")
-            self._log("LinkedIn credentials saved to user_config.json")
+            user_config_path.write_text(json.dumps(user_config, indent=2), encoding="utf-8")
+            messagebox.showinfo("Success", "Credentials saved on this PC.")
+            self._log("Login credentials saved locally.")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save credentials: {e}")
             self._log(f"Failed to save credentials: {e}")
@@ -1225,17 +1229,23 @@ class AgentGUI:
         self.settings_text.insert(tk.END, text)
         self.settings_text.config(state=tk.DISABLED)
 
-    def _load_linkedin_from_disk(self) -> None:
+    def _load_credentials_from_disk(self) -> None:
         path = Path(self.home) / "user_config.json"
         if not path.is_file():
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             secrets = data.get("secrets") or {}
-            email = secrets.get("username") or ""
-            if email and hasattr(self, "linkedin_email"):
-                self.linkedin_email.delete(0, tk.END)
-                self.linkedin_email.insert(0, email)
+            fields = (
+                (self.linkedin_email, secrets.get("username") or ""),
+                (self.linkedin_password, secrets.get("password") or ""),
+                (self.naukri_email, secrets.get("naukri_username") or ""),
+                (self.naukri_password, secrets.get("naukri_password") or ""),
+            )
+            for entry, value in fields:
+                entry.delete(0, tk.END)
+                if value:
+                    entry.insert(0, value)
         except Exception:
             pass
 

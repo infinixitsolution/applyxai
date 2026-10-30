@@ -35,6 +35,7 @@ PRODUCTION_OK = dict(
     DATABASE_URL="postgresql+psycopg://u:p@db/applyxai", PAYMENT_PROVIDER="razorpay",
     SMTP_HOST="smtp.example.com", RATE_LIMIT_STORAGE_URL="redis://redis:6379/1",
     PAYMENT_KEY_ID="rzp_live_x", PAYMENT_SECRET="s", PAYMENT_WEBHOOK_SECRET="w",
+    WHATSAPP_BRIDGE_SECRET=STRONG, OUTREACH_AUTOMATION_ENABLED=True,
 )
 
 

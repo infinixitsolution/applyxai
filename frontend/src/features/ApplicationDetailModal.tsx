@@ -71,12 +71,14 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
                   <Building2 className="h-4 w-4 shrink-0" aria-hidden />
                   {data.job.company || "Company not listed"}
                 </p>
-                {(data.job.location || data.job.work_setting) && (
-                  <p className="mt-1 flex items-center gap-1.5 text-slate-600">
-                    <MapPin className="h-4 w-4 shrink-0" aria-hidden />
-                    {[data.job.location, data.job.work_setting].filter(Boolean).join(" · ")}
-                  </p>
-                )}
+                <p className="mt-1 flex items-center gap-1.5 text-slate-600">
+                  <MapPin className="h-4 w-4 shrink-0" aria-hidden />
+                  {[
+                    data.job.platform === "naukri" ? "Naukri" : "LinkedIn",
+                    data.job.location,
+                    data.job.work_setting,
+                  ].filter(Boolean).join(" · ")}
+                </p>
               </div>
               <Badge tone={STATUS_TONES[data.status]}>{STATUS_LABELS[data.status]}</Badge>
             </div>
@@ -84,12 +86,18 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
 
           <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
-              <dt className="text-slate-500">Discovered</dt>
+              <dt className="text-slate-500">Found</dt>
               <dd className="font-medium text-slate-900">{formatDateTime(data.created_at)}</dd>
             </div>
             <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
-              <dt className="text-slate-500">Applied</dt>
-              <dd className="font-medium text-slate-900">{formatDateTime(data.applied_at)}</dd>
+              <dt className="text-slate-500">Submitted</dt>
+              <dd className="font-medium text-slate-900">
+                {data.applied_at
+                  ? formatDateTime(data.applied_at)
+                  : data.status === "discovered" || data.status === "queued" || data.status === "running"
+                    ? "Not submitted yet"
+                    : "Did not apply"}
+              </dd>
             </div>
             {data.job.experience_level && (
               <div className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
@@ -133,16 +141,25 @@ export function ApplicationDetailModal({ id, onClose }: { id: string | null; onC
             </section>
           )}
 
+          {(data.status === "applied" || data.status === "external" || added) && (
           <section>
             <h3 className="mb-2 font-medium text-slate-900">Resume added</h3>
             {added ? (
               <ResumeCard resume={added} featured />
             ) : (
               <p className="rounded-xl bg-slate-50 px-4 py-3 text-slate-600 ring-1 ring-slate-200">
-                No resume was attached to this application.
+                {data.status === "applied"
+                  ? "Submitted on LinkedIn, but this record has no resume file attached in ApplyXAI. The default resume on LinkedIn may have been used."
+                  : "No resume was attached to this application."}
               </p>
             )}
           </section>
+          )}
+          {(data.status === "discovered" || data.status === "queued" || data.status === "running") && !added && (
+            <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+              ApplyXAI opened this listing. It is not submitted yet, so no resume is attached.
+            </p>
+          )}
 
           {others.length > 0 && (
             <section>

@@ -17,7 +17,9 @@ router = APIRouter(prefix="/live-interviews", tags=["live-interviews"])
 
 @router.get("", summary="Live interviews for this account")
 def list_mine(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok({"sessions": live_interview_service.list_sessions(db, user.id)})
+    sessions = live_interview_service.list_sessions(db, user.id)
+    db.commit()
+    return ok({"sessions": sessions})
 
 
 @router.get("/applications", summary="Auto-applied jobs that can be attached to a report")

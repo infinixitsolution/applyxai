@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.models.base import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin
+from backend.app.models.base import Base, JSONType, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin
 
 
 class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -40,3 +40,26 @@ class BillingEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     subscription_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("subscriptions.id", ondelete="SET NULL"))
 
     __table_args__ = (UniqueConstraint("provider", "event_id"),)
+
+
+class TaxInvoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Tax invoice issued (or drafted) for a payment — GST breakdown stored for compliance."""
+
+    __tablename__ = "tax_invoices"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("payments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    invoice_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    supplier_json: Mapped[dict] = mapped_column(JSONType, default=dict)
+    buyer_json: Mapped[dict] = mapped_column(JSONType, default=dict)
+    line_items_json: Mapped[list] = mapped_column(JSONType, default=list)
+    taxable_cents: Mapped[int] = mapped_column(Integer, default=0)
+    cgst_cents: Mapped[int] = mapped_column(Integer, default=0)
+    sgst_cents: Mapped[int] = mapped_column(Integer, default=0)
+    igst_cents: Mapped[int] = mapped_column(Integer, default=0)
+    total_cents: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")

@@ -2,11 +2,13 @@ import { useMutation } from "@tanstack/react-query";
 import { MailCheck, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { consumeNext, homeFor, rememberNext, safeNext, storedNext, useSetSession, withNext } from "../auth/session";
+import { consumeNext, rememberNext, storedNext, useSetSession, withNext } from "../auth/session";
+import { postLoginPath } from "../lib/desktopLink";
 import { TextInput } from "../components/form";
 import { Alert, Button, ButtonLink, Spinner } from "../components/ui";
 import { AuthShell, CheckEmailAside, PasswordAside } from "../features/auth";
 import { AuthLegalLinks, AuthPageLayout } from "../features/auth/AuthPageLayout";
+import { isDesktop, isDesktopApp } from "../lib/desktop";
 import { LoginScreen } from "../features/auth/LoginScreen";
 import { REGISTER_STORY } from "../features/auth/registerStories";
 import { ApiError, errorMessage, fieldErrors } from "../services/api";
@@ -36,7 +38,7 @@ export function LoginPage() {
     const next = params.get("next") ?? consumeNext();
     consumeNext();
     setSession(user);
-    navigate(safeNext(next, homeFor(user)), { replace: true });
+    navigate(postLoginPath(user, next), { replace: true });
   };
 
   const login = useMutation({
@@ -135,13 +137,14 @@ export function RegisterPage() {
 
   return (
     <AuthPageLayout
+      compact={isDesktopApp}
       storyAriaLabel="Candidate signup"
       kicker={story.kicker}
       storyTitle={story.title}
       storyLead={story.lead}
       highlights={story.highlights}
       trustSub={story.trustSub}
-      registerTabs="candidate"
+      registerTabs={isDesktop ? undefined : "candidate"}
       cardHeadingId="ax-register-candidate"
       cardTitle="Apply smarter on LinkedIn"
       cardSubtitle={

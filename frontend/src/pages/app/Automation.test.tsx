@@ -18,11 +18,13 @@ const run: AutomationRun = {
   id: "r1", status: "running", control: "run", dry_run: false, created_at: "2026-10-07T04:00:00+00:00",
   started_at: "2026-10-07T04:00:05+00:00", finished_at: null, current_job: "Looking at Python Developer at Acme",
   total_jobs: 4, successful_count: 2, failed_count: 1, skipped_count: 1, error_message: "", stop_reason: "", claimed: true,
+  sources: ["linkedin"], switch_after: null, active_source: "linkedin", source_submitted: 0,
 };
 
 function overview(over: Partial<AutomationOverview> = {}): AutomationOverview {
   return { active: null, recent: [], devices: [device], agent_online: true,
-           readiness: { ready: true, problems: [] }, usage, ...over };
+           readiness: { ready: true, problems: [] }, usage,
+           enabled_sources: ["linkedin", "naukri"], ...over };
 }
 
 const ok = (data: unknown, status = 200) => new Response(JSON.stringify({ success: true, data }), { status });
@@ -56,7 +58,7 @@ describe("AutomationPage", () => {
     renderPage();
     expect(await screen.findByText("Add your phone number.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start run" })).toBeDisabled();
-    expect(screen.getByText(/Install the ApplyXAI desktop agent/)).toBeInTheDocument();
+    expect(screen.getByText(/Connect your computer to run applications/)).toBeInTheDocument();
   });
 
   it("starts a practice run", async () => {
@@ -72,8 +74,27 @@ describe("AutomationPage", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("radio", { name: /default resume only/i }));
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
-    expect(body).toEqual({ dry_run: true, resume_mode: "default" });
+    expect(body).toEqual({ dry_run: true, resume_mode: "default", sources: ["linkedin"] });
     expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/automation/start" && (i?.headers as Record<string, string>)["X-CSRF-Token"] !== undefined)).toBe(true);
+  });
+
+  it("sends both sources and the switch count", async () => {
+    let body: unknown;
+    mockApi({
+      "GET /api/automation": overview(),
+      "POST /api/automation/start": (init?: RequestInit) => { body = JSON.parse(String(init?.body)); return { ...run, status: "queued" }; },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("checkbox", { name: "Naukri" }));
+    expect(screen.getByRole("spinbutton", { name: "Jobs before switching" })).toHaveValue(10);
+    await user.clear(screen.getByRole("spinbutton", { name: "Jobs before switching" }));
+    await user.type(screen.getByRole("spinbutton", { name: "Jobs before switching" }), "10");
+    await user.click(screen.getAllByRole("button", { name: "Start run" })[0]!);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("radio", { name: /default resume only/i }));
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    expect(body).toEqual({ dry_run: false, resume_mode: "default", sources: ["linkedin", "naukri"], switch_after: 10 });
   });
 
   it("shows a live run with its log and lets you pause and stop it", async () => {

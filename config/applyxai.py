@@ -8,6 +8,10 @@ run_id = ""
 human_questions = []
 ai_policy = {"deny_label_contains": []}
 resume_mode = "default"
+default_resume_id = ""
+sources = ["linkedin"]
+switch_after = None
+education = []
 
 import config._overrides as _o
 

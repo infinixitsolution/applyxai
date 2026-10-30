@@ -530,6 +530,12 @@ class LiveReportPdf {
   }
 }
 
+export function liveInterviewReportPdfFilename(session: LiveInterviewSession): string {
+  const date = (session.ended_at || session.started_at || "").slice(0, 10) || "report";
+  const company = sanitizeFilename(session.company || session.job_title || "live-interview");
+  return `live-interview-${company}-${date}.pdf`;
+}
+
 export async function exportLiveInterviewReportPdf(session: LiveInterviewSession): Promise<void> {
   const mascotDataUrl = await loadApplyXaiMascotDataUrl();
   const { jsPDF } = await import("jspdf");
@@ -538,7 +544,5 @@ export async function exportLiveInterviewReportPdf(session: LiveInterviewSession
   await report.loadFonts();
   report.drawPageWatermark();
   await report.build();
-  const date = (session.ended_at || session.started_at || "").slice(0, 10) || "report";
-  const company = sanitizeFilename(session.company || session.job_title || "live-interview");
-  doc.save(`live-interview-${company}-${date}.pdf`);
+  doc.save(liveInterviewReportPdfFilename(session));
 }

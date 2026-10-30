@@ -28,6 +28,7 @@ const QUICK_LINKS = [
   { to: "/admin/institutes", label: "Institutes", icon: Building2 },
   { to: "/admin/partners", label: "Partners", icon: CreditCard },
   { to: "/admin/subscriptions", label: "Subscriptions", icon: Receipt },
+  { to: "/admin/payments", label: "Payment history", icon: IndianRupee },
   { to: "/admin/runs", label: "Automation runs", icon: Bot },
   { to: "/admin/applications", label: "Applications", icon: ListChecks },
   { to: "/admin/plans", label: "Plans", icon: Package },
@@ -54,7 +55,7 @@ export function AdminOverviewPage() {
   if (isLoading) return <Spinner />;
   if (error || !data) return <Alert kind="error">{errorMessage(error)}</Alert>;
 
-  const { users, subscriptions: subs, applications: apps, automation, mock_interviews: mi } = data;
+  const { users, subscriptions: subs, applications: apps, automation, mock_interviews: mi, live_interviews: live } = data;
   const paying = subs.by_plan.reduce((n, p) => n + p.count, 0);
   const unverified = Math.max(0, users.total - users.verified);
   const appsThisMonth = APPLICATION_STATUSES.reduce((n, s) => n + apps.this_month_by_status[s], 0);
@@ -113,7 +114,7 @@ export function AdminOverviewPage() {
           sub={subs.past_due ? `${subs.past_due} with a failed renewal` : "No failed renewals"}
         />
         <Stat
-          to="/admin/subscriptions"
+          to="/admin/payments"
           icon={<IndianRupee className="h-4 w-4" aria-hidden />}
           label="Monthly recurring revenue"
           value={moneyByCurrency(subs.mrr_cents)}
@@ -129,7 +130,7 @@ export function AdminOverviewPage() {
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="!py-4">
+        <Card className="!py-4" data-testid="mi-ops-card">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Mock interviews</p>
           <p className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-900">
             <Mic className="h-4 w-4 text-brand-600" aria-hidden />
@@ -137,7 +138,8 @@ export function AdminOverviewPage() {
             <span className="text-sm font-normal text-slate-500">this month</span>
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {mi.by_status.completed ?? 0} completed · {mi.by_status.active ?? 0} active
+            {(mi.total_sessions ?? 0).toLocaleString()} total · {mi.by_status.completed ?? 0} completed · {mi.by_status.abandoned ?? 0} abandoned
+            {mi.average_score != null ? ` · avg ${mi.average_score}` : ""}
             {mi.failed_feedback_jobs_24h > 0 ? ` · ${mi.failed_feedback_jobs_24h} failed jobs (24h)` : ""}
           </p>
         </Card>
@@ -207,6 +209,45 @@ export function AdminOverviewPage() {
           )}
           <p className="mt-4 text-xs leading-relaxed text-slate-500">
             Includes complimentary and cancelled-but-not-yet-ended plans. MRR counts only paid plans set to renew.
+          </p>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card title="Sign-ups, last 30 days">
+          <DailyChart
+            data={data.signups_daily ?? []}
+            primaryLabel="Sign-ups"
+            secondaryLabel="Unused"
+            ariaLabel="New accounts over the last 30 days"
+          />
+        </Card>
+        <Card title="Collected revenue (paise), last 30 days">
+          <DailyChart
+            data={data.revenue_daily ?? []}
+            primaryLabel="Amount (paise)"
+            secondaryLabel="Unused"
+            ariaLabel="Captured payment amounts over the last 30 days"
+          />
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card title="Mock interviews, last 30 days">
+          <DailyChart
+            data={mi.daily ?? []}
+            primaryLabel="Sessions"
+            secondaryLabel="Unused"
+            ariaLabel="Mock interview sessions over the last 30 days"
+          />
+        </Card>
+        <Card data-testid="live-interview-ops-card" title="Live interviews">
+          <p className="text-lg font-semibold text-slate-900">
+            {(live?.this_month ?? 0).toLocaleString()}{" "}
+            <span className="text-sm font-normal text-slate-500">this month</span>
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {(live?.total_sessions ?? 0).toLocaleString()} total · {live?.by_status?.completed ?? 0} completed · {live?.by_status?.active ?? 0} in progress
           </p>
         </Card>
       </div>

@@ -112,8 +112,10 @@ class FakeEngine:
         self.alive = False
         self.killed = False
 
-    def start(self, cfg, max_applied=None):
+    def start(self, cfg, max_applied=None, extra_env=None, profile_sync=False):
         self.config, self.max_applied, self.alive = cfg, max_applied, True
+        self.extra_env = extra_env or {}
+        self.profile_sync = profile_sync
 
     def pause(self):
         self.calls.append("pause")
@@ -154,6 +156,9 @@ class FakeEngine:
 class FakeServer:
     """Stands in for ApiClient: records batches, answers with scripted controls."""
 
+    server = "https://x.test/"
+    token = "axd_test_token"
+
     def __init__(self, controls=(), remaining=10, failures=()):
         self.batches, self.controls, self.failures = [], list(controls), list(failures)
         self.remaining = remaining
@@ -161,6 +166,9 @@ class FakeServer:
 
     def download_resume(self, run_id):
         return b"%PDF-1.4 resume"
+
+    def poll(self, active_run_id=None):
+        return {"run": None, "control": "run", "remaining_applications": self.remaining}
 
     def post_events(self, run_id, first_seq, events):
         if self.failures:

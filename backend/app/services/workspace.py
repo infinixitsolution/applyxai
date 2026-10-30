@@ -58,6 +58,7 @@ def workspace_for(db: Session, user: User) -> dict:
 
 def user_payload(db: Session, user: User) -> dict:
     from backend.app.schemas.auth import UserOut
+    from backend.app.services import institute_service
 
     base = UserOut.model_validate(user).model_dump(mode="json")
     ws = workspace_for(db, user)
@@ -66,4 +67,12 @@ def user_payload(db: Session, user: User) -> dict:
     if ws["partner_id"] is not None:
         ws["partner_id"] = str(ws["partner_id"])
     base.update(ws)
+    # Campus seat students keep workspace "app" but personal billing is institute-managed.
+    if ws["workspace"] == "app":
+        campus = institute_service.managed_institute_for_user(db, user.id)
+        base["institute_managed"] = campus is not None
+        base["institute_name"] = campus.name if campus is not None else None
+    else:
+        base["institute_managed"] = False
+        base["institute_name"] = None
     return base

@@ -26,6 +26,7 @@ class Email:
     subject: str
     body: str
     html: str = ""
+    attachments: tuple[tuple[str, bytes, str], ...] = ()
 
 
 FOOTER_LINES = ("Regards,", "ApplyXAI", "www.applyxai.com", "Bangalore", "info@applyxai.com")
@@ -147,7 +148,7 @@ def branded(email: Email) -> Email:
         else:
             content = text_to_html(email.body)
         html = render_layout(email.subject, content)
-    return Email(to=email.to, subject=email.subject, body=body, html=html)
+    return Email(to=email.to, subject=email.subject, body=body, html=html, attachments=email.attachments)
 
 
 class EmailSender(Protocol):
@@ -172,6 +173,14 @@ class SmtpEmailSender:
         message.set_content(email.body)
         if email.html.strip():
             message.add_alternative(email.html, subtype="html")
+        for filename, data, mime in email.attachments:
+            maintype, _, subtype = mime.partition("/")
+            message.add_attachment(
+                data,
+                maintype=maintype or "application",
+                subtype=subtype or "octet-stream",
+                filename=filename,
+            )
         context = ssl.create_default_context()
         if self._smtp.port == SMTPS_PORT:
             client = smtplib.SMTP_SSL(self._smtp.host, self._smtp.port, timeout=15, context=context)
@@ -263,6 +272,38 @@ def institute_invite_email(to: str, institute_name: str, token: str, db: Session
     return Email(to=to, subject=email.subject, body=email.body, html=email.html)
 
 
+def institute_student_credentials_email(
+    to: str, institute_name: str, password: str, db: Session | None = None,
+) -> Email:
+    from backend.app.services import template_service as ts
+
+    auth = ps.get_effective_auth(db)
+    link = f"{auth.frontend_url}/login"
+    email = ts.auth_email(
+        db, "institute_student_credentials", to,
+        link=link, institute_name=institute_name, email=to, password=password,
+    )
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
+
+
+def institute_student_enrolled_email(to: str, institute_name: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
+    auth = ps.get_effective_auth(db)
+    link = f"{auth.frontend_url}/login"
+    email = ts.auth_email(db, "institute_student_enrolled", to, link=link, institute_name=institute_name)
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
+
+
+def institute_student_released_email(to: str, institute_name: str, db: Session | None = None) -> Email:
+    from backend.app.services import template_service as ts
+
+    auth = ps.get_effective_auth(db)
+    link = f"{auth.frontend_url}/app/billing"
+    email = ts.auth_email(db, "institute_student_released", to, link=link, institute_name=institute_name)
+    return Email(to=to, subject=email.subject, body=email.body, html=email.html)
+
+
 def notification_email(
     to: str, subject: str, body: str, link: str, db: Session | None = None, *, html: str = ""
 ) -> Email:
@@ -282,6 +323,12 @@ def auth_template_test_email(db: Session, kind: str, to: str) -> Email:
 
     auth = ps.get_effective_auth(db)
     sample_link = f"{auth.frontend_url}/example"
-    vars_common = {"to": to, "link": sample_link, "institute_name": "Example Institute"}
+    vars_common = {
+        "to": to,
+        "link": sample_link,
+        "institute_name": "Example Institute",
+        "email": to,
+        "password": "ExampleTempPass1",
+    }
     email = ts.auth_email(db, kind, to, **vars_common)
     return Email(to=to, subject=email.subject, body=email.body, html=email.html)

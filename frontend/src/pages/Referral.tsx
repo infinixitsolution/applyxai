@@ -16,7 +16,10 @@ export function ReferralPage() {
     enabled: Boolean(code),
   });
   useEffect(() => {
-    if (data?.referral_code) navigate(`/register/institute?r=${data.referral_code}`, { replace: true });
+    if (!data?.referral_code) return;
+    const dest = data.redirect || (data.kind === "candidate" ? "/register" : "/register/institute");
+    const sep = dest.includes("?") ? "&" : "?";
+    navigate(`${dest}${sep}r=${data.referral_code}`, { replace: true });
   }, [data, navigate]);
   return (
     <AuthShell

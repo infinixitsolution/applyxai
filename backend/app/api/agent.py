@@ -17,7 +17,8 @@ from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import AgentDevice, Application, ApplicationStatus, Job, User
 from backend.app.schemas.automation import AgentAiAnswerIn, AgentCoverLetterIn, AgentTailorIn, ConnectPollIn, ConnectStartIn, EventBatchIn, PairIn, PollIn
 from backend.app.schemas.live_interview import LiveInterviewStartIn
-from backend.app.services import agent_service, application_context, application_service, automation_service, dashboard_service, preferences_service, resume_ai_service, resume_service, run_config_service
+from backend.app.services import agent_service, application_context, application_service, automation_service, dashboard_service, preferences_service, profile_photo_service, resume_ai_service, resume_service, run_config_service
+from backend.app.services.linkedin_profile_sync_service import RUN_KIND_PROFILE_SYNC
 from backend.app.services import application_ai_service
 from backend.app.services.ai_service import AiTask, ai_available, complete
 
@@ -88,8 +89,16 @@ def unpair(device: AgentDevice = Depends(get_current_device), db: Session = Depe
 def poll(body: PollIn, device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
     run = automation_service.poll(db, device, active_run_id=body.active_run_id,
                                   agent_version=body.agent_version, platform=body.platform)
+    extra = {}
+    if body.active_run_id is not None:
+        extra = automation_service.active_run_refresh_meta(db, device, body.active_run_id)
     db.commit()
-    return ok({"run": run, "user_id": str(device.user_id)})
+    return ok({"run": run, "user_id": str(device.user_id), **extra})
+
+
+@router.get("/runs/{run_id}/refresh", summary="Hot-reload Master Profile and custom QA for an active run")
+def run_refresh(run_id: uuid.UUID, device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    return ok(automation_service.refresh_run_config(db, device, run_id))
 
 
 @router.get("/runs/{run_id}/resume", summary="The default resume for a run this computer holds")
@@ -100,6 +109,24 @@ def run_resume(run_id: uuid.UUID, device: AgentDevice = Depends(get_current_devi
     if path is None or not path.is_file():
         raise AppError("NOT_FOUND", "Resume not found", 404)
     return FileResponse(path, media_type=resume_service.MIME_BY_TYPE[resume.file_type], filename=resume.filename,
+                        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"})
+
+
+@router.get("/runs/{run_id}/profile-photo", summary="Master profile photo for a profile sync run")
+def run_profile_photo(run_id: uuid.UUID, device: AgentDevice = Depends(get_current_device), db: Session = Depends(get_db)):
+    run = automation_service.agent_run(db, device, run_id)
+    if (run.run_kind or "") != RUN_KIND_PROFILE_SYNC:
+        raise AppError("NOT_FOUND", "Photo download is only for profile sync runs.", 404)
+    user = db.get(User, run.user_id)
+    profile = user.profile if user else None
+    path = profile_photo_service.photo_path(profile) if profile else None
+    if path is None or not path.is_file():
+        raise AppError("NOT_FOUND", "Profile photo not found", 404)
+    ext = path.suffix.lower().lstrip(".")
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(
+        ext, "application/octet-stream",
+    )
+    return FileResponse(path, media_type=mime, filename=path.name,
                         headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"})
 
 

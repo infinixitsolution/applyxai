@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from backend.app.core.pagination import PageParams, page_response, paginate
 from backend.app.core.plans import PLAN_LIMITS
 from backend.app.core.security import generate_token, hash_password, hash_token
 from backend.app.models import (
+    Application,
+    ApplicationStatus,
     AssignmentStatus,
     Institute,
     InstituteAssignment,
@@ -33,13 +36,13 @@ from backend.app.models import (
     SubscriptionStatus,
     User,
 )
-from backend.app.services import billing_service
+from backend.app.services import billing_service, gst_service
 
 INSTITUTE_TYPES = (
     "TRAINING_CENTRE", "COLLEGE", "SCHOOL", "IT_TRAINING", "COACHING",
     "UNIVERSITY", "CORPORATE_LEARNING", "OTHER",
 )
-GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{3}$")
+
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 DEFAULT_SETTINGS = {
     "timezone": "Asia/Kolkata",
@@ -61,10 +64,13 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 def _validate_tax(gstin: str, pan: str) -> tuple[str, str]:
-    gstin = gstin.upper().strip()
+    try:
+        gstin = gst_service.validate_gstin(gstin)
+    except AppError as exc:
+        if exc.code == "GSTIN_INVALID":
+            raise AppError("INSTITUTE_GSTIN_INVALID", exc.message, exc.status) from exc
+        raise
     pan = pan.upper().strip()
-    if gstin and GSTIN_RE.match(gstin) is None:
-        raise AppError("INSTITUTE_GSTIN_INVALID", "Enter a valid GSTIN.", 422)
     if pan and PAN_RE.match(pan) is None:
         raise AppError("INSTITUTE_PAN_INVALID", "Enter a valid PAN.", 422)
     return gstin, pan
@@ -289,7 +295,7 @@ def admin_detail(db: Session, institute: Institute) -> dict:
         "subscription": dash["subscription"],
         "subscriptions": [billing_service.sub_out(s) for s in subs],
         "payments": [billing_service.payment_out(p) for p in payments],
-        "students": [assignment_out(a) for a in assignments],
+        "students": [assignment_out(a, db) for a in assignments],
         "invitations": list_invites(db, institute),
         "seats": {"counts": dash["seats"], "items": list_seats(db, institute)},
         "reports": reports(db, institute),
@@ -328,7 +334,54 @@ def dashboard(db: Session, institute: Institute) -> dict:
         "students": students,
         "pending_invites": pending,
         "seats": counts,
-        "recent_assignments": [assignment_out(a) for a in recent],
+        "activity": student_activity(db, institute.id),
+        "recent_assignments": [assignment_out(a, db) for a in recent],
+    }
+
+
+def active_student_user_ids(db: Session, institute_id: uuid.UUID) -> list[uuid.UUID]:
+    return list(db.scalars(
+        select(InstituteAssignment.student_user_id).where(
+            InstituteAssignment.institute_id == institute_id,
+            InstituteAssignment.status == AssignmentStatus.ACTIVE,
+            InstituteAssignment.student_user_id.is_not(None),
+        )
+    ).all())
+
+
+def student_activity(db: Session, institute_id: uuid.UUID) -> dict:
+    """Campus-wide jobs searched, applied, skipped, and failed for active students."""
+    from backend.app.services.dashboard_service import CHART_DAYS, daily_series
+
+    user_ids = active_student_user_ids(db, institute_id)
+    by_status = {s.value: 0 for s in ApplicationStatus}
+    if user_ids:
+        for status, count in db.execute(
+            select(Application.status, func.count())
+            .where(Application.user_id.in_(user_ids))
+            .group_by(Application.status)
+        ):
+            by_status[status.value] = count
+    applied = by_status["applied"]
+    failed = by_status["failed"]
+    now = datetime.now(timezone.utc)
+    today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    chart_start = today - timedelta(days=CHART_DAYS - 1)
+    if user_ids:
+        series = daily_series(db, chart_start, Application.user_id.in_(user_ids))
+        daily = [{"date": day, **counts} for day, counts in series.items()]
+    else:
+        daily = [
+            {"date": (chart_start + timedelta(days=i)).date().isoformat(), "applied": 0, "failed": 0}
+            for i in range(CHART_DAYS)
+        ]
+    return {
+        "searched": sum(by_status.values()),
+        "applied": applied,
+        "skipped": by_status["skipped"],
+        "failed": failed,
+        "success_rate": round(applied / (applied + failed), 4) if applied + failed else None,
+        "daily": daily,
     }
 
 
@@ -374,9 +427,74 @@ def _available_seat(db: Session, institute_id: uuid.UUID) -> InstituteSeat | Non
     )
 
 
-def invite_candidate(db: Session, institute: Institute, email: str, invited_by: User, note: str = "") -> tuple[InstituteAssignment, str]:
+def _temp_password() -> str:
+    """Random login password that meets auth password rules (never email it back via API JSON)."""
+    return secrets.token_urlsafe(14)
+
+
+def _reject_workspace_account(db: Session, user: User) -> None:
+    from backend.app.services.workspace import workspace_for
+
+    ws = workspace_for(db, user)["workspace"]
+    if ws == "institute":
+        raise AppError(
+            "NOT_A_CANDIDATE",
+            "That email belongs to an institute account. Invite a student email instead.",
+            409,
+        )
+    if ws == "partner":
+        raise AppError(
+            "NOT_A_CANDIDATE",
+            "That email belongs to a partner account. Invite a student email instead.",
+            409,
+        )
+    if ws == "admin":
+        raise AppError("NOT_A_CANDIDATE", "That email belongs to an admin account.", 409)
+
+
+def _split_student_name(name: str) -> tuple[str, str]:
+    name = " ".join(name.split())
+    if not name:
+        return "", ""
+    first, _, last = name.partition(" ")
+    return first[:100], last.strip()[:100]
+
+
+def _apply_student_contact(db: Session, user: User, *, name: str, phone: str, created: bool) -> None:
+    from backend.app.models import UserProfile
+
+    first, last = _split_student_name(name)
+    phone = phone.strip()[:32]
+    if created or not (user.first_name or "").strip():
+        user.first_name = first
+    if created or not (user.last_name or "").strip():
+        user.last_name = last
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+    if profile is None:
+        db.add(UserProfile(user_id=user.id, phone=phone))
+    elif created or not (profile.phone or "").strip():
+        profile.phone = phone
+
+
+def invite_candidate(
+    db: Session,
+    institute: Institute,
+    email: str,
+    invited_by: User,
+    note: str = "",
+    *,
+    name: str = "",
+    phone: str = "",
+) -> tuple[InstituteAssignment, str | None]:
+    """Add a student: create account if needed, activate the seat, return temp password if new."""
     require_active(institute)
     email = email.strip().lower()
+    name = " ".join((name or "").split())
+    phone = (phone or "").strip()
+    if not name:
+        raise AppError("INVALID_NAME", "Enter the student name.", 422)
+    if len(phone) < 5 or len(phone) > 32:
+        raise AppError("INVALID_PHONE", "Enter a valid phone number.", 422)
     if "@" not in email or len(email) > 320:
         raise AppError("INVALID_EMAIL", "Enter a valid student email.", 422)
     open_row = db.scalar(select(InstituteAssignment).where(
@@ -389,36 +507,74 @@ def invite_candidate(db: Session, institute: Institute, email: str, invited_by: 
     seat = _available_seat(db, institute.id)
     if seat is None:
         raise AppError("NO_SEATS", "Buy more seats before inviting another student.", 409)
+
     existing_user = db.scalar(select(User).where(User.email == email))
-    status = AssignmentStatus.PENDING_CANDIDATE_ACCEPTANCE if existing_user else AssignmentStatus.INVITED
+    temp_password: str | None = None
+    created = False
+    if existing_user is None:
+        created = True
+        temp_password = _temp_password()
+        first, last = _split_student_name(name)
+        existing_user = User(
+            email=email,
+            password_hash=hash_password(temp_password),
+            first_name=first,
+            last_name=last,
+            is_verified=True,
+        )
+        db.add(existing_user)
+        db.flush()
+    else:
+        _reject_workspace_account(db, existing_user)
+
+    _apply_student_contact(db, existing_user, name=name, phone=phone, created=created)
+
     seat.status = SeatStatus.ASSIGNED
     assignment = InstituteAssignment(
         institute_id=institute.id,
         candidate_email=email,
-        student_user_id=existing_user.id if existing_user else None,
+        student_user_id=existing_user.id,
         seat_id=seat.id,
         invited_by_user_id=invited_by.id,
-        status=status,
+        status=AssignmentStatus.ACTIVE,
         note=note.strip()[:500],
+        accepted_at=_now(),
     )
     db.add(assignment)
     db.flush()
-    settings = {**DEFAULT_SETTINGS, **(institute.settings or {})}
-    days = max(1, min(30, int(settings.get("invite_expiry_days") or 7)))
-    raw = generate_token()
-    db.add(InstituteInvite(
-        assignment_id=assignment.id,
-        token_hash=hash_token(raw),
-        expires_at=_now() + timedelta(days=days),
-    ))
-    db.flush()
-    return assignment, raw
+
+    from backend.app.services import partner_service
+
+    partner_service.maybe_accrue_candidate_commission(db, assignment)
+    notify_invite_accepted(db, assignment)
+    return assignment, temp_password
 
 
-def assignment_out(row: InstituteAssignment) -> dict:
+def managed_institute_for_user(db: Session, user_id: uuid.UUID) -> Institute | None:
+    """Sponsoring institute when the user has an active entitled campus seat."""
+    assignment = active_assignment_for_user(db, user_id)
+    if assignment is None:
+        return None
+    return db.get(Institute, assignment.institute_id)
+
+
+def assignment_out(row: InstituteAssignment, db: Session | None = None) -> dict:
+    name = ""
+    phone = ""
+    if db is not None and row.student_user_id:
+        from backend.app.models import UserProfile
+
+        student = db.get(User, row.student_user_id)
+        if student is not None:
+            name = f"{student.first_name} {student.last_name}".strip()
+            profile = db.scalar(select(UserProfile).where(UserProfile.user_id == student.id))
+            if profile is not None:
+                phone = (profile.phone or "").strip()
     return {
         "id": str(row.id),
         "candidate_email": row.candidate_email,
+        "candidate_name": name or None,
+        "candidate_phone": phone or None,
         "student_user_id": str(row.student_user_id) if row.student_user_id else None,
         "seat_id": str(row.seat_id) if row.seat_id else None,
         "status": row.status.value,
@@ -429,13 +585,88 @@ def assignment_out(row: InstituteAssignment) -> dict:
     }
 
 
+def assignment_activity_map(db: Session, user_ids: list[uuid.UUID]) -> dict[str, dict]:
+    """Per-student searched/applied/skipped/failed totals for a roster page."""
+    empty = {"searched": 0, "applied": 0, "skipped": 0, "failed": 0}
+    out = {str(uid): dict(empty) for uid in user_ids}
+    if not user_ids:
+        return out
+    for user_id, status, n in db.execute(
+        select(Application.user_id, Application.status, func.count())
+        .where(Application.user_id.in_(user_ids))
+        .group_by(Application.user_id, Application.status)
+    ):
+        bucket = out.setdefault(str(user_id), dict(empty))
+        bucket["searched"] += n
+        key = status.value
+        if key in ("applied", "skipped", "failed"):
+            bucket[key] += n
+    return out
+
+
 def list_assignments(db: Session, institute: Institute, params: PageParams, status: AssignmentStatus | None = None) -> dict:
     stmt = select(InstituteAssignment).where(InstituteAssignment.institute_id == institute.id)
     if status is not None:
         stmt = stmt.where(InstituteAssignment.status == status)
     stmt = stmt.order_by(InstituteAssignment.created_at.desc())
     rows, total = paginate(db, stmt, params)
-    return page_response([assignment_out(r) for r in rows], total, params)
+    activity = assignment_activity_map(db, [r.student_user_id for r in rows if r.student_user_id])
+    items = []
+    for row in rows:
+        payload = assignment_out(row, db)
+        payload["activity"] = (
+            activity.get(str(row.student_user_id), {"searched": 0, "applied": 0, "skipped": 0, "failed": 0})
+            if row.student_user_id else {"searched": 0, "applied": 0, "skipped": 0, "failed": 0}
+        )
+        items.append(payload)
+    return page_response(items, total, params)
+
+
+def get_assignment(db: Session, institute: Institute, assignment_id: uuid.UUID) -> InstituteAssignment:
+    row = db.get(InstituteAssignment, assignment_id)
+    if row is None or row.institute_id != institute.id:
+        raise AppError("NOT_FOUND", "Student not found.", 404)
+    return row
+
+
+def student_detail(db: Session, institute: Institute, assignment_id: uuid.UUID) -> dict:
+    """Assignment, profile, and application totals for one campus student."""
+    from backend.app.services.admin_service import _candidate
+
+    row = get_assignment(db, institute, assignment_id)
+    user = db.get(User, row.student_user_id) if row.student_user_id else None
+    by_status = {s.value: 0 for s in ApplicationStatus}
+    candidate = None
+    if user is not None:
+        for status, count in db.execute(
+            select(Application.status, func.count()).where(Application.user_id == user.id).group_by(Application.status)
+        ):
+            by_status[status.value] = count
+        candidate = _candidate(db, user, by_status)
+    applied = by_status["applied"]
+    failed = by_status["failed"]
+    return {
+        "assignment": assignment_out(row, db),
+        "user": None if user is None else {
+            "id": str(user.id),
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "last_login_at": _iso(user.last_login_at),
+            "created_at": _iso(user.created_at),
+        },
+        "activity": {
+            "searched": sum(by_status.values()),
+            "applied": applied,
+            "skipped": by_status["skipped"],
+            "failed": failed,
+            "success_rate": round(applied / (applied + failed), 4) if applied + failed else None,
+        },
+        "applications_by_status": by_status,
+        "candidate": candidate,
+    }
 
 
 def list_invites(db: Session, institute: Institute) -> list[dict]:
@@ -445,7 +676,17 @@ def list_invites(db: Session, institute: Institute) -> list[dict]:
             InstituteAssignment.status.in_((AssignmentStatus.INVITED, AssignmentStatus.PENDING_CANDIDATE_ACCEPTANCE)),
         ).order_by(InstituteAssignment.created_at.desc())
     ).all()
-    return [assignment_out(r) for r in rows]
+    items = []
+    for row in rows:
+        payload = assignment_out(row, db)
+        invite = db.scalar(
+            select(InstituteInvite)
+            .where(InstituteInvite.assignment_id == row.id, InstituteInvite.accepted_at.is_(None))
+            .order_by(InstituteInvite.expires_at.desc())
+        )
+        payload["expires_at"] = _iso(invite.expires_at) if invite else None
+        items.append(payload)
+    return items
 
 
 def list_seats(db: Session, institute: Institute) -> list[dict]:
@@ -453,8 +694,23 @@ def list_seats(db: Session, institute: Institute) -> list[dict]:
         select(InstituteSeat).where(InstituteSeat.institute_id == institute.id)
         .order_by(InstituteSeat.created_at.asc())
     ).all()
-    return [{"id": str(s.id), "subscription_id": str(s.subscription_id), "status": s.status.value,
-             "created_at": _iso(s.created_at)} for s in rows]
+    by_seat: dict[str, InstituteAssignment] = {}
+    if rows:
+        for assignment in db.scalars(
+            select(InstituteAssignment).where(
+                InstituteAssignment.institute_id == institute.id,
+                InstituteAssignment.seat_id.in_([s.id for s in rows]),
+            )
+        ):
+            if assignment.seat_id is not None:
+                by_seat[str(assignment.seat_id)] = assignment
+    return [{
+        "id": str(s.id),
+        "subscription_id": str(s.subscription_id),
+        "status": s.status.value,
+        "created_at": _iso(s.created_at),
+        "assignment": assignment_out(by_seat[str(s.id)], db) if str(s.id) in by_seat else None,
+    } for s in rows]
 
 
 def invite_preview(db: Session, raw_token: str) -> dict:
@@ -544,30 +800,45 @@ def notify_invite_accepted(db: Session, assignment: InstituteAssignment) -> None
         )
 
 
-def release_assignment(db: Session, institute: Institute, assignment_id: uuid.UUID) -> InstituteAssignment:
+_RELEASABLE_STATUSES = (*OPEN_ASSIGNMENT_STATUSES, AssignmentStatus.SUSPENDED)
+
+
+def release_assignment(
+    db: Session, institute: Institute, assignment_id: uuid.UUID,
+) -> tuple[InstituteAssignment, str | None]:
+    """Unbind a candidate from campus billing. Institute seats stay in inventory as available."""
     assignment = db.get(InstituteAssignment, assignment_id)
     if assignment is None or assignment.institute_id != institute.id:
         raise AppError("NOT_FOUND", "Assignment not found.", 404)
-    if assignment.status not in OPEN_ASSIGNMENT_STATUSES:
-        raise AppError("NOT_OPEN", "That seat is already closed.", 409)
+    if assignment.status not in _RELEASABLE_STATUSES:
+        raise AppError("NOT_OPEN", "That candidate is already released from this campus.", 409)
+    notify_email = (
+        assignment.candidate_email
+        if assignment.status in (AssignmentStatus.ACTIVE, AssignmentStatus.SUSPENDED)
+        else None
+    )
     _free_seat(db, assignment)
     assignment.status = AssignmentStatus.RELEASED
     assignment.released_at = _now()
     db.flush()
-    return assignment
+    return assignment, notify_email
 
 
-def suspend_assignment(db: Session, institute: Institute, assignment_id: uuid.UUID) -> InstituteAssignment:
+def suspend_assignment(
+    db: Session, institute: Institute, assignment_id: uuid.UUID,
+) -> tuple[InstituteAssignment, str | None]:
+    """Suspend an active student. Returns (assignment, student_email_to_notify)."""
     assignment = db.get(InstituteAssignment, assignment_id)
     if assignment is None or assignment.institute_id != institute.id:
         raise AppError("NOT_FOUND", "Assignment not found.", 404)
     if assignment.status != AssignmentStatus.ACTIVE:
         raise AppError("NOT_ACTIVE", "Only an active student can be suspended.", 409)
+    notify_email = assignment.candidate_email
     _free_seat(db, assignment)
     assignment.status = AssignmentStatus.SUSPENDED
     assignment.released_at = _now()
     db.flush()
-    return assignment
+    return assignment, notify_email
 
 
 def _free_seat(db: Session, assignment: InstituteAssignment) -> None:

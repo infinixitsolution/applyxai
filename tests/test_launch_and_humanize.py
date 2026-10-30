@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from modules.helpers import get_default_temp_profile, human_type
+from modules.helpers import chrome_profile_launch_args, get_default_temp_profile, human_type
 from modules.clickers_and_finders import pick_first_displayed, text_xpath, try_xp
 
 
@@ -33,12 +33,25 @@ def test_temp_profile_is_a_bare_path_on_every_platform(monkeypatch, fake_home, p
     # The callers add "--user-data-dir=" themselves, baking it in here doubled the flag.
     assert "--user-data-dir" not in path
     assert not path.startswith("-")
-    assert "auto-job-apply-profile" in path
+    if platform == "win32":
+        assert "ApplyXAI" in path
+    else:
+        assert "auto-job-apply-profile" in path
+
+
+def test_chrome_profile_launch_args_include_isolated_profile_and_no_picker():
+    flags = chrome_profile_launch_args(r"C:\ApplyXAI\profile")
+    assert flags[0] == "--user-data-dir=C:\\ApplyXAI\\profile"
+    assert "--profile-directory=Default" in flags
+    joined = " ".join(flags)
+    assert "ChromeProfilePicker" in joined or "ProfilePickerOnStartup" in joined
 
 
 def test_temp_profile_is_usable_as_a_chrome_flag(monkeypatch, fake_home):
     monkeypatch.setattr(sys, "platform", "win32")
-    assert f"--user-data-dir={get_default_temp_profile()}" == "--user-data-dir=C:\\temp\\auto-job-apply-profile"
+    path = get_default_temp_profile()
+    assert "ApplyXAI" in path or "auto-job-apply-profile" in path
+    assert f"--user-data-dir={path}" == f"--user-data-dir={path}"
 
 
 def test_temp_profile_directory_gets_created(monkeypatch, tmp_path):

@@ -1,9 +1,13 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_user
 from backend.app.core.database import get_db
 from backend.app.core.errors import AppError, ok
+from backend.app.core.pagination import PageParams, page_params
 from backend.app.core.rate_limit import RateLimiter, get_rate_limiter
 from backend.app.models import User
 from backend.app.schemas.billing import CheckoutIn, ConfirmIn
@@ -19,6 +23,12 @@ MAX_WEBHOOK_BYTES = 256 * 1024
 def billing_overview(user: User = Depends(get_current_user), db: Session = Depends(get_db),
                      provider: PaymentProvider = Depends(get_payment_provider)):
     return ok(billing_service.overview(db, user, provider))
+
+
+@router.get("/payments", summary="Paginated payment history for your account")
+def billing_payments(status: str | None = None, params: PageParams = Depends(page_params),
+                     user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ok(billing_service.list_user_payments(db, user.id, params, status=status))
 
 
 @router.post("/checkout", summary="Start a subscription; returns what the provider's checkout needs")
@@ -40,6 +50,24 @@ def confirm(body: ConfirmIn, user: User = Depends(get_current_user), db: Session
                                               subscription_id=body.subscription_id, signature=body.signature)
     db.commit()
     return ok(result)
+
+
+@router.get("/invoices")
+def list_invoices(params: PageParams = Depends(page_params), user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    from backend.app.services import gst_service
+    return ok(gst_service.list_user_tax_invoices(db, user.id, params))
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+def invoice_pdf(invoice_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from backend.app.services import gst_service
+    row = gst_service.get_user_invoice(db, user, invoice_id)
+    return Response(
+        content=gst_service.invoice_pdf_bytes(row),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{row.invoice_number}.pdf"'},
+    )
 
 
 @router.post("/cancel", summary="Cancel at the end of the current billing period")

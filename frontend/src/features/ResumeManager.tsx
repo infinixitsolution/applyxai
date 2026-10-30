@@ -110,6 +110,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
     mutationFn: (id: string) => resumesApi.intake(id, true),
     onSuccess: (result) => {
       client.setQueryData(["profile"], result.profile);
+      void client.invalidateQueries({ queryKey: ["profile"] });
       void client.invalidateQueries({ queryKey: ["preferences", "application"] });
       void client.invalidateQueries({ queryKey: ["me"] });
       const via = result.source === "ai" ? "AI" : "your resume";
@@ -117,7 +118,7 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
         result.text_extraction === "ocr" || result.text_extraction === "pdf_text+ocr"
           ? " (scanned PDF read with OCR)"
           : "";
-      toast.success(`Profile and cover letter filled from ${via}${ocr}. Review the next steps.`);
+      toast.success(`Profile, education, and employment filled from ${via}${ocr}. Review Master Profile.`);
       onIntakeDone?.();
     },
     onError: (e) => toast.error(errorMessage(e)),
@@ -246,6 +247,14 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
           <div className="flex flex-wrap gap-1 lg:max-w-md lg:justify-end">
             {!built && (
               <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={intake.isPending && intake.variables === r.id}
+                  onClick={() => intake.mutate(r.id)}
+                >
+                  Fill profile
+                </Button>
                 <Button variant="secondary" size="sm" loading={analyze.isPending && analyze.variables === r.id}
                         onClick={() => analyze.mutate(r.id)}>Analyze skills</Button>
                 <Button variant="ghost" size="sm" onClick={() => { setStyling(r); }}>
@@ -385,6 +394,14 @@ export function ResumeManager({ onboarding = false, onIntakeDone, dashboardShell
                 )}
               </div>
               <div className="flex flex-wrap gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={intake.isPending && intake.variables === r.id}
+                  onClick={() => intake.mutate(r.id)}
+                >
+                  Fill profile
+                </Button>
                 <Button variant="ghost" size="sm" loading={analyze.isPending && analyze.variables === r.id}
                         onClick={() => analyze.mutate(r.id)}>Analyze skills</Button>
                 <Button variant="ghost" size="sm" onClick={() => { setStyling(r); }}>

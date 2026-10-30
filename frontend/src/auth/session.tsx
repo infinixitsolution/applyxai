@@ -95,7 +95,7 @@ function SessionGate({ children, pending }: { children: ReactNode; pending: bool
         <Alert kind="error">{errorMessage(error)}</Alert>
         <p className="mt-3 text-sm text-slate-600">
           Start the API from the project root:{" "}
-          <code className="rounded bg-slate-100 px-1">python -m uvicorn backend.app.main:app --reload --port 8000</code>
+          <code className="rounded bg-slate-100 px-1">python -m uvicorn backend.app.main:app --reload --port 8010</code>
         </p>
       </div>
     );

@@ -5,7 +5,17 @@ interface Point {
 }
 
 /** Stacked daily bars (applied + failed). Plain SVG, no chart library. */
-export function DailyChart({ data }: { data: Point[] }) {
+export function DailyChart({
+  data,
+  primaryLabel = "Applied",
+  secondaryLabel = "Failed",
+  ariaLabel,
+}: {
+  data: Point[];
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  ariaLabel?: string;
+}) {
   const max = Math.max(1, ...data.map((d) => d.applied + d.failed));
   const width = 600;
   const height = 160;
@@ -16,14 +26,14 @@ export function DailyChart({ data }: { data: Point[] }) {
   return (
     <figure>
       <svg viewBox={`0 0 ${width} ${height + 20}`} className="h-48 w-full" role="img"
-           aria-label={`Applications over the last ${data.length} days: ${total} applied`}>
+           aria-label={ariaLabel || `${primaryLabel} over the last ${data.length} days: ${total}`}>
         {data.map((d, i) => {
           const x = i * (bar + gap);
           const appliedH = (d.applied / max) * height;
           const failedH = (d.failed / max) * height;
           return (
             <g key={d.date}>
-              <title>{`${d.date}: ${d.applied} applied, ${d.failed} failed`}</title>
+              <title>{`${d.date}: ${d.applied} ${primaryLabel.toLowerCase()}, ${d.failed} ${secondaryLabel.toLowerCase()}`}</title>
               <rect x={x} y={0} width={bar} height={height} fill="transparent" />
               <rect x={x} y={height - appliedH} width={bar} height={appliedH} rx={2} className="fill-brand-600" />
               <rect x={x} y={height - appliedH - failedH} width={bar} height={failedH} rx={2} className="fill-red-300" />
@@ -41,8 +51,10 @@ export function DailyChart({ data }: { data: Point[] }) {
         )}
       </svg>
       <figcaption className="mt-2 flex gap-4 text-xs text-slate-500">
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-brand-600" /> Applied</span>
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-300" /> Failed</span>
+        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-brand-600" /> {primaryLabel}</span>
+        {data.some((d) => d.failed > 0) ? (
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-300" /> {secondaryLabel}</span>
+        ) : null}
       </figcaption>
     </figure>
   );

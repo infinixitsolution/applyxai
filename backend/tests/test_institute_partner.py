@@ -93,12 +93,47 @@ def test_admin_approves_institute_and_partner(api, db, outbox):
                     headers=csrf_headers(api)).json()["data"]["status"] == "approved"
 
 
+def test_partner_kyc_file_upload_and_admin_download(api, db, outbox):
+    _register(api, "kycdocs@example.com", "partner", organization="KYC Files", agreed=True)
+    _verify_login(api, outbox, "kycdocs@example.com")
+    uploaded = api.post(
+        "/api/partner/kyc",
+        files={"file": ("pan.pdf", b"%PDF-1.4 kyc", "application/pdf")},
+        data={"note": "PAN card"},
+        headers=csrf_headers(api),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    docs = uploaded.json()["data"]["kyc_documents"]
+    assert len(docs) == 1
+    assert docs[0]["filename"] == "pan.pdf"
+    assert docs[0]["note"] == "PAN card"
+    assert docs[0]["id"]
+    assert "storage_path" not in docs[0]
+    doc_id = docs[0]["id"]
+    own = api.get(f"/api/partner/kyc/{doc_id}/file")
+    assert own.status_code == 200
+    assert own.content.startswith(b"%PDF-1.4")
+    reject = api.post(
+        "/api/partner/kyc",
+        files={"file": ("notes.exe", b"MZ not a document", "application/octet-stream")},
+        headers=csrf_headers(api),
+    )
+    assert reject.status_code == 422
+
+    partner_id = api.get("/api/partner/me").json()["data"]["id"]
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+    admin = _admin(api, db)
+    admin_file = admin.get(f"/api/admin/partners/{partner_id}/kyc/{doc_id}/file")
+    assert admin_file.status_code == 200
+    assert admin_file.content.startswith(b"%PDF-1.4")
+
+
 def test_invite_requires_active_institute_and_free_seat(api, db, outbox):
     _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
     _verify_login(api, outbox, "campus@example.com")
     inst_id = api.get("/api/auth/me").json()["data"]["user"]["institute_id"]
-    resp = api.post("/api/institute/students/invite", json={"email": "student@example.com"},
-                    headers=csrf_headers(api))
+    student = {"name": "Sam Student", "phone": "9876543210", "email": "student@example.com"}
+    resp = api.post("/api/institute/students/invite", json=student, headers=csrf_headers(api))
     assert resp.status_code == 403 and resp.json()["error"]["code"] == "INSTITUTE_NOT_ACTIVE"
 
     api.post("/api/auth/logout", headers=csrf_headers(api))
@@ -106,8 +141,7 @@ def test_invite_requires_active_institute_and_free_seat(api, db, outbox):
     admin.post(f"/api/admin/institutes/{inst_id}/status", json={"status": "active"}, headers=csrf_headers(admin))
     admin.post("/api/auth/logout", headers=csrf_headers(admin))
     api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
-    resp = api.post("/api/institute/students/invite", json={"email": "student@example.com"},
-                    headers=csrf_headers(api))
+    resp = api.post("/api/institute/students/invite", json=student, headers=csrf_headers(api))
     assert resp.status_code == 409 and resp.json()["error"]["code"] == "NO_SEATS"
 
     _grant_campus(db, inst_id)
@@ -115,13 +149,19 @@ def test_invite_requires_active_institute_and_free_seat(api, db, outbox):
     api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
     seats = api.get("/api/institute/seats").json()["data"]["counts"]
     assert seats["available"] == 10
-    invited = api.post("/api/institute/students/invite", json={"email": "student@example.com"},
-                       headers=csrf_headers(api))
+    invited = api.post("/api/institute/students/invite", json=student, headers=csrf_headers(api))
     assert invited.status_code == 200, invited.text
-    assert invited.json()["data"]["assignment"]["status"] == "invited"
+    assert invited.json()["data"]["assignment"]["status"] == "active"
+    assert any(e.to == "student@example.com" and "Password:" in e.body for e in outbox.sent)
+    listed = api.get("/api/institute/seats").json()["data"]["items"]
+    assert sum(1 for s in listed if s["status"] == "assigned") == 1
+    assert any(s.get("assignment") and s["assignment"]["candidate_email"] == "student@example.com" for s in listed)
 
 
-def test_accept_invite_assigns_seat_and_release_frees_it(api, db, outbox):
+def test_dashboard_sums_jobs_across_active_students(api, db, outbox):
+    import uuid as uuid_lib
+    from backend.app.models import Application, ApplicationStatus, Job
+
     _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
     _verify_login(api, outbox, "campus@example.com")
     inst_id = api.get("/api/auth/me").json()["data"]["user"]["institute_id"]
@@ -131,29 +171,175 @@ def test_accept_invite_assigns_seat_and_release_frees_it(api, db, outbox):
     _grant_campus(db, inst_id)
     admin.post("/api/auth/logout", headers=csrf_headers(admin))
     api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
-    api.post("/api/institute/students/invite", json={"email": "student@example.com"}, headers=csrf_headers(api))
-    token = outbox.last_token("student@example.com")
-    assignment_id = api.get("/api/institute/invitations").json()["data"]["items"][0]["id"]
+    first = api.post("/api/institute/students/invite", json={
+        "name": "Sam Student", "phone": "9876543210", "email": "sam@example.com",
+    }, headers=csrf_headers(api))
+    second = api.post("/api/institute/students/invite", json={
+        "name": "Riley Student", "phone": "9876543211", "email": "riley@example.com",
+    }, headers=csrf_headers(api))
+    assert first.status_code == 200 and second.status_code == 200, first.text + second.text
+    sam = uuid_lib.UUID(first.json()["data"]["assignment"]["student_user_id"])
+    riley = uuid_lib.UUID(second.json()["data"]["assignment"]["student_user_id"])
+    outsider = User(email="outsider@example.com", password_hash=hash_password(PASSWORD), is_verified=True)
+    db.add(outsider)
+    jobs = [Job(external_id=str(i), title=f"Role {i}", company="Acme") for i in range(6)]
+    db.add_all(jobs)
+    db.commit()
+    db.add_all([
+        Application(user_id=sam, job_id=jobs[0].id, status=ApplicationStatus.APPLIED),
+        Application(user_id=sam, job_id=jobs[1].id, status=ApplicationStatus.SKIPPED),
+        Application(user_id=riley, job_id=jobs[2].id, status=ApplicationStatus.APPLIED),
+        Application(user_id=riley, job_id=jobs[3].id, status=ApplicationStatus.FAILED),
+        Application(user_id=riley, job_id=jobs[4].id, status=ApplicationStatus.DISCOVERED),
+        Application(user_id=outsider.id, job_id=jobs[5].id, status=ApplicationStatus.APPLIED),
+    ])
+    db.commit()
+    dash = api.get("/api/institute/dashboard").json()["data"]["activity"]
+    assert dash["searched"] == 5
+    assert dash["applied"] == 2
+    assert dash["skipped"] == 1
+    assert dash["failed"] == 1
+    assert dash["success_rate"] == 0.6667
+    listed = {row["candidate_email"]: row for row in api.get("/api/institute/students").json()["data"]["items"]}
+    assert listed["sam@example.com"]["activity"]["applied"] == 1
+    assert listed["sam@example.com"]["activity"]["skipped"] == 1
+    assert listed["riley@example.com"]["activity"]["applied"] == 1
+    assert listed["riley@example.com"]["activity"]["failed"] == 1
+    assert listed["riley@example.com"]["activity"]["searched"] == 3
+
+
+def test_student_detail_returns_profile_and_activity(api, db, outbox):
+    import uuid as uuid_lib
+    from backend.app.models import Application, ApplicationStatus, Job, UserProfile
+
+    _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
+    _verify_login(api, outbox, "campus@example.com")
+    inst_id = api.get("/api/auth/me").json()["data"]["user"]["institute_id"]
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+    admin = _admin(api, db)
+    admin.post(f"/api/admin/institutes/{inst_id}/status", json={"status": "active"}, headers=csrf_headers(admin))
+    _grant_campus(db, inst_id)
+    admin.post("/api/auth/logout", headers=csrf_headers(admin))
+    api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
+    added = api.post("/api/institute/students/invite", json={
+        "name": "Sam Student", "phone": "9876543210", "email": "sam@example.com",
+    }, headers=csrf_headers(api))
+    assert added.status_code == 200, added.text
+    assignment = added.json()["data"]["assignment"]
+    user_id = uuid_lib.UUID(assignment["student_user_id"])
+    job = Job(external_id="detail-1", title="Backend Engineer", company="Acme", location="Bengaluru")
+    db.add(job)
+    db.commit()
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    profile.headline = "Python developer"
+    profile.current_title = "Trainee Engineer"
+    profile.current_company = "Acme Labs"
+    profile.skills = ["Python", "SQL"]
+    db.add(Application(user_id=user_id, job_id=job.id, status=ApplicationStatus.APPLIED))
+    db.commit()
+
+    missing = api.get("/api/institute/students/00000000-0000-0000-0000-000000000001")
+    assert missing.status_code == 404
+
+    detail = api.get(f"/api/institute/students/{assignment['id']}")
+    assert detail.status_code == 200, detail.text
+    data = detail.json()["data"]
+    assert data["assignment"]["id"] == assignment["id"]
+    assert data["user"]["email"] == "sam@example.com"
+    assert data["activity"]["searched"] == 1
+    assert data["activity"]["applied"] == 1
+    assert data["candidate"]["profile"]["headline"] == "Python developer"
+    assert data["candidate"]["profile"]["skills"] == ["Python", "SQL"]
+    assert data["candidate"]["recent_applications"][0]["title"] == "Backend Engineer"
+
+
+def test_add_student_activates_seat_and_release_frees_it(api, db, outbox):
+    _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
+    _verify_login(api, outbox, "campus@example.com")
+    inst_id = api.get("/api/auth/me").json()["data"]["user"]["institute_id"]
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+    admin = _admin(api, db)
+    admin.post(f"/api/admin/institutes/{inst_id}/status", json={"status": "active"}, headers=csrf_headers(admin))
+    _grant_campus(db, inst_id)
+    admin.post("/api/auth/logout", headers=csrf_headers(admin))
+    api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
+    added = api.post("/api/institute/students/invite", json={
+        "name": "Sam Student", "phone": "9876543210", "email": "student@example.com",
+    }, headers=csrf_headers(api))
+    assert added.status_code == 200, added.text
+    assignment = added.json()["data"]["assignment"]
+    assert assignment["status"] == "active"
+    assert assignment["candidate_name"] == "Sam Student"
+    assert assignment["candidate_phone"] == "9876543210"
+    assignment_id = assignment["id"]
+    cred_mail = next(e for e in outbox.sent if e.to == "student@example.com" and "Password:" in e.body)
+    import re
+    password = re.search(r"Password:\s*(\S+)", cred_mail.body).group(1)
     api.post("/api/auth/logout", headers=csrf_headers(api))
 
-    _register(api, "student@example.com")
-    _verify_login(api, outbox, "student@example.com")
-    preview = api.get(f"/api/invites/{token}")
-    assert preview.status_code == 200 and preview.json()["data"]["email"] == "student@example.com"
-    accepted = api.post(f"/api/invites/{token}/accept", headers=csrf_headers(api))
-    assert accepted.status_code == 200
-    assert accepted.json()["data"]["assignment"]["status"] == "active"
+    login = api.post("/api/auth/login", json={"email": "student@example.com", "password": password})
+    assert login.status_code == 200, login.text
+    me = api.get("/api/auth/me").json()["data"]["user"]
+    assert me["institute_managed"] is True
+    assert me["institute_name"] == "Acme College"
 
     usage = api.get("/api/usage").json()["data"]
     assert usage["plan"] == "campus"
     assert usage["applications"]["limit"] == 100
 
-    api.post("/api/auth/logout", headers=csrf_headers(api))
-    api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
-    released = api.post(f"/api/institute/students/{assignment_id}/release", headers=csrf_headers(api))
-    assert released.status_code == 200
-    seats = api.get("/api/institute/seats").json()["data"]["counts"]
+    billing = api.get("/api/billing").json()["data"]
+    assert billing["managed_by_institute"] is True
+    assert billing["checkout_available"] is False
+    blocked = api.post("/api/billing/checkout", json={"plan": "starter"}, headers=csrf_headers(api))
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "BILLING_MANAGED_BY_INSTITUTE"
+
+    # Release via service (same client is rate-limited on login) while student session stays open.
+    import uuid
+    from backend.app.services import institute_service
+    from backend.app.services.email_service import institute_student_released_email
+    institute = db.get(Institute, uuid.UUID(str(inst_id)))
+    row, notify_email = institute_service.release_assignment(db, institute, uuid.UUID(assignment_id))
+    db.commit()
+    assert row.status == AssignmentStatus.RELEASED and notify_email == "student@example.com"
+    outbox.send(institute_student_released_email(notify_email, institute.name, db))
+    assert any(e.to == "student@example.com" and "campus package ended" in e.subject.lower() for e in outbox.sent)
+
+    me2 = api.get("/api/auth/me").json()["data"]["user"]
+    assert me2["institute_managed"] is False
+    billing2 = api.get("/api/billing").json()["data"]
+    assert billing2["managed_by_institute"] is False
+    usage2 = api.get("/api/usage").json()["data"]
+    assert usage2["plan"] != "campus"
+    seats = institute_service.seat_counts(db, institute.id)
     assert seats["available"] == 10 and seats["assigned"] == 0
+
+
+def test_add_existing_candidate_keeps_password(api, db, outbox):
+    _register(api, "student@example.com")
+    _verify_login(api, outbox, "student@example.com")
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+
+    _register(api, "campus@example.com", "institute", institute_name="Acme College", agreed=True)
+    _verify_login(api, outbox, "campus@example.com")
+    inst_id = api.get("/api/auth/me").json()["data"]["user"]["institute_id"]
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+    admin = _admin(api, db)
+    admin.post(f"/api/admin/institutes/{inst_id}/status", json={"status": "active"}, headers=csrf_headers(admin))
+    _grant_campus(db, inst_id)
+    admin.post("/api/auth/logout", headers=csrf_headers(admin))
+    api.post("/api/auth/login", json={"email": "campus@example.com", "password": PASSWORD})
+    before = len(outbox.sent)
+    added = api.post("/api/institute/students/invite", json={
+        "name": "Sam Student", "phone": "9876543210", "email": "student@example.com",
+    }, headers=csrf_headers(api))
+    assert added.status_code == 200
+    assert added.json()["data"]["assignment"]["status"] == "active"
+    new_mail = [e for e in outbox.sent[before:] if e.to == "student@example.com"]
+    assert new_mail and "Password:" not in new_mail[-1].body
+    assert "enrolled" in new_mail[-1].subject.lower() or "campus" in new_mail[-1].body.lower()
+    api.post("/api/auth/logout", headers=csrf_headers(api))
+    assert api.post("/api/auth/login", json={"email": "student@example.com", "password": PASSWORD}).status_code == 200
 
 
 def test_partner_referral_attributes_institute(api, db, outbox):
@@ -186,6 +372,7 @@ def test_partner_enroll_creates_institute(api, db, outbox):
 
     api.post("/api/auth/logout", headers=csrf_headers(api))
     admin = _admin(api, db)
+    admin.post(f"/api/admin/partners/{partner_id}/kyc", json={"status": "verified"}, headers=csrf_headers(admin))
     admin.post(f"/api/admin/partners/{partner_id}/status", json={"status": "approved"}, headers=csrf_headers(admin))
     admin.post("/api/auth/logout", headers=csrf_headers(admin))
     api.post("/api/auth/login", json={"email": "ally@example.com", "password": PASSWORD})

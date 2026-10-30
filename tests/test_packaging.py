@@ -1,5 +1,6 @@
 """Tests for Windows agent packaging functionality."""
 
+import pytest
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +10,8 @@ def test_agent_imports():
     """Test that agent modules can be imported."""
     import agent
     assert hasattr(agent, 'AGENT_VERSION')
-    assert agent.AGENT_VERSION == "1.1.8"
+    version = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip().splitlines()[0]
+    assert agent.AGENT_VERSION == version
 
     from agent import config
     assert hasattr(config, 'default_home')
@@ -82,9 +84,13 @@ def test_config_check_server_url():
         pass
 
 
-def test_config_round_trip(tmp_path):
-    """Test config save/load round trip."""
-    from agent import config
+def test_config_round_trip(tmp_path, monkeypatch):
+    """Test config save/load round trip (JSON fallback; keyring is covered in test_agent_credentials)."""
+    from agent import config, credentials
+
+    monkeypatch.setattr(credentials, "store_token", lambda token: False)
+    monkeypatch.setattr(credentials, "load_token", lambda: None)
+    monkeypatch.setattr(credentials, "clear_token", lambda: None)
 
     cfg = config.AgentConfig(
         server="https://test.example.com",
@@ -109,6 +115,14 @@ def test_config_round_trip(tmp_path):
 
     config.forget(tmp_path)
     assert config.load(tmp_path) is None
+
+
+def test_worker_spec_bundles_linkedin_profile_sync():
+    spec = (Path(__file__).resolve().parents[1] / "build" / "applyxai_agent_worker.spec").read_text(encoding="utf-8")
+    assert "runLinkedInProfileSync.py" in spec
+    assert "automation.linkedin_profile" in spec
+    assert "agent.credentials" in spec
+    assert "chromedriver-win64.exe" in spec
 
 
 def test_runner_is_frozen():
@@ -140,13 +154,15 @@ def test_automation_modules_import():
 
 def test_modules_import():
     """Test that modules can be imported."""
-    import modules
-    import modules.run_hooks
-    import modules.open_chrome
-    import modules.helpers
+    from modules import helpers, open_chrome, run_hooks
 
-    assert hasattr(modules.run_hooks, 'emit')
-    assert hasattr(modules.open_chrome, 'createChromeSession')
+    assert hasattr(run_hooks, "emit")
+    assert hasattr(open_chrome, "createChromeSession")
+    assert hasattr(open_chrome, "platform_chromedriver_names")
+    names = open_chrome.platform_chromedriver_names()
+    assert names
+    if sys.platform.startswith("win"):
+        assert "chromedriver-win64.exe" in names
 
 
 def test_gui_imports():

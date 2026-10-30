@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
@@ -24,6 +25,13 @@ describe("JobsDashboard", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
       const url = String(input).split("?")[0]!;
       if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+      if (url.includes("/automation")) {
+        return ok({
+          active: null, recent: [], devices: [], agent_online: false,
+          readiness: { ready: true, problems: [] },
+          usage: dashboardStats.usage, enabled_sources: ["linkedin"],
+        });
+      }
       if (url.includes("/preferences/options")) {
         return ok({
           search: { experience_level: [], job_type: [], on_site: [], date_posted: [], sort_by: [], extra_fields: [] },
@@ -50,6 +58,13 @@ describe("JobsDashboard", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
       const url = String(input).split("?")[0]!;
       if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+      if (url.includes("/automation")) {
+        return ok({
+          active: null, recent: [], devices: [], agent_online: false,
+          readiness: { ready: true, problems: [] },
+          usage: dashboardStats.usage, enabled_sources: ["linkedin"],
+        });
+      }
       if (url.includes("/preferences/options")) {
         return ok({
           search: { experience_level: [], job_type: [], on_site: [], date_posted: [], sort_by: [], extra_fields: [] },
@@ -90,5 +105,88 @@ describe("JobsDashboard", () => {
     );
     expect(await screen.findByText("Backend Engineer")).toBeTruthy();
     expect(screen.getAllByText(/Acme Corp/).length).toBeGreaterThan(0);
+  });
+
+  it("opens application details from a job card", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input).split("?")[0]!;
+      if (url.includes("/dashboard/stats")) return ok(dashboardStats);
+      if (url.includes("/automation")) {
+        return ok({
+          active: null, recent: [], devices: [], agent_online: false,
+          readiness: { ready: true, problems: [] },
+          usage: dashboardStats.usage, enabled_sources: ["linkedin"],
+        });
+      }
+      if (url.includes("/preferences/options")) {
+        return ok({
+          search: { experience_level: [], job_type: [], on_site: [], date_posted: [], sort_by: [], extra_fields: [] },
+          application_fields: [],
+        });
+      }
+      if (url.includes("/jobs")) {
+        return ok({
+          items: [{
+            id: "job-1",
+            platform: "linkedin",
+            external_id: "ext-1",
+            title: "Backend Engineer",
+            company: "Acme Corp",
+            location: "Remote",
+            job_url: "https://example.com/j",
+            work_setting: "remote",
+            salary_min: null,
+            salary_max: null,
+            discovered_at: "2026-10-01T00:00:00Z",
+            application: { id: "app-1", status: "discovered", applied_at: null },
+          }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        });
+      }
+      if (url.includes("/applications/app-1")) {
+        return ok({
+          id: "app-1",
+          status: "discovered",
+          applied_at: null,
+          failure_reason: "",
+          resume_id: null,
+          automation_job_id: null,
+          created_at: "2026-10-01T00:00:00Z",
+          updated_at: "2026-10-01T00:00:00Z",
+          job: {
+            id: "job-1",
+            platform: "linkedin",
+            external_id: "ext-1",
+            title: "Backend Engineer",
+            company: "Acme Corp",
+            location: "Remote",
+            job_url: "https://example.com/j",
+            work_setting: "remote",
+            employment_type: "",
+            experience_level: "",
+            salary_min: null,
+            salary_max: null,
+            discovered_at: "2026-10-01T00:00:00Z",
+            description: "Build APIs.",
+          },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <ToastProvider>
+            <JobsDashboard />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Details" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("heading", { name: "Backend Engineer" })).toBeTruthy();
   });
 });

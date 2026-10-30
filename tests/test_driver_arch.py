@@ -19,6 +19,7 @@ from unittest import mock
 import pytest
 
 import undetected_chromedriver as uc
+import modules.chrome_update as chrome_update
 import modules.helpers as helpers
 from selenium.webdriver.common.selenium_manager import SeleniumManager
 
@@ -39,7 +40,9 @@ class _FakeChrome:
         pass
 
 
-with mock.patch.object(uc, "Chrome", _FakeChrome), \
+with mock.patch.dict("os.environ", {"APPLYXAI_SKIP_CHROME_BOOTSTRAP": ""}, clear=False), \
+     mock.patch.object(chrome_update, "prepare_chrome_for_run", lambda **_kw: None), \
+     mock.patch.object(uc, "Chrome", _FakeChrome), \
      mock.patch.object(helpers, "make_directories", lambda paths: None), \
      mock.patch.object(helpers, "get_default_temp_profile", lambda: "/tmp/not-a-real-profile"), \
      mock.patch.object(SeleniumManager, "binary_paths", side_effect=OSError("no selenium manager")):
@@ -114,28 +117,41 @@ def test_patch_happens_before_signing_and_never_on_the_selenium_cache(monkeypatc
     assert cached not in (order[1][1], order[2][1])              # the shared cache is never patched
 
 
-def _profile_args(monkeypatch, **overrides) -> list[str]:
+def _profile_dir_used(monkeypatch, **overrides) -> str:
     _chrome_kwargs.clear()
     monkeypatch.setattr(oc.uc, "Chrome", _FakeChrome)
     monkeypatch.setattr(oc, "make_directories", lambda paths: None)
     monkeypatch.setattr(oc, "get_managed_driver_path", lambda: None)
     monkeypatch.setattr(oc, "get_default_temp_profile", lambda: "/tmp/guest-profile")
-    monkeypatch.setattr(oc, "find_default_profile_directory", lambda: "/home/me/chrome-profile")
+    monkeypatch.setattr(
+        oc,
+        "find_default_profile_directory",
+        lambda: "/home/me/chrome-profile",
+        raising=False,
+    )
+    monkeypatch.delenv("APPLYXAI_RUN_CONFIG", raising=False)
+    monkeypatch.delenv("APPLYXAI_ALLOW_PERSONAL_CHROME", raising=False)
     for name, value in overrides.items():
         monkeypatch.setattr(oc, name, value)
     oc.createChromeSession()
-    return [a for a in _chrome_kwargs[0]["options"].arguments if a.startswith("--user-data-dir=")]
+    kw = _chrome_kwargs[-1]
+    if kw.get("user_data_dir"):
+        return str(kw["user_data_dir"])
+    for arg in kw["options"].arguments:
+        if arg.startswith("--user-data-dir="):
+            return arg.split("=", 1)[1]
+    raise AssertionError("no chrome user-data-dir configured")
 
 
 def test_agent_profile_dir_is_used_even_in_safe_mode(monkeypatch, tmp_path):
     '''The ApplyXAI agent gives each user their own profile; it keeps the LinkedIn login between runs.'''
     profile = tmp_path / "agent-profile"
     monkeypatch.setenv("APPLYXAI_PROFILE_DIR", str(profile))
-    assert _profile_args(monkeypatch, safe_mode=True) == [f"--user-data-dir={profile}"]
+    assert _profile_dir_used(monkeypatch, safe_mode=True) == str(profile)
     assert profile.is_dir()
 
 
-def test_without_the_agent_profile_behaviour_is_unchanged(monkeypatch):
+def test_without_the_agent_profile_never_uses_personal_chrome_by_default(monkeypatch):
     monkeypatch.delenv("APPLYXAI_PROFILE_DIR", raising=False)
-    assert _profile_args(monkeypatch, safe_mode=True) == ["--user-data-dir=/tmp/guest-profile"]
-    assert _profile_args(monkeypatch, safe_mode=False) == ["--user-data-dir=/home/me/chrome-profile"]
+    assert _profile_dir_used(monkeypatch, safe_mode=True) == "/tmp/guest-profile"
+    assert _profile_dir_used(monkeypatch, safe_mode=False) == "/tmp/guest-profile"

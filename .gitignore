@@ -32,6 +32,23 @@ frontend/dist/
 *.tsbuildinfo
 /nul
 
+# PyInstaller / Electron / agent build outputs (keep build/*.spec and build/*.iss)
+/dist/
+/build/applyxai_agent/
+/build/applyxai_agent_gui/
+/build/applyxai_agent_worker/
+*.exe
+*.blockmap
+ApplyXAI-Agent-Setup-*/
+/desktop/dist/
+/desktop/resources/dist/
+debug.log
+.tmp-ref-head.txt
+whatsapp-bridge/.wwebjs_auth/
+whatsapp-bridge/.wwebjs_cache/
+*.py[cod]
+*.pyo
+
 # Local control-panel runtime files — contain your credentials/answers, never commit
 user_config.json
 .bot_run.log

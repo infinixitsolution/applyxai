@@ -52,15 +52,23 @@ def make_directories(paths: list[str]) -> None:
             print(f'Could not create the directory "{target}":', e)
 
 
+def applyxai_chrome_profiles_root() -> pathlib.Path:
+    """Parent folder for all ApplyXAI automation Chrome profiles on this PC."""
+    if sys.platform.startswith("win"):
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return pathlib.Path(local) / "ApplyXAI" / "chrome-profiles"
+    return pathlib.Path.home() / ".applyxai" / "chrome-profiles"
+
+
 def get_default_temp_profile() -> str:
     '''
     Absolute path of the throwaway Chrome profile folder, created if it doesn't exist.
     Returns a **bare path** - callers add the `--user-data-dir=` flag themselves.
     '''
-    # Thanks to https://github.com/vinodbavage31 for suggestion!
     home = pathlib.Path.home()
     if sys.platform.startswith('win'):
-        path = pathlib.Path("C:\\temp\\auto-job-apply-profile")
+        path = applyxai_chrome_profiles_root() / "automation-default"
     elif sys.platform.startswith('linux'):
         path = home / ".auto-job-apply-profile"
     else:
@@ -71,6 +79,35 @@ def get_default_temp_profile() -> str:
     except OSError as e:
         print(f'Could not create the Chrome profile directory "{path}":', e)
     return str(path)
+
+
+def normalize_chrome_user_data_dir(user_data_dir: str) -> str:
+    path = os.path.expanduser(user_data_dir).replace("//", "/")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def chrome_profile_extra_args() -> list[str]:
+    """Flags besides --user-data-dir (pass user_data_dir to uc.Chrome() separately)."""
+    return [
+        "--profile-directory=Default",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--password-store=basic",
+        "--disable-session-crashed-bubble",
+        "--hide-crash-restore-bubble",
+        "--disable-features=ChromeProfilePicker,ProfilePickerOnStartup,SignInProfileCreation,ChromeWhatsNew,Sync",
+    ]
+
+
+def chrome_profile_launch_args(user_data_dir: str) -> list[str]:
+    '''
+    Chrome flags for automation: dedicated user-data dir, Default profile, no picker on startup.
+    Without these, multi-profile Chrome installs show "Who's using Chrome?" instead of LinkedIn.
+    '''
+    path = normalize_chrome_user_data_dir(user_data_dir)
+    return [f"--user-data-dir={path}", *chrome_profile_extra_args()]
 
 
 def find_default_profile_directory() -> str | None:
@@ -184,6 +221,7 @@ def setup_logging(log_path: str = None, level: str | int = None) -> logging.Logg
     if level is None:
         level = getattr(_settings, "log_level", "INFO")
     resolved = level if isinstance(level, int) else logging.getLevelName(str(level).upper())
+    logger.disabled = False
     logger.setLevel(resolved if isinstance(resolved, int) else logging.INFO)
     logger.propagate = False        # our records already have handlers, don't double up on root
 
@@ -206,6 +244,8 @@ def setup_logging(log_path: str = None, level: str | int = None) -> logging.Logg
                                                 datefmt="%Y-%m-%d %H:%M:%S"))
     file_handler.handleError = _report_log_failure_once(file_handler, log_path)
     logger.addHandler(file_handler)
+    for handler in logger.handlers:
+        handler.setLevel(logging.NOTSET)
     return logger
 
 
@@ -220,6 +260,8 @@ def print_lg(*msgs: str | dict, end: str = "\n", pretty: bool = False, flush: bo
     unchanged. Everything it emits is INFO (ERROR when `from_critical`). New code that
     genuinely carries a level should call `logger.warning(...)` / `logger.error(...)`.
     '''
+    if not logger.handlers or _console_handler is None or _console_handler not in logger.handlers:
+        setup_logging()
     level = logging.ERROR if from_critical else logging.INFO
     for message in msgs:
         # pformat is exactly what pprint prints, so the console stays character-identical.
@@ -275,21 +317,40 @@ def human_type(target, text: str) -> None:
         if randint(1,40) == 1: buffer(1)
 
 
-def manual_login_retry(is_logged_in: callable, limit: int = 2) -> None:
-    '''
-    Function to ask and validate manual login
-    '''
-    count = 0
+def _supervised_engine() -> bool:
+    return bool(os.environ.get("APPLYXAI_CONTROL_FILE") or os.environ.get("APPLYXAI_RUN_CONFIG"))
+
+
+def manual_login_retry(
+    is_logged_in: callable,
+    limit: int = 2,
+    *,
+    poll_seconds: float = 2.0,
+    max_wait_seconds: float = 600,
+) -> None:
+    '''Wait until the user signs in in the opened Chrome window. No Tk dialogs.'''
+    print_lg("Sign in in the Chrome window that just opened. The run continues after you are logged in.")
+    deadline = datetime.now() + timedelta(seconds=max_wait_seconds)
+    polls = 0
     while not is_logged_in():
-        from pyautogui import alert
-        print_lg("Seems like you're not logged in!")
-        button = "Confirm Login"
-        message = 'After you successfully Log In, please click "{}" button below.'.format(button)
-        if count > limit:
-            button = "Skip Confirmation"
-            message = 'If you\'re seeing this message even after you logged in, Click "{}". Seems like auto login confirmation failed!'.format(button)
-        count += 1
-        if alert(message, "Login Required", button) and count > limit: return
+        if datetime.now() >= deadline:
+            print_lg("Login wait timed out.")
+            return
+        if not _supervised_engine() and polls <= limit:
+            try:
+                from pyautogui import alert
+                button = "Confirm Login" if polls < limit else "Skip Confirmation"
+                alert(
+                    'After you successfully Log In, please click "{}" button below.'.format(button),
+                    "Login Required",
+                    button,
+                )
+                if polls >= limit:
+                    return
+            except Exception:
+                pass
+        polls += 1
+        sleep(poll_seconds)
 
 
 

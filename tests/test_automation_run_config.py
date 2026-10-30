@@ -38,6 +38,12 @@ def test_resume_mode_from_values_goes_to_applyxai_section(tmp_path):
     assert "resume_mode" not in config["search"]
 
 
+def test_education_rows_are_passed_to_applyxai_section(tmp_path):
+    rows = [{"school": "IIT Delhi", "degree": "B.Tech", "field": "Computer Science", "end_year": "2020"}]
+    config = build(tmp_path, applyxai_qa={"education": rows})
+    assert config["applyxai"]["education"] == rows
+
+
 def test_values_are_routed_to_their_engine_sections(tmp_path):
     config = build(tmp_path)
     assert config["personals"]["first_name"] == "Priya" and config["personals"]["current_city"] == "Bengaluru"

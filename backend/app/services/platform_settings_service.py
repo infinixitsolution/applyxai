@@ -19,14 +19,17 @@ from backend.app.core.platform_defaults import (
     DEFAULT_AI,
     DEFAULT_CMS,
     DEFAULT_EMAIL_TEMPLATES,
+    DEFAULT_JOB_SOURCES,
     DEFAULT_LIVE_INTERVIEW,
     DEFAULT_NOTIFICATIONS,
+    DEFAULT_OUTREACH_CAMPAIGN,
     DEFAULT_PAYMENTS,
     PLATFORM_SETTINGS_KEY,
 )
 from backend.app.models import PlatformSettings
 from backend.app.schemas.platform_settings import (
-    AiIn, AuthEmailIn, CmsIn, LiveInterviewSettingsIn, NotificationsIn, PaymentsIn, SmtpIn,
+    AiIn, AuthEmailIn, CmsIn, GstSettingsIn, JobSourcesIn, LiveInterviewSettingsIn, NotificationsIn,
+    OutreachSettingsIn, PaymentsIn, SmtpIn,
 )
 
 logger = logging.getLogger("applyxai.settings")
@@ -116,7 +119,13 @@ class EffectiveAi:
         return bool(self.api_key)
 
     def feature_on(self, name: str) -> bool:
-        return self.enabled and self.configured and bool(self.features.get(name))
+        if not (self.enabled and self.configured):
+            return False
+        if name == "outreach":
+            # Legacy rows saved before outreach existed: follow Application Q&A toggle.
+            if "outreach" not in self.features:
+                return bool(self.features.get("applications", True))
+        return bool(self.features.get(name))
 
 
 @dataclass(frozen=True)
@@ -258,7 +267,10 @@ def get_effective_ai(db: Session | None) -> EffectiveAi:
     if encrypted and not api_key:
         logger.warning("Platform AI API key is stored but could not be decrypted (check SECRET_KEY/JWT_SECRET)")
     models = _deep_merge(dict(DEFAULT_AI["models"]), db_ai.get("models") or {})
-    features = _deep_merge(dict(DEFAULT_AI["features"]), db_ai.get("features") or {})
+    raw_features = db_ai.get("features")
+    if not isinstance(raw_features, dict):
+        raw_features = {}
+    features = _deep_merge(dict(DEFAULT_AI["features"]), raw_features)
     return EffectiveAi(
         enabled=enabled,
         provider=str(db_ai.get("provider") or DEFAULT_AI["provider"]),
@@ -316,6 +328,9 @@ def build_admin_view(db: Session) -> dict:
         "ai": _admin_ai_view(db),
         "payments": _admin_payments_view(db),
         "live_interview": get_live_interview(db),
+        "job_sources": get_job_sources(db),
+        "outreach": get_outreach_admin(db),
+        "gst": get_gst_admin(db),
         "infrastructure": {
             "app_env": settings.APP_ENV,
             "app_version": settings.APP_VERSION,
@@ -367,24 +382,71 @@ def update_auth_email(db: Session, payload: AuthEmailIn) -> dict:
     return build_admin_view(db)["auth_email"]
 
 
+def _merge_mock_interview_voice_admin(db_ai: dict) -> dict:
+    from backend.app.core.platform_defaults import DEFAULT_AI
+
+    base = dict(DEFAULT_AI.get("mock_interview_voice") or {})
+    raw = db_ai.get("mock_interview_voice")
+    if isinstance(raw, dict):
+        for key in ("provider", "elevenlabs_agent_id", "elevenlabs_model_id", "elevenlabs_voice_id"):
+            if raw.get(key) not in (None, ""):
+                base[key] = raw[key]
+    return {
+        "provider": str(base.get("provider") or "elevenlabs"),
+        "elevenlabs_agent_id": str(base.get("elevenlabs_agent_id") or "fA4eSDsx5xNZ1RV7zEu5"),
+        "elevenlabs_model_id": str(base.get("elevenlabs_model_id") or "eleven_multilingual_v2"),
+    }
+
+
+def list_mock_interviews_unlimited_emails(db: Session) -> list[str]:
+    row = _row(db)
+    ai = row.ai if isinstance(getattr(row, "ai", None), dict) else {}
+    raw = ai.get("mock_interviews_unlimited_emails")
+    if not isinstance(raw, list):
+        return []
+    return sorted({str(item).strip().lower() for item in raw if str(item).strip()})
+
+
+def add_mock_interviews_unlimited_email(db: Session, email: str) -> list[str]:
+    normalized = email.strip().lower()
+    if not normalized:
+        raise AppError("VALIDATION_ERROR", "Email is required.", 422)
+    row = _row(db)
+    current = list_mock_interviews_unlimited_emails(db)
+    if normalized not in current:
+        current.append(normalized)
+        current.sort()
+    row.ai = {**(row.ai or {}), "mock_interviews_unlimited_emails": current}
+    invalidate_caches()
+    return current
+
+
 def _admin_ai_view(db: Session) -> dict:
     eff = get_effective_ai(db)
     row = _row(db)
     db_ai = row.ai or {}
+    from backend.app.core.config import settings
     from backend.app.core.platform_defaults import merge_mock_interview_presenter
 
     presenter = merge_mock_interview_presenter(db_ai.get("mock_interview_presenter"))
+    elevenlabs_db = bool(db_ai.get("elevenlabs_api_key_encrypted"))
+    env_eleven = (settings.ELEVENLABS_API_KEY or "").strip()
     return {
         "enabled": eff.enabled,
         "provider": eff.provider,
         "base_url": eff.base_url,
         "api_key_configured": bool(db_ai.get("api_key_encrypted")),
+        "elevenlabs_api_key_configured": elevenlabs_db or bool(env_eleven),
+        "elevenlabs_api_key_source": "database" if elevenlabs_db else ("environment" if env_eleven else "none"),
         "models": eff.models,
         "features": eff.features,
         "ready": eff.enabled and eff.configured,
         "resume_ready": eff.feature_on("resume"),
         "mock_interview_ready": eff.feature_on("mock_interview"),
+        "outreach_ready": eff.feature_on("outreach"),
         "mock_interview_presenter": presenter,
+        "mock_interview_voice": _merge_mock_interview_voice_admin(db_ai),
+        "mock_interviews_unlimited_emails": list_mock_interviews_unlimited_emails(db),
     }
 
 
@@ -406,6 +468,32 @@ def _admin_payments_view(db: Session) -> dict:
     }
 
 
+def get_job_sources(db: Session) -> dict:
+    from backend.app.core.config import get_settings
+
+    row = _row(db)
+    stored = row.job_sources if isinstance(getattr(row, "job_sources", None), dict) else {}
+    merged = {**DEFAULT_JOB_SOURCES, **stored}
+    if get_settings().ENABLE_NAUKRI:
+        merged["naukri"] = True
+    return {"linkedin": bool(merged.get("linkedin")), "naukri": bool(merged.get("naukri"))}
+
+
+def enabled_source_names(db: Session) -> list[str]:
+    flags = get_job_sources(db)
+    return [name for name in ("linkedin", "naukri") if flags[name]]
+
+
+def update_job_sources(db: Session, payload: JobSourcesIn) -> dict:
+    names = payload.enabled_names()
+    if not names:
+        raise AppError("VALIDATION_ERROR", "Turn on at least one job source.", 422)
+    row = _row(db)
+    row.job_sources = {"linkedin": payload.linkedin, "naukri": payload.naukri}
+    invalidate_caches()
+    return get_job_sources(db)
+
+
 def get_live_interview(db: Session) -> dict:
     row = _row(db)
     stored = row.live_interview if isinstance(getattr(row, "live_interview", None), dict) else {}
@@ -418,6 +506,155 @@ def get_live_interview(db: Session) -> dict:
         merged["price_cents"] = 0
     merged["currency"] = "INR"
     return merged
+
+
+def get_effective_elevenlabs_api_key(db: Session | None) -> str:
+    from backend.app.core.config import settings
+
+    if db is not None:
+        row = _row(db)
+        db_ai = row.ai if isinstance(getattr(row, "ai", None), dict) else {}
+        encrypted = db_ai.get("elevenlabs_api_key_encrypted") or ""
+        if encrypted:
+            key = decrypt_secret(encrypted)
+            if key:
+                return key.strip()
+            raise AppError(
+                "CONFIG_ERROR",
+                "The saved ElevenLabs API key could not be decrypted. Re-enter and save it under Admin → Settings → AI "
+                "(this usually means SECRET_KEY or JWT_SECRET changed after the key was saved).",
+                503,
+            )
+    return (settings.ELEVENLABS_API_KEY or "").strip()
+
+
+def get_effective_firecrawl_api_key(db: Session | None) -> str:
+    from backend.app.core.config import settings
+
+    if db is not None:
+        row = _row(db)
+        stored = row.outreach if isinstance(getattr(row, "outreach", None), dict) else {}
+        encrypted = stored.get("firecrawl_api_key_encrypted") or ""
+        if encrypted:
+            key = decrypt_secret(encrypted)
+            if key:
+                return key.strip()
+    return (settings.FIRECRAWL_API_KEY or "").strip()
+
+
+def _normalize_outreach_campaign(raw: dict | None) -> dict:
+    base = dict(DEFAULT_OUTREACH_CAMPAIGN)
+    if isinstance(raw, dict):
+        for key in base:
+            if key in raw and raw[key] is not None:
+                base[key] = raw[key]
+    base["keywords"] = [str(k).strip() for k in (base.get("keywords") or []) if str(k).strip()]
+    base["cities"] = [str(c).strip() for c in (base.get("cities") or []) if str(c).strip()]
+    if not base["keywords"]:
+        base["keywords"] = list(DEFAULT_OUTREACH_CAMPAIGN["keywords"])
+    if not base["cities"]:
+        base["cities"] = list(DEFAULT_OUTREACH_CAMPAIGN["cities"])
+    sources = base.get("sources") or ["google"]
+    base["sources"] = [str(s).strip().lower() for s in sources if str(s).strip()] or ["google"]
+    try:
+        base["max_results"] = int(base.get("max_results") or DEFAULT_OUTREACH_CAMPAIGN["max_results"])
+    except (TypeError, ValueError):
+        base["max_results"] = DEFAULT_OUTREACH_CAMPAIGN["max_results"]
+    base["max_results"] = max(1, min(50, base["max_results"]))
+    try:
+        base["rotation_index"] = max(0, int(base.get("rotation_index") or 0))
+    except (TypeError, ValueError):
+        base["rotation_index"] = 0
+    base["public_listing_attestation"] = bool(base.get("public_listing_attestation"))
+    for key in ("send_interval_min_sec", "send_interval_max_sec"):
+        try:
+            base[key] = int(base.get(key) or DEFAULT_OUTREACH_CAMPAIGN[key])
+        except (TypeError, ValueError):
+            base[key] = DEFAULT_OUTREACH_CAMPAIGN[key]
+    if base["send_interval_max_sec"] < base["send_interval_min_sec"]:
+        base["send_interval_max_sec"] = base["send_interval_min_sec"]
+    return base
+
+
+def get_outreach_campaign(db: Session) -> dict:
+    row = _row(db)
+    stored = row.outreach if isinstance(getattr(row, "outreach", None), dict) else {}
+    return _normalize_outreach_campaign(stored.get("campaign"))
+
+
+def save_outreach_campaign(db: Session, campaign: dict) -> dict:
+    row = _row(db)
+    existing = row.outreach if isinstance(getattr(row, "outreach", None), dict) else {}
+    stored = dict(existing)
+    stored["campaign"] = _normalize_outreach_campaign(campaign)
+    row.outreach = stored
+    invalidate_caches()
+    return stored["campaign"]
+
+
+def get_outreach_admin(db: Session) -> dict:
+    from backend.app.core.config import settings
+
+    row = _row(db)
+    stored = row.outreach if isinstance(getattr(row, "outreach", None), dict) else {}
+    env_key = (settings.FIRECRAWL_API_KEY or "").strip()
+    db_configured = bool(stored.get("firecrawl_api_key_encrypted"))
+    provider = str(stored.get("whatsapp_provider") or "bridge").strip().lower()
+    if provider not in ("bridge", "cloud"):
+        provider = "bridge"
+    from backend.app.services import whatsapp_cloud_client
+    return {
+        "firecrawl_api_key_configured": db_configured or bool(env_key),
+        "source": "database" if db_configured else ("environment" if env_key else "none"),
+        "campaign": get_outreach_campaign(db),
+        "automation_enabled": settings.OUTREACH_AUTOMATION_ENABLED,
+        "whatsapp_provider": provider,
+        "whatsapp_cloud_configured": whatsapp_cloud_client.configured(),
+    }
+
+
+def update_outreach(db: Session, payload: OutreachSettingsIn) -> dict:
+    if payload.firecrawl_api_key and _fernet() is None:
+        raise AppError("CONFIG_ERROR", "Set SECRET_KEY or JWT_SECRET (32+ chars) before saving API keys.", 503)
+    row = _row(db)
+    existing = row.outreach if isinstance(getattr(row, "outreach", None), dict) else {}
+    stored = dict(existing)
+    if payload.firecrawl_api_key:
+        stored["firecrawl_api_key_encrypted"] = encrypt_secret(payload.firecrawl_api_key.strip())
+    elif existing.get("firecrawl_api_key_encrypted"):
+        stored["firecrawl_api_key_encrypted"] = existing["firecrawl_api_key_encrypted"]
+    if payload.campaign is not None:
+        current = _normalize_outreach_campaign(stored.get("campaign"))
+        incoming = payload.campaign.model_dump()
+        for key, value in incoming.items():
+            current[key] = value
+        stored["campaign"] = _normalize_outreach_campaign(current)
+    if payload.whatsapp_provider:
+        stored["whatsapp_provider"] = payload.whatsapp_provider
+    row.outreach = stored
+    invalidate_caches()
+    return get_outreach_admin(db)
+
+
+def get_gst_admin(db: Session) -> dict:
+    from backend.app.services import gst_service
+
+    row = _row(db)
+    stored = row.gst if isinstance(getattr(row, "gst", None), dict) else {}
+    return gst_service.gst_admin_view(stored)
+
+
+def update_gst(db: Session, payload: GstSettingsIn) -> dict:
+    from backend.app.services import gst_service
+
+    row = _row(db)
+    existing = row.gst if isinstance(getattr(row, "gst", None), dict) else {}
+    merged = {**existing, **payload.model_dump()}
+    normalized = gst_service.normalize_gst_settings(merged, strict=True)
+    gst_service.validate_gst_settings_for_enable(normalized)
+    row.gst = normalized
+    invalidate_caches()
+    return get_gst_admin(db)
 
 
 def update_live_interview(db: Session, payload: LiveInterviewSettingsIn) -> dict:
@@ -474,7 +711,7 @@ def update_payments(db: Session, payload: PaymentsIn) -> dict:
 
 
 def update_ai(db: Session, payload: AiIn) -> dict:
-    if payload.api_key and _fernet() is None:
+    if (payload.api_key or payload.elevenlabs_api_key) and _fernet() is None:
         raise AppError("CONFIG_ERROR", "Set SECRET_KEY or JWT_SECRET (32+ chars) before saving AI API keys.", 503)
     row = _row(db)
     existing = row.ai or {}
@@ -489,6 +726,10 @@ def update_ai(db: Session, payload: AiIn) -> dict:
         stored["api_key_encrypted"] = encrypt_secret(payload.api_key)
     elif existing.get("api_key_encrypted"):
         stored["api_key_encrypted"] = existing["api_key_encrypted"]
+    if payload.elevenlabs_api_key:
+        stored["elevenlabs_api_key_encrypted"] = encrypt_secret(payload.elevenlabs_api_key.strip())
+    elif existing.get("elevenlabs_api_key_encrypted"):
+        stored["elevenlabs_api_key_encrypted"] = existing["elevenlabs_api_key_encrypted"]
     from backend.app.core.platform_defaults import DEFAULT_AI
 
     if payload.mock_interview_presenter is not None:
@@ -497,8 +738,18 @@ def update_ai(db: Session, payload: AiIn) -> dict:
         stored["mock_interview_presenter"] = existing["mock_interview_presenter"]
     else:
         stored["mock_interview_presenter"] = dict(DEFAULT_AI.get("mock_interview_presenter") or {})
-    if isinstance(existing.get("mock_interview_voice"), dict):
+    if payload.mock_interview_voice is not None:
+        prior = existing.get("mock_interview_voice") if isinstance(existing.get("mock_interview_voice"), dict) else {}
+        stored["mock_interview_voice"] = {**prior, **payload.mock_interview_voice.model_dump()}
+    elif isinstance(existing.get("mock_interview_voice"), dict):
         stored["mock_interview_voice"] = existing["mock_interview_voice"]
+    else:
+        stored["mock_interview_voice"] = dict(DEFAULT_AI.get("mock_interview_voice") or {})
+    prior_unlimited = existing.get("mock_interviews_unlimited_emails")
+    if isinstance(prior_unlimited, list):
+        stored["mock_interviews_unlimited_emails"] = prior_unlimited
+    else:
+        stored["mock_interviews_unlimited_emails"] = list(DEFAULT_AI.get("mock_interviews_unlimited_emails") or [])
     row.ai = stored
     invalidate_caches()
     return _admin_ai_view(db)

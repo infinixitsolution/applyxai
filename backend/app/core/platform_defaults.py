@@ -2,6 +2,28 @@
 
 PLATFORM_SETTINGS_KEY = "default"
 
+DEFAULT_JOB_SOURCES: dict = {
+    "linkedin": True,
+    "naukri": True,
+}
+
+DEFAULT_OUTREACH: dict = {
+    "whatsapp_provider": "bridge",  # bridge | cloud
+}
+
+DEFAULT_OUTREACH_CAMPAIGN: dict = {
+    "keywords": ["IT training institute"],
+    "cities": ["Bangalore"],
+    "sources": ["google"],
+    "max_results": 10,
+    "rotation_index": 0,
+    "public_listing_attestation": False,
+    "last_outreach_send_at": None,
+    "next_outreach_send_at": None,
+    "send_interval_min_sec": 60,
+    "send_interval_max_sec": 120,
+}
+
 DEFAULT_LIVE_INTERVIEW: dict = {
     "enabled": True,
     "display_name": "Live interview",
@@ -23,7 +45,7 @@ DEFAULT_CMS: dict = {
         "hero_subtitle": "Set preferences once. Tailor when you want. Track every application.",
         "hero_cta_primary": "Start applying free",
         "hero_cta_secondary": "See how it works",
-        "hero_footnote": "LinkedIn only today. You sign in locally — we never see your password.",
+        "hero_footnote": "You sign in locally — we never store your job-site password.",
         "features_heading": "Everything for a focused LinkedIn search",
         "features": [
             {"icon": "sliders", "title": "Precise job preferences", "text": "Pick titles, locations, experience levels, job types, and work settings with the same filters LinkedIn uses."},
@@ -45,8 +67,8 @@ DEFAULT_CMS: dict = {
         "faq_heading": "Frequently asked questions",
         "faq": [
             {"question": "Does ApplyXAI guarantee interviews or a job?", "answer": "No. ApplyXAI saves you time on repetitive applications. Whether you hear back depends on employers, your profile, and the roles you choose."},
-            {"question": "Which job sites are supported?", "answer": "LinkedIn Easy Apply only. Jobs that redirect to an external site are saved in your history so you can finish them manually."},
-            {"question": "Do you store my LinkedIn password?", "answer": "No. Automation runs in Chrome on your computer. You sign in to LinkedIn there; ApplyXAI never receives your password or OTP codes."},
+            {"question": "Which job sites are supported?", "answer": "LinkedIn Easy Apply, and Naukri on-site Apply when an administrator turns Naukri on. Jobs that redirect to a company site are saved in your history so you can finish them manually."},
+            {"question": "Do you store my LinkedIn password?", "answer": "No. Automation runs in Chrome on your computer. You sign in to LinkedIn or Naukri there; ApplyXAI never receives your password or OTP codes."},
             {"question": "Is automated applying allowed on LinkedIn?", "answer": "LinkedIn's terms restrict some automated activity. You are responsible for compliant use — review submissions and keep volume reasonable."},
             {"question": "Can I cancel at any time?", "answer": "Yes. Paid plans can be cancelled at any time and stay active until the end of the billing period. See our refund policy for details."},
         ],
@@ -278,6 +300,80 @@ DEFAULT_EMAIL_TEMPLATES: dict = {
             ),
             "html": "",
         },
+        "institute_student_credentials": {
+            "subject": "{institute_name} added you to {app_name}",
+            "body": (
+                "{institute_name} enrolled you on {app_name} with a campus seat.\n\n"
+                "Sign in with these credentials:\n"
+                "Email: {email}\n"
+                "Password: {password}\n\n"
+                "Log in here:\n{link}\n\n"
+                "Your subscription and billing are managed by {institute_name}. "
+                "Change your password after you sign in (Settings or Forgot password)."
+            ),
+            "html": "",
+        },
+        "institute_student_enrolled": {
+            "subject": "{institute_name} enrolled you on {app_name}",
+            "body": (
+                "{institute_name} enrolled you on {app_name} with a campus seat.\n\n"
+                "Sign in with your existing {app_name} password:\n{link}\n\n"
+                "While you are on this campus seat, your plan and billing are managed by "
+                "{institute_name}. If they release you, campus billing ends and you will need a personal plan to apply."
+            ),
+            "html": "",
+        },
+        "institute_student_released": {
+            "subject": "Your {app_name} campus package ended",
+            "body": (
+                "{institute_name} released you from their campus on {app_name}. "
+                "You are no longer bound to that institute, and the campus package assigned to you is cancelled.\n\n"
+                "Personal billing is now open. Buy a candidate plan to keep applying:\n{link}\n\n"
+                "Until you subscribe, you stay on the Free plan."
+            ),
+            "html": "",
+        },
+        "institute_proposal": {
+            "subject": "ApplyXAI Campus partnership for {institute_name}",
+            "body": (
+                "Hi {contact_name},\n\n"
+                "I'm reaching out from ApplyXAI.\n\n"
+                "We partner with institutes like {institute_name} to help students become more job-ready through "
+                "AI-powered job applications, interview preparation, and career support.\n\n"
+                "With ApplyXAI, your students can get support with:\n"
+                "• AI-assisted job applications\n"
+                "• Resume and profile optimization\n"
+                "• Interview preparation and coaching\n"
+                "• Application and career progress tracking\n\n"
+                "We would love to explore a Campus Partnership with {institute_name} and show you how ApplyXAI can "
+                "support your students' placement journey.\n\n"
+                "Create your institute account (takes a few minutes):\n{link}\n\n"
+                "Reply to this email if you would like a short demo.\n\n"
+                "If you prefer not to hear from us, reply with \"unsubscribe\".\n\n"
+                "— Team ApplyXAI"
+            ),
+            "html": (
+                '<p style="margin-top:24px"><img src="{proposal_image_url}" alt="ApplyXAI Campus Partnership" '
+                'style="max-width:100%;height:auto;border-radius:12px" /></p>'
+            ),
+            "whatsapp": (
+                "Hi {contact_name} 👋\n\n"
+                "I'm reaching out from ApplyXAI.\n\n"
+                "We partner with institutes like {institute_name} to help students become more job-ready through "
+                "AI-powered job applications, interview preparation, and career support.\n\n"
+                "With ApplyXAI, your students can get support with:\n"
+                "• AI-assisted job applications\n"
+                "• Resume and profile optimization\n"
+                "• Interview preparation & coaching\n"
+                "• Application and career progress tracking\n\n"
+                "We'd love to explore a Campus Partnership with {institute_name} and show you how ApplyXAI can "
+                "support your students' placement journey.\n\n"
+                "Interested in learning more?\n\n"
+                "👉 Create your Institute Account: {link}\n\n"
+                "It only takes a few minutes to get started.\n\n"
+                "— Team ApplyXAI"
+            ),
+        },
     },
     "events": {
         "run_finished": {
@@ -402,6 +498,27 @@ DEFAULT_PAYMENTS: dict = {
     "key_id": "",
 }
 
+DEFAULT_GST: dict = {
+    "enabled": False,
+    "legal_name": "",
+    "trade_name": "",
+    "address_line1": "",
+    "address_line2": "",
+    "city": "",
+    "state": "",
+    "state_code": "",
+    "pin": "",
+    "country": "India",
+    "gstin": "",
+    "pan": "",
+    "sac_code": "998313",
+    "rate_percent": 18.0,
+    "pricing_tax_exclusive": True,
+    "invoice_prefix": "AXAI",
+    "invoice_next_number": 1,
+    "invoice_footer_note": "",
+}
+
 DEFAULT_AI: dict = {
     "enabled": False,
     "provider": "openai",
@@ -411,7 +528,13 @@ DEFAULT_AI: dict = {
         "strong": "gpt-4o",
         "embedding": "text-embedding-3-small",
     },
-    "features": {"applications": True, "resume": True, "mock_interview": True},
+    "features": {
+        "applications": True,
+        "resume": True,
+        "mock_interview": True,
+        "profile_sync": True,
+        "outreach": True,
+    },
     "mock_interview_presenter": {
         "mode": "digital_human_3d",
         "image_url": "/interviewer-portrait.png",
@@ -420,7 +543,12 @@ DEFAULT_AI: dict = {
         "supports_barge_in": True,
         "supports_replay": True,
     },
+    # Admin/CLI: accounts with unlimited mock interviews (plan mock cap ignored).
+    "mock_interviews_unlimited_emails": [],
     "mock_interview_voice": {
+        "provider": "elevenlabs",
+        "elevenlabs_agent_id": "fA4eSDsx5xNZ1RV7zEu5",
+        "elevenlabs_model_id": "eleven_multilingual_v2",
         "model": "gpt-4o-mini-tts",
         "fallback_model": "tts-1-hd",
         "last_resort_model": "tts-1",

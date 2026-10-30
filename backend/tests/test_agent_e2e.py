@@ -71,6 +71,9 @@ class AgentHttp:
         self._client = TestClient(app)
 
     def request(self, method, url, timeout=None, **kwargs):
+        kwargs.pop("verify", None)
+        if timeout is not None:
+            kwargs.pop("timeout", None)
         return self._client.request(method, url, **kwargs)
 
 

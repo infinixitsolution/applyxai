@@ -3,19 +3,31 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Spinner } from "./components/ui";
 import { GuestOnly, RequireAdmin, RequireAuth, RequireInstitute, RequireOnboarded, RequirePartner } from "./auth/session";
 import { AppShell } from "./layouts/AppShell";
+import { DesktopPublicIndex, DesktopPublicLayout } from "./layouts/DesktopPublicLayout";
 import { PublicLayout } from "./layouts/PublicLayout";
+import { isDesktopApp } from "./lib/desktop";
 import { AdminCompanyPage } from "./pages/admin/Company";
-import { AdminApplicationsPage, AdminCompaniesPage, AdminRunsPage, AdminSubscriptionsPage } from "./pages/admin/Lists";
+import { AdminApplicationsPage, AdminCompaniesPage, AdminPaymentsPage, AdminRunsPage, AdminSubscriptionsPage } from "./pages/admin/Lists";
 import { AdminOverviewPage } from "./pages/admin/Overview";
 import { AdminPlansPage } from "./pages/admin/Plans";
 import { AdminSystemPage } from "./pages/admin/System";
 import { AdminInstitutePage, AdminInstitutesPage, AdminPartnerPage, AdminPartnersPage } from "./pages/admin/Orgs";
+import {
+  AdminOutreachLeadDetailPage,
+  AdminOutreachLeadsPage,
+  AdminOutreachPage,
+  AdminOutreachScrapePage,
+  AdminOutreachWhatsappPage,
+  AdminOutreachWhatsappChatPage,
+  AdminOutreachTemplatesPage,
+} from "./pages/admin/Outreach";
 import { AdminUserPage, AdminUsersPage } from "./pages/admin/Users";
 import { AdminUserLiveInterviewPage } from "./pages/admin/UserCandidate";
 import {
   InstituteDashboardPage, InstituteInvitationsPage, InstituteProfilePage, InstituteReportsPage,
   InstituteSeatsPage, InstituteSettingsPage, InstituteStudentsPage, InstituteSubscriptionPage,
 } from "./pages/institute/Pages";
+import { InstituteStudentPage } from "./pages/institute/Student";
 import {
   PartnerCampaignsPage, PartnerCommissionsPage, PartnerDashboardPage, PartnerInstitutesPage,
   PartnerKycPage, PartnerLinksPage, PartnerMarketingPage, PartnerPayoutsPage, PartnerProfilePage,
@@ -28,6 +40,8 @@ import { ApplicationsPage } from "./pages/app/Applications";
 import { AgentConnectPage } from "./pages/app/AgentConnect";
 import { AutomationPage } from "./pages/app/Automation";
 import { BillingPage } from "./pages/app/Billing";
+import { PaymentHistoryPage } from "./pages/app/PaymentHistory";
+import { LiveInterviewCoachOverlayPage } from "./pages/app/LiveInterviewCoachOverlay";
 import { LiveInterviewReportPage, LiveInterviewsPage } from "./pages/app/LiveInterviews";
 import { SupportPage } from "./pages/app/Support";
 import { AdminSupportPage } from "./pages/admin/Support";
@@ -57,7 +71,15 @@ function MockInterviewRoute({ children }: { children: ReactNode }) {
   );
 }
 import {
-  NotFoundPage, NotificationsPage, PreferencesPage, ProfilePage, ResumesPage, SettingsPage,
+  AutomationSettingsPage,
+  CustomQuestionsPage,
+  JobLoginsPage,
+  JobSearchPreferencesPage,
+  NotFoundPage,
+  NotificationsPage,
+  ProfilePage,
+  ResumesPage,
+  SettingsPage,
 } from "./pages/app/Pages";
 import {
   CheckEmailPage, ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, VerifyEmailPage,
@@ -84,26 +106,51 @@ export function App() {
     <>
     <ScrollToTop />
     <Routes>
-      <Route element={<PublicLayout />}>
-        <Route index element={<LandingPage />} />
-        <Route path="login" element={<GuestOnly><LoginPage /></GuestOnly>} />
-        <Route path="register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
-        <Route path="register/institute" element={<GuestOnly><InstituteRegisterPage /></GuestOnly>} />
-        <Route path="register/partner" element={<GuestOnly><PartnerRegisterPage /></GuestOnly>} />
-        <Route path="r/:code" element={<ReferralPage />} />
-        <Route path="invite/:token" element={<InvitePage />} />
-        <Route path="check-email" element={<CheckEmailPage />} />
-        <Route path="verify-email" element={<VerifyEmailPage />} />
-        <Route path="forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="reset-password" element={<ResetPasswordPage />} />
-        <Route path="privacy" element={<PrivacyPage />} />
-        <Route path="terms" element={<TermsPage />} />
-        <Route path="refund-policy" element={<RefundPage />} />
-        <Route path="pricing" element={<Navigate to="/#pricing" replace />} />
-        <Route path="*" element={<NotFoundPage />} />
-      </Route>
+      {isDesktopApp ? (
+        <Route element={<DesktopPublicLayout />}>
+          <Route index element={<DesktopPublicIndex />} />
+          <Route path="login" element={<GuestOnly><LoginPage /></GuestOnly>} />
+          <Route path="register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
+          <Route path="invite/:token" element={<InvitePage />} />
+          <Route path="check-email" element={<CheckEmailPage />} />
+          <Route path="verify-email" element={<VerifyEmailPage />} />
+          <Route path="forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="reset-password" element={<ResetPasswordPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Route>
+      ) : (
+        <Route element={<PublicLayout />}>
+          <Route index element={<LandingPage />} />
+          <Route path="login" element={<GuestOnly><LoginPage /></GuestOnly>} />
+          <Route path="register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
+          <Route path="register/institute" element={<GuestOnly><InstituteRegisterPage /></GuestOnly>} />
+          <Route path="register/partner" element={<GuestOnly><PartnerRegisterPage /></GuestOnly>} />
+          <Route path="r/:code" element={<ReferralPage />} />
+          <Route path="invite/:token" element={<InvitePage />} />
+          <Route path="check-email" element={<CheckEmailPage />} />
+          <Route path="verify-email" element={<VerifyEmailPage />} />
+          <Route path="forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="reset-password" element={<ResetPasswordPage />} />
+          <Route path="privacy" element={<PrivacyPage />} />
+          <Route path="terms" element={<TermsPage />} />
+          <Route path="refund-policy" element={<RefundPage />} />
+          <Route path="pricing" element={<Navigate to="/#pricing" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Route>
+      )}
 
       <Route path="onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+
+      <Route
+        path="app/live-interview-coach"
+        element={
+          <RequireAuth>
+            <RequireOnboarded>
+              <LiveInterviewCoachOverlayPage />
+            </RequireOnboarded>
+          </RequireAuth>
+        }
+      />
 
       <Route path="app" element={<RequireAuth><RequireOnboarded><AppShell /></RequireOnboarded></RequireAuth>}>
         <Route index element={<DashboardPage />} />
@@ -134,11 +181,16 @@ export function App() {
           }
         />
         <Route path="automation" element={<AutomationPage />} />
+        <Route path="job-logins" element={<JobLoginsPage />} />
         <Route path="automation/connect" element={<AgentConnectPage />} />
         <Route path="resumes" element={<ResumesPage />} />
-        <Route path="preferences" element={<PreferencesPage />} />
+        <Route path="preferences" element={<Navigate to="/app/questions" replace />} />
+        <Route path="questions" element={<CustomQuestionsPage />} />
         <Route path="profile" element={<ProfilePage />} />
+        <Route path="settings/automation" element={<AutomationSettingsPage />} />
+        <Route path="automation/search" element={<JobSearchPreferencesPage />} />
         <Route path="billing" element={<BillingPage />} />
+        <Route path="payment-history" element={<PaymentHistoryPage />} />
         <Route path="support" element={<SupportPage />} />
         <Route path="live-interviews" element={<LiveInterviewsPage />} />
         <Route path="live-interviews/:id/report" element={<LiveInterviewReportPage />} />
@@ -154,9 +206,18 @@ export function App() {
         <Route path="users/:id/live-interviews/:sessionId" element={<AdminUserLiveInterviewPage />} />
         <Route path="institutes" element={<AdminInstitutesPage />} />
         <Route path="institutes/:id" element={<AdminInstitutePage />} />
+        <Route path="outreach" element={<AdminOutreachPage />} />
+        <Route path="outreach/scrape" element={<AdminOutreachScrapePage />} />
+        <Route path="outreach/leads" element={<AdminOutreachLeadsPage />} />
+        <Route path="outreach/leads/:id" element={<AdminOutreachLeadDetailPage />} />
+        <Route path="outreach/whatsapp" element={<AdminOutreachWhatsappPage />} />
+        <Route path="outreach/chat" element={<AdminOutreachWhatsappChatPage />} />
+        <Route path="outreach/chat/:leadId" element={<AdminOutreachWhatsappChatPage />} />
+        <Route path="outreach/templates" element={<AdminOutreachTemplatesPage />} />
         <Route path="partners" element={<AdminPartnersPage />} />
         <Route path="partners/:id" element={<AdminPartnerPage />} />
         <Route path="subscriptions" element={<AdminSubscriptionsPage />} />
+        <Route path="payments" element={<AdminPaymentsPage />} />
         <Route path="runs" element={<AdminRunsPage />} />
         <Route path="applications" element={<AdminApplicationsPage />} />
         <Route path="companies" element={<AdminCompaniesPage />} />
@@ -170,6 +231,7 @@ export function App() {
       <Route path="institute" element={<RequireAuth><RequireInstitute><AppShell variant="institute" /></RequireInstitute></RequireAuth>}>
         <Route index element={<InstituteDashboardPage />} />
         <Route path="students" element={<InstituteStudentsPage />} />
+        <Route path="students/:id" element={<InstituteStudentPage />} />
         <Route path="invitations" element={<InstituteInvitationsPage />} />
         <Route path="seats" element={<InstituteSeatsPage />} />
         <Route path="subscription" element={<InstituteSubscriptionPage />} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isDesktop } from "../lib/desktop";
 import { stopInterviewerAudio } from "./interviewerMotion";
 import { type FetchInterviewerTts, playInterviewerSpeech } from "./mockInterviewSpeech";
 export type VoicePhase = "idle" | "listening" | "processing" | "speaking" | "unsupported";
@@ -28,6 +29,9 @@ const UTTERANCE_PAUSE_MS = 1600;
 /** Extra wait when we only have a tiny fragment (browser split an answer early). */
 const SHORT_FRAGMENT_PAUSE_MS = 2800;
 const MIN_COMFORTABLE_CHARS = 28;
+const TTS_PLAYBACK_TIMEOUT_MS = 90_000;
+/** RMS-ish level from frequency bins — speech vs room noise. */
+const VAD_VOICE_THRESHOLD = 0.08;
 
 export function useMockInterviewVoice(options: {
   onTranscript: (text: string) => Promise<void>;
@@ -38,7 +42,10 @@ export function useMockInterviewVoice(options: {
   disabled?: boolean;
   /** Hands-free: listen continuously and send after you pause speaking. */
   continuous?: boolean;
+  /** ApplyXAI Desktop: skip flaky Web Speech; use mic VAD + server Whisper. */
+  preferServerStt?: boolean;
 }) {
+  const preferServerStt = options.preferServerStt ?? isDesktop;
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [interim, setInterim] = useState("");
   const [liveMode, setLiveMode] = useState(false);
@@ -75,17 +82,29 @@ export function useMockInterviewVoice(options: {
   const bargeRafRef = useRef(0);
   const bargeLoudMsRef = useRef(0);
   const bargeInEnabledRef = useRef(options.bargeInEnabled !== false);
+  const preferServerSttRef = useRef(preferServerStt);
+  const serverVadRef = useRef(false);
+  const vadRafRef = useRef(0);
+  const vadAnalyserRef = useRef<AnalyserNode | null>(null);
+  const vadCtxRef = useRef<AudioContext | null>(null);
+  const vadHadSpeechRef = useRef(false);
+  const vadLastVoiceAtRef = useRef(0);
+  const vadSegmentChunksRef = useRef<Blob[]>([]);
+  const vadTranscribingRef = useRef(false);
 
   useEffect(() => {
     onTranscriptRef.current = options.onTranscript;
     disabledRef.current = options.disabled;
     transcribeRef.current = options.transcribe;
     bargeInEnabledRef.current = options.bargeInEnabled !== false;
-  }, [options.onTranscript, options.disabled, options.transcribe, options.bargeInEnabled]);
+    preferServerSttRef.current = options.preferServerStt ?? isDesktop;
+  }, [options.onTranscript, options.disabled, options.transcribe, options.bargeInEnabled, options.preferServerStt]);
 
   useEffect(() => {
-    setSpeechSupported(Boolean(speechRecognitionCtor()) || Boolean(options.transcribe));
-  }, [options.transcribe]);
+    const browserOk = Boolean(speechRecognitionCtor());
+    const serverOk = Boolean(options.transcribe);
+    setSpeechSupported(preferServerStt ? serverOk : browserOk || serverOk);
+  }, [options.transcribe, preferServerStt]);
 
   const clearDebounce = useCallback(() => {
     if (debounceRef.current) {
@@ -102,6 +121,15 @@ export function useMockInterviewVoice(options: {
     }
     bargeAnalyserRef.current = null;
     bargeLoudMsRef.current = 0;
+  }, []);
+
+  const stopServerVadMonitor = useCallback(() => {
+    if (vadRafRef.current) {
+      cancelAnimationFrame(vadRafRef.current);
+      vadRafRef.current = 0;
+    }
+    vadAnalyserRef.current = null;
+    vadHadSpeechRef.current = false;
   }, []);
 
   const stopSpeaking = useCallback(() => {
@@ -175,7 +203,26 @@ export function useMockInterviewVoice(options: {
     return merged;
   }, []);
 
+  const transcribeBlob = useCallback(async (blob: Blob, _mimeType: string): Promise<string> => {
+    const transcribe = transcribeRef.current;
+    if (!transcribe || blob.size < 800) return "";
+    try {
+      return (await transcribe(blob)).trim();
+    } catch {
+      return "";
+    }
+  }, []);
+
   const stopServerRecording = useCallback(async (): Promise<string> => {
+    if (serverVadRef.current) {
+      const chunks = [...vadSegmentChunksRef.current, ...recorderChunksRef.current];
+      vadSegmentChunksRef.current = [];
+      recorderChunksRef.current = [];
+      const rec = recorderRef.current;
+      const mime = rec?.mimeType || "audio/webm";
+      if (!chunks.length) return "";
+      return transcribeBlob(new Blob(chunks, { type: mime }), mime);
+    }
     const rec = recorderRef.current;
     if (!rec || rec.state === "inactive") return "";
     return new Promise((resolve) => {
@@ -186,16 +233,7 @@ export function useMockInterviewVoice(options: {
         stream?.getTracks().forEach((t) => t.stop());
         const blob = new Blob(recorderChunksRef.current, { type: rec.mimeType || "audio/webm" });
         recorderChunksRef.current = [];
-        const transcribe = transcribeRef.current;
-        if (!transcribe || blob.size < 800) {
-          resolve("");
-          return;
-        }
-        try {
-          resolve((await transcribe(blob)).trim());
-        } catch {
-          resolve("");
-        }
+        resolve(await transcribeBlob(blob, rec.mimeType || "audio/webm"));
       };
       try {
         rec.stop();
@@ -203,7 +241,7 @@ export function useMockInterviewVoice(options: {
         resolve("");
       }
     });
-  }, []);
+  }, [transcribeBlob]);
 
   const flushUtterance = useCallback(async () => {
     clearDebounce();
@@ -277,9 +315,119 @@ export function useMockInterviewVoice(options: {
   const scheduleListenRef = useRef<() => void>(() => {});
   const beginListeningRef = useRef<() => void>(() => {});
 
+  const finalizeVadSegment = useCallback(async () => {
+    if (vadTranscribingRef.current || disabledRef.current || processingRef.current || speakingRef.current) return;
+    const chunks = vadSegmentChunksRef.current;
+    if (!chunks.length) return;
+    vadSegmentChunksRef.current = [];
+    const rec = recorderRef.current;
+    const mime = rec?.mimeType || "audio/webm";
+    vadTranscribingRef.current = true;
+    try {
+      const text = await transcribeBlob(new Blob(chunks, { type: mime }), mime);
+      if (text) {
+        utteranceBufferRef.current = `${utteranceBufferRef.current} ${text}`.trim();
+        setInterim(utteranceBufferRef.current);
+        const shortBurst = utteranceBufferRef.current.length < MIN_COMFORTABLE_CHARS;
+        scheduleEndOfTurnRef.current(shortBurst);
+      }
+    } finally {
+      vadTranscribingRef.current = false;
+    }
+  }, [transcribeBlob]);
+
+  const beginServerVadListening = useCallback(() => {
+    const transcribe = transcribeRef.current;
+    if (!transcribe || !navigator.mediaDevices?.getUserMedia) {
+      setPhase("unsupported");
+      setSpeechSupported(false);
+      return;
+    }
+    stopSpeaking();
+    stopServerVadMonitor();
+    serverSttRef.current = true;
+    serverVadRef.current = true;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    if (!utteranceBufferRef.current) {
+      resultIndexRef.current = 0;
+    }
+    latestInterimRef.current = "";
+    setInterim(utteranceBufferRef.current || "Listening… pause when you finish your answer.");
+    setPhase("listening");
+
+    void (async () => {
+      try {
+        let stream = recorderStreamRef.current;
+        if (!stream || stream.getTracks().every((t) => t.readyState === "ended")) {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recorderStreamRef.current = stream;
+        }
+        if (!recorderRef.current || recorderRef.current.state === "inactive") {
+          vadSegmentChunksRef.current = [];
+          recorderChunksRef.current = [];
+          const rec = new MediaRecorder(stream);
+          recorderRef.current = rec;
+          rec.ondataavailable = (ev) => {
+            if (ev.data.size <= 0) return;
+            recorderChunksRef.current.push(ev.data);
+            vadSegmentChunksRef.current.push(ev.data);
+          };
+          rec.start(250);
+        }
+        const ctx = vadCtxRef.current ?? new AudioContext();
+        vadCtxRef.current = ctx;
+        await ctx.resume();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.65;
+        source.connect(analyser);
+        vadAnalyserRef.current = analyser;
+
+        const tick = () => {
+          if (!liveRef.current || !serverVadRef.current || micPausedRef.current) {
+            stopServerVadMonitor();
+            return;
+          }
+          if (processingRef.current || speakingRef.current) {
+            vadRafRef.current = requestAnimationFrame(tick);
+            return;
+          }
+          const node = vadAnalyserRef.current;
+          if (!node) return;
+          const buf = new Uint8Array(node.frequencyBinCount);
+          node.getByteFrequencyData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i += 1) sum += buf[i];
+          const level = sum / buf.length / 255;
+          const now = Date.now();
+          if (level > VAD_VOICE_THRESHOLD) {
+            vadHadSpeechRef.current = true;
+            vadLastVoiceAtRef.current = now;
+            setAwaitingSilence(false);
+          } else if (vadHadSpeechRef.current && now - vadLastVoiceAtRef.current >= UTTERANCE_PAUSE_MS) {
+            vadHadSpeechRef.current = false;
+            void finalizeVadSegment();
+          }
+          vadRafRef.current = requestAnimationFrame(tick);
+        };
+        vadRafRef.current = requestAnimationFrame(tick);
+      } catch {
+        setPhase("unsupported");
+        setSpeechSupported(false);
+      }
+    })();
+  }, [finalizeVadSegment, stopServerVadMonitor, stopSpeaking]);
+
   const beginListening = useCallback(() => {
     if (disabledRef.current || processingRef.current || speakingRef.current || micPausedRef.current) return;
     if (!liveRef.current) return;
+
+    if (preferServerSttRef.current && transcribeRef.current) {
+      beginServerVadListening();
+      return;
+    }
 
     const Ctor = speechRecognitionCtor();
     if (!Ctor) {
@@ -314,6 +462,8 @@ export function useMockInterviewVoice(options: {
     }
 
     serverSttRef.current = false;
+    serverVadRef.current = false;
+    stopServerVadMonitor();
     stopSpeaking();
     recognitionRef.current?.abort();
     if (!utteranceBufferRef.current) {
@@ -384,7 +534,7 @@ export function useMockInterviewVoice(options: {
     } catch {
       setTimeout(() => scheduleListenRef.current(), 500);
     }
-  }, [scheduleEndOfTurn, stopSpeaking]);
+  }, [beginServerVadListening, scheduleEndOfTurn, stopServerVadMonitor, stopSpeaking]);
 
   scheduleListenRef.current = beginListening;
   beginListeningRef.current = beginListening;
@@ -415,16 +565,21 @@ export function useMockInterviewVoice(options: {
     bargeStreamRef.current?.getTracks().forEach((t) => t.stop());
     bargeStreamRef.current = null;
     stopBargeInMonitor();
+    stopServerVadMonitor();
     void bargeCtxRef.current?.close();
     bargeCtxRef.current = null;
+    void vadCtxRef.current?.close();
+    vadCtxRef.current = null;
     serverSttRef.current = false;
+    serverVadRef.current = false;
+    vadSegmentChunksRef.current = [];
     recognitionRef.current?.abort();
     recognitionRef.current = null;
     utteranceBufferRef.current = "";
     latestInterimRef.current = "";
     setInterim("");
     if (!processingRef.current && !speakingRef.current) setPhase("idle");
-  }, [clearDebounce, stopBargeInMonitor]);
+  }, [clearDebounce, stopBargeInMonitor, stopServerVadMonitor]);
 
   useEffect(() => () => stopLiveMode(), [stopLiveMode]);
 
@@ -471,8 +626,15 @@ export function useMockInterviewVoice(options: {
       setTtsBuffering(true);
       if (liveRef.current && !micPausedRef.current) startBargeInMonitor();
       try {
-        await playInterviewerSpeech(text, audioBase64, mime, fetchTtsRef.current, messageId);
+        await Promise.race([
+          playInterviewerSpeech(text, audioBase64, mime, fetchTtsRef.current, messageId),
+          new Promise<void>((_, reject) => {
+            setTimeout(() => reject(new Error("TTS playback timed out")), TTS_PLAYBACK_TIMEOUT_MS);
+          }),
+        ]);
         if (seq === speakSeqRef.current) lastSpeakKeyRef.current = key;
+      } catch {
+        stopSpeaking();
       } finally {
         setTtsBuffering(false);
         stopBargeInMonitor();

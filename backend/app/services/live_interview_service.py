@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,14 +21,75 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+LIVE_INTERVIEW_MAX_ACTIVE_HOURS = 1
+
+
 def _candidate_name(user: User) -> str:
     name = f"{user.first_name} {user.last_name}".strip()
     return name or "I"
 
 
+def _master_profile_snippet(profile: UserProfile | None) -> str:
+    if profile is None:
+        return ""
+    from backend.app.services.master_profile_service import ensure_master_data
+
+    master = ensure_master_data(profile)
+    lines: list[str] = []
+    professional = master.get("professional")
+    if isinstance(professional, dict):
+        for key in ("headline", "current_title", "current_company", "summary", "years_experience"):
+            val = professional.get(key)
+            if val:
+                lines.append(f"{key.replace('_', ' ').title()}: {val}")
+    skills = master.get("skills")
+    if isinstance(skills, list) and skills:
+        names = []
+        for row in skills[:30]:
+            if isinstance(row, dict) and row.get("name"):
+                names.append(str(row["name"]))
+            elif isinstance(row, str):
+                names.append(row)
+        if names:
+            lines.append("Master profile skills: " + ", ".join(names))
+    projects = master.get("projects")
+    if isinstance(projects, list):
+        for proj in projects[:4]:
+            if not isinstance(proj, dict):
+                continue
+            title = str(proj.get("title") or proj.get("name") or "").strip()
+            detail = str(proj.get("description") or proj.get("summary") or "").strip()
+            if title:
+                lines.append(f"Project — {title}: {detail[:400]}")
+    employment = master.get("employment_extended")
+    if isinstance(employment, list):
+        for job in employment[:4]:
+            if not isinstance(job, dict):
+                continue
+            title = str(job.get("title") or "").strip()
+            company = str(job.get("company") or "").strip()
+            bullets = job.get("highlights") or job.get("description") or ""
+            if title or company:
+                lines.append(f"Role — {title} at {company}: {str(bullets)[:500]}")
+    common = master.get("common_answers")
+    if isinstance(common, list):
+        for row in common[:12]:
+            if not isinstance(row, dict):
+                continue
+            q = str(row.get("question") or row.get("pattern") or "").strip()
+            a = str(row.get("answer") or row.get("value") or "").strip()
+            if q and a:
+                lines.append(f"Prepared answer ({q}): {a[:350]}")
+    text = "\n".join(lines).strip()
+    return text[:3500]
+
+
 def _profile_brief(user: User, profile: UserProfile | None, job_title: str, company: str, description: str) -> str:
     lines = [f"Name: {_candidate_name(user)}"]
     if profile is not None:
+        master_snip = _master_profile_snippet(profile)
+        if master_snip:
+            lines.append("Master profile (use these facts in answers):\n" + master_snip)
         if profile.headline:
             lines.append(f"Headline: {profile.headline}")
         if profile.current_title or profile.current_company:
@@ -108,22 +169,163 @@ def list_applications(db: Session, user_id: uuid.UUID) -> list[dict]:
     ]
 
 
-def start_session(db: Session, user: User, *, code: str, application_id: uuid.UUID | None) -> dict:
-    token = _token_for_user(db, user.id, code)
-    if token.status == "used":
-        raise AppError("TOKEN_USED", "This token was already used for a finished interview.", 409)
-    if token.status == "reserved" and token.session_id:
+def _has_substantive_interview(session: LiveInterviewSession) -> bool:
+    """True when the candidate actually answered — empty/aborted starts must not burn the token."""
+    for turn in session.transcript or []:
+        if not isinstance(turn, dict):
+            continue
+        if str(turn.get("role") or "") != "candidate":
+            continue
+        if len(str(turn.get("text") or "").split()) >= 8:
+            return True
+    return False
+
+
+def _finalize_token_for_session(db: Session, session: LiveInterviewSession) -> None:
+    token = db.get(LiveInterviewToken, session.token_id)
+    if token is None:
+        return
+    if token.session_id not in (None, session.id):
+        return
+    if _has_substantive_interview(session):
+        token.status = "used"
+        token.session_id = session.id
+        return
+    token.status = "unused"
+    token.session_id = None
+
+
+def _auto_complete_active_session(
+    db: Session,
+    session: LiveInterviewSession,
+    *,
+    summary: str,
+    superseded: bool = False,
+    timed_out: bool = False,
+) -> None:
+    kept = session.feedback if isinstance(session.feedback, dict) else {}
+    session.feedback = {
+        **kept,
+        "summary": kept.get("summary") or summary,
+        "superseded": bool(superseded or kept.get("superseded")),
+        "auto_closed": True,
+        "timed_out": timed_out,
+    }
+    session.status = "completed"
+    session.ended_at = _now()
+    _finalize_token_for_session(db, session)
+
+
+def _session_exceeded_max_duration(session: LiveInterviewSession, *, max_hours: int = LIVE_INTERVIEW_MAX_ACTIVE_HOURS) -> bool:
+    cutoff = _now() - timedelta(hours=max_hours)
+    return session.started_at < cutoff
+
+
+def close_stale_active_sessions(
+    db: Session,
+    *,
+    user_id: uuid.UUID | None = None,
+    max_hours: int = LIVE_INTERVIEW_MAX_ACTIVE_HOURS,
+) -> int:
+    """Mark long-running active sessions completed (max interview length)."""
+    cutoff = _now() - timedelta(hours=max_hours)
+    stmt = select(LiveInterviewSession).where(
+        LiveInterviewSession.status == "active",
+        LiveInterviewSession.started_at < cutoff,
+    )
+    if user_id is not None:
+        stmt = stmt.where(LiveInterviewSession.user_id == user_id)
+    count = 0
+    for row in db.scalars(stmt).all():
+        _auto_complete_active_session(
+            db,
+            row,
+            summary=f"Ended automatically after the maximum interview length ({max_hours} hour).",
+            timed_out=True,
+        )
+        count += 1
+    if count:
+        db.flush()
+    return count
+
+
+def _supersede_other_active_sessions(db: Session, user: User, *, keep_session_id: uuid.UUID | None = None) -> None:
+    """Close stray in-progress sessions when the candidate starts (or resumes) one interview."""
+    stmt = select(LiveInterviewSession).where(
+        LiveInterviewSession.user_id == user.id,
+        LiveInterviewSession.status == "active",
+    )
+    if keep_session_id is not None:
+        stmt = stmt.where(LiveInterviewSession.id != keep_session_id)
+    for other in db.scalars(stmt).all():
+        _auto_complete_active_session(
+            db,
+            other,
+            summary="Ended automatically when you started another live interview.",
+            superseded=True,
+        )
+
+
+def _session_for_token(db: Session, token: LiveInterviewToken) -> LiveInterviewSession | None:
+    if token.session_id:
         existing = db.get(LiveInterviewSession, token.session_id)
-        if existing is not None and existing.status == "active":
-            return session_out(existing, token_code=token.code)
-    job_title, company, description = "", "", ""
+        if existing is not None:
+            return existing
+    return db.scalar(select(LiveInterviewSession).where(LiveInterviewSession.token_id == token.id))
+
+
+def _job_fields(db: Session, user: User, application_id: uuid.UUID | None) -> tuple[str, str, str]:
+    if application_id is None:
+        return "", "", ""
+    app = db.get(Application, application_id)
+    if app is None or app.user_id != user.id:
+        raise AppError("NOT_FOUND", "That application was not found.", 404)
+    job = db.get(Job, app.job_id)
+    if job is None:
+        return "", "", ""
+    return job.title, job.company, (job.description or "")[:4000]
+
+
+def _reopen_empty_session(
+    db: Session,
+    user: User,
+    token: LiveInterviewToken,
+    session: LiveInterviewSession,
+    application_id: uuid.UUID | None,
+) -> dict:
+    job_title, company, description = _job_fields(db, user, application_id)
+    kept = session.feedback if isinstance(session.feedback, dict) else {}
+    if not description:
+        description = str(kept.get("job_description") or "")
     if application_id is not None:
-        app = db.get(Application, application_id)
-        if app is None or app.user_id != user.id:
-            raise AppError("NOT_FOUND", "That application was not found.", 404)
-        job = db.get(Job, app.job_id)
-        if job is not None:
-            job_title, company, description = job.title, job.company, job.description or ""
+        session.application_id = application_id
+    if job_title:
+        session.job_title = job_title
+        session.company = company
+    session.status = "active"
+    session.ended_at = None
+    session.started_at = _now()
+    session.transcript = []
+    session.feedback = {"job_description": description} if description else None
+    token.status = "reserved"
+    token.session_id = session.id
+    _supersede_other_active_sessions(db, user, keep_session_id=session.id)
+    return session_out(session, token_code=token.code)
+
+
+def start_session(db: Session, user: User, *, code: str, application_id: uuid.UUID | None) -> dict:
+    close_stale_active_sessions(db, user_id=user.id)
+    token = _token_for_user(db, user.id, code)
+    existing = _session_for_token(db, token)
+    if existing is not None and existing.status == "active":
+        _supersede_other_active_sessions(db, user, keep_session_id=existing.id)
+        return session_out(existing, token_code=token.code)
+    if existing is not None:
+        if _has_substantive_interview(existing):
+            raise AppError("TOKEN_USED", "This token was already used for a finished interview.", 409)
+        return _reopen_empty_session(db, user, token, existing, application_id)
+    job_title, company, description = _job_fields(db, user, application_id)
+    _supersede_other_active_sessions(db, user, keep_session_id=None)
     session = LiveInterviewSession(
         user_id=user.id,
         token_id=token.id,
@@ -138,7 +340,7 @@ def start_session(db: Session, user: User, *, code: str, application_id: uuid.UU
     db.flush()
     token.status = "reserved"
     token.session_id = session.id
-    session.feedback = {"job_description": description[:4000]} if description else None
+    session.feedback = {"job_description": description} if description else None
     return session_out(session, token_code=token.code)
 
 
@@ -156,7 +358,7 @@ def _suggest(db: Session, user: User, session: LiveInterviewSession, question: s
     ).strip()
 
 
-_ANSWER_TOKENS = 300
+_ANSWER_TOKENS = 240
 
 
 def _suggest_prompts(db: Session, user: User, session: LiveInterviewSession, question: str) -> tuple[str, str]:
@@ -170,9 +372,11 @@ def _suggest_prompts(db: Session, user: User, session: LiveInterviewSession, que
         history.append(f"{turn.get('role')}: {turn.get('text')}")
     system = (
         "You write the words a candidate will read aloud, in English, during a live job interview. "
-        "Write in the first person as this candidate, using their real name, experience, and technologies. "
+        "Write in the first person as this candidate. Ground every answer in their Master profile, résumé, "
+        "projects, skills, and prepared Q&A — use real company names, tools, metrics, and timelines from that data. "
+        "Do not invent employers or degrees not listed. "
         "Use short spoken sentences a person can say without looking away for long. "
-        "3 to 6 sentences. Plain English only. If the interviewer speaks another language, still answer in English. "
+        "3 to 5 sentences. Plain English only. If the interviewer speaks another language, still answer in English. "
         "No bullet points, labels, stage directions, or preamble."
     )
     user_prompt = (
@@ -232,6 +436,19 @@ def _active_session(db: Session, user: User, session_id: uuid.UUID) -> LiveInter
         raise AppError("NOT_FOUND", "That interview was not found.", 404)
     if session.status != "active":
         raise AppError("SESSION_CLOSED", "This interview has already ended.", 409)
+    if _session_exceeded_max_duration(session):
+        _auto_complete_active_session(
+            db,
+            session,
+            summary=f"Ended automatically after the maximum interview length ({LIVE_INTERVIEW_MAX_ACTIVE_HOURS} hour).",
+            timed_out=True,
+        )
+        db.flush()
+        raise AppError(
+            "SESSION_CLOSED",
+            f"This interview ended after the maximum length ({LIVE_INTERVIEW_MAX_ACTIVE_HOURS} hour).",
+            409,
+        )
     return session
 
 
@@ -286,7 +503,7 @@ def add_clip(
     ).strip()
     text = _english_transcript(text)
     added: list[dict] = []
-    if len(text) < 8:
+    if len(text) < 6:
         return {"turns": [], "transcript": session.transcript or []}
     added.append(_append(session, speaker, text))
     if speaker == "interviewer" and defer_answer:
@@ -430,13 +647,13 @@ def end_session(db: Session, user: User, session_id: uuid.UUID) -> dict:
         session.feedback = report
         session.status = "completed"
         session.ended_at = _now()
-        if token is not None:
-            token.status = "used"
+        _finalize_token_for_session(db, session)
     code = token.code if token is not None else ""
     return session_out(session, token_code=code)
 
 
 def list_sessions(db: Session, user_id: uuid.UUID) -> list[dict]:
+    close_stale_active_sessions(db, user_id=user_id)
     rows = db.scalars(
         select(LiveInterviewSession)
         .where(LiveInterviewSession.user_id == user_id)
